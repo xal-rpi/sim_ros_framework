@@ -1,0 +1,87 @@
+# Example of a basic scenario configuration file for initiatin beamng sim
+
+# Simulator configuration
+beamng:
+  host: 172.26.32.1
+  port: 64256
+  open_args:
+    launch: False
+    debug: False
+  setup_funcs:
+    beamng.settings.set_deterministic:
+      steps_per_second: 60
+    beamng.ui.show_hud: {}
+
+# Scenario configuration
+scenario:
+  level: smallgrid
+  name: basic
+
+# post_scenario: {}
+
+# Vehicle configuration
+vehicles:
+  ego: # Name of the car
+  # config: vehicles/rockbouncer/rock_racer.pc 
+    model: utv # bolide # utv # etk800 # utv # bolide, etk800, wild (utv)
+    partConfig: /vehicles/utv/wild.pc
+    # color: blue
+    # color2: red
+    # color3: green
+    license: EGO
+    scenario_args:
+      pos: [0, 0, 0]
+      # rot_quat: [0, 0, -0.7071, 0.7071]
+      yaw_angle: 0
+      # rot_ang: [0, 0, 0]
+    # All the sensors that the vehicle has
+    sensors:
+      # gps:
+      #   type: GPS
+      #   pos: [0, 0, 0]
+      #   gfx_update_time: 0.0
+      #   physics_update_time: 0.01
+      #   ref_lon: 0
+      #   ref_lat: 0
+      # electrics:
+      #   type: Electrics
+      # basicState:
+      #   type: BasicState
+      # # imu:
+      # #   type: AdvancedIMU
+      # #   gfx_update_time: 0.05
+      # #   physics_update_time: 0.01
+      # #   is_using_gravity: True
+      # #   is_visualised: True
+      # #   is_dir_world_space: False
+      # #   # Up and dir name are confusing, but it is the way it is
+      # #   dir: [0, -1, 0] # First axis
+      # #   up: [1, 0, 0] # Second axis in right hand rule
+      # #   pos: [0, 0, 3]
+      gtstate:
+        type: GtState
+        gfx_update_time: 0.15
+        physics_update_time: 0.005
+        num_physics_steps_for_gfx_save: 1
+        # pos: [0, 0, 3] # Position is relative to the center of mass of the vehicle
+        # pos: cog # Position could be a string: 'cog, 'front', 'rear', 'left', 'right'.
+        # is_pos_relative_to_cog: True
+        # use_reference_info: True
+        # is_visualised: True
+        # is_dir_world_space: False
+        # # Up and dir name are confusing, but it is the way it is
+        # dir: [0, -1, 0] # First axis
+        # up: [1, 0, 0] # Second axis in right hand rule
+
+# ROS configuration
+ros_poll_config:
+  ego:
+    # basicState:
+    #   # topic: /ego/basicState
+    #   poll_time: 0.1
+    #   publish: True
+    gtstate:
+      topic: /ego/basicState
+      poll_time: 0.15 # Make sure this matches the gfx_update_time and is not 3 times slower
+      publish: 1 # 0 is false, 1 is true, 2 is true and publish to all
+      # publish_all: True

@@ -1,0 +1,5 @@
+string save_location
+int32 max_queue_size
+float32 flush_interval # seconds
+---
+bool success

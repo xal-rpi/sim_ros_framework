@@ -1,0 +1,105 @@
+drift:
+  args:
+    boost_config:
+      args:
+        activation_fn: tanh
+        fake_normalization: true
+        initial_value_range: 0.1
+        layers_archictecture: !!python/tuple
+        - 128
+        - 128
+      type: MLP
+    gear_ratio_config:
+      args:
+        activation_fn: tanh
+        initial_value_range: 0.01
+        layers_archictecture: !!python/tuple
+        - 32
+        - 32
+      type: MLP
+    guided_parameters: {}
+    latent_config:
+      gear_dynamic:
+        args:
+          activation_fn: tanh
+          fake_normalization: true
+          initial_value_range: 0.01
+          layers_archictecture: !!python/tuple
+          - 64
+          - 64
+        type: MLP
+    net_torque_config:
+      engine:
+        args:
+          activation_fn: tanh
+          fake_normalization: true
+          initial_value_range: 0.1
+          layers_archictecture: !!python/tuple
+          - 128
+          - 128
+        type: MLP
+      res_wheelspeed:
+        args:
+          activation_fn: tanh
+          initial_value_range: 0.1
+          layers_archictecture: !!python/tuple
+          - 32
+          - 32
+        type: MLP
+      shaft:
+        args:
+          activation_fn: tanh
+          fake_normalization: true
+          initial_value_range: 0.1
+          layers_archictecture: !!python/tuple
+          - 32
+          - 32
+        type: MLP
+    state_action_mean:
+      boost_pressure: 0.7121732346583596
+      engine_speed: 65.59500459861802
+      rear_wheelspeed: 5.948200705588748
+      throttle: 0.3604252540085749
+      time: 119.19425566142309
+    state_action_std:
+      boost_pressure: 0.950965053349123
+      engine_speed: 9.793139959883957
+      rear_wheelspeed: 2.1213360594209747
+      throttle: 0.36804657433714577
+      time: 42.52531341763577
+    state_max_min:
+      boost_pressure:
+        max: 3.0817966847734684
+        min: -1.3480961362664363
+      engine_speed:
+        max: 86.82305069488737
+        min: 23.569903149343506
+      rear_wheelspeed:
+        max: 10.830589893766014
+        min: -0.4983424759368774
+      throttle:
+        max: 2.0
+        min: -1.0
+      time:
+        max: 193.84750915976
+        min: 44.541002163081
+    stop_gradient: true
+    use_normalized_input: true
+  type: ImprovedEngineDynamics
+noise:
+  args:
+    ignore_noise: false
+    max_noise:
+    - 1
+    - 1
+    - 1
+    noise_network_config:
+      args:
+        activation_fn: tanh
+        initial_value_range: 0.1
+        layers_archictecture: !!python/tuple
+        - 64
+        - 64
+      type: MLP
+    output_dimension: 3
+  type: NNNoiseTerm

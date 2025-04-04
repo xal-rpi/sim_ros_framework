@@ -1,0 +1,9 @@
+# Execute a request on the BeamNG simulation manager
+# Function name to be executed in the simulation manager
+string function_name
+
+# Arguments for the function, as a YAML-formatted string
+string arguments
+---
+# Result of the function execution
+string result
