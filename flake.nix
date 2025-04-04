@@ -126,7 +126,7 @@
           shellHook = ''
             # Set ROS environment variables properly
             export LD_LIBRARY_PATH="${rosDistro.rmw-fastrtps-cpp}/lib:${rosDistro.fastrtps}/lib:${rosDistro.fastcdr}/lib:$LD_LIBRARY_PATH"
-            export AMENT_PREFIX_PATH="${rosDistro.ros-core}"
+            export AMENT_PREFIX_PATH="${rosDistro.ros-core}:$(dirname $(dirname $(which ros2)))"
             export CMAKE_PREFIX_PATH="${rosDistro.ros-core}"
 
             export PYTHONPATH=${pythonWithBeamNGpy}/${pkgs.python3.sitePackages}:$PYTHONPATH
