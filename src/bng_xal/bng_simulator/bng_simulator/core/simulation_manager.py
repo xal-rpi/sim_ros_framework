@@ -18,6 +18,8 @@ from bng_simulator.vehicle.sensors import SensorBase
 from bng_simulator.utils.math_op import convert_euler_to_quaternion
 import bng_simulator.core.vehicle_properties as vehicle_queries
 
+PI = 3.14159
+
 
 class SimulationManager:
     """
@@ -198,11 +200,9 @@ class SimulationManager:
             rot_quat = scenario_args.get("rot_quat", [0, 0, 0, 1.0])
         # Check if euler angles are provided
         if "yaw_angle" in kwargs or "pitch_angle" in kwargs or "roll_angle" in kwargs:
-            yaw_rad = kwargs.get("yaw_angle", 0) * (
-                3.14159 / 180
-            )  # TODO : use constant for pi
-            pitch_rad = kwargs.get("pitch_angle", 0) * (3.14159 / 180)
-            roll_rad = kwargs.get("roll_angle", 0) * (3.14159 / 180)
+            yaw_rad = kwargs.get("yaw_angle", 0) * (PI / 180)
+            pitch_rad = kwargs.get("pitch_angle", 0) * (PI / 180)
+            roll_rad = kwargs.get("roll_angle", 0) * (PI / 180)
             rot_quat = convert_euler_to_quaternion(
                 (roll_rad, pitch_rad, yaw_rad)
             )  # TODO : fix type mistmatch
