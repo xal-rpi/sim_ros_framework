@@ -8,10 +8,10 @@ import traceback
 from typing import Dict, List, Optional, Any
 from copy import deepcopy
 
-from beamngpy import BeamNGpy, Scenario, Vehicle
+from beamngpy import BeamNGpy, Scenario
 from beamngpy.logging import BNGValueError
 
-from bng_simulator.utils.io_dict_utils import load_yaml, save_yaml
+from bng_simulator.utils.io_dict_utils import load_yaml
 
 from bng_simulator.vehicle.manager import VehicleManager
 from bng_simulator.vehicle.sensors import SensorBase
@@ -139,7 +139,7 @@ class SimulationManager:
             self.logger.info("No existing scenario found.\n")
 
     def proxy_for_vehicle_properties(
-        self, property_name: str, vehicle_name: str = None, **kwargs
+        self, property_name: str, vehicle_name: str | None = None, **kwargs
     ) -> Dict[str, Any]:
         """
         Proxy for vehicle properties query functions.
@@ -166,9 +166,9 @@ class SimulationManager:
         try:
             self.logger.info(f"Attempting {property_name} for vehicle: {vehicle_name}")
             query_output = query_func(vehicle, **kwargs)
-        except TypeError as e:
+        except TypeError:
             self.logger.error(f"Error executing query function: {property_name}")
-            err_msg = f"Error:\n" + traceback.format_exc()
+            err_msg = "Error:\n" + traceback.format_exc()
             self.logger.error(err_msg)
             return {"error": err_msg}
         self.logger.info("Query executed successfully.")
@@ -178,7 +178,7 @@ class SimulationManager:
 
     def teleport_vehicle(
         self,
-        vehicle_name: str = None,
+        vehicle_name: str | None = None,
         pos: Optional[List[float]] = None,
         rot_quat: Optional[List[float]] = None,
         reset: bool = True,
@@ -198,10 +198,14 @@ class SimulationManager:
             rot_quat = scenario_args.get("rot_quat", [0, 0, 0, 1.0])
         # Check if euler angles are provided
         if "yaw_angle" in kwargs or "pitch_angle" in kwargs or "roll_angle" in kwargs:
-            yaw_rad = kwargs.get("yaw_angle", 0) * (3.14159 / 180)
+            yaw_rad = kwargs.get("yaw_angle", 0) * (
+                3.14159 / 180
+            )  # TODO : use constant for pi
             pitch_rad = kwargs.get("pitch_angle", 0) * (3.14159 / 180)
             roll_rad = kwargs.get("roll_angle", 0) * (3.14159 / 180)
-            rot_quat = convert_euler_to_quaternion((roll_rad, pitch_rad, yaw_rad))
+            rot_quat = convert_euler_to_quaternion(
+                (roll_rad, pitch_rad, yaw_rad)
+            )  # TODO : fix type mistmatch
             rot_quat = [float(q) for q in rot_quat]
         # Teleport the vehicle
         succeed = vehicle.teleport(pos, rot_quat, reset=reset)
@@ -313,7 +317,7 @@ class SimulationManager:
             _config["vehicles_part"][vehicle_name] = veh_model_name
         return _config
 
-    def poll_sensor(self, sensor_name: str, vehicle_name: str = None):
+    def poll_sensor(self, sensor_name: str, vehicle_name: str | None = None):
         """
         Poll a sensor for the latest data.
 
@@ -327,7 +331,7 @@ class SimulationManager:
         vehicle_manager.poll_sensor(sensor_name)
 
     def extract_sensor_ros_msg_type(
-        self, sensor_name: str, vehicle_name: str = None
+        self, sensor_name: str, vehicle_name: str | None = None
     ) -> Optional[Any]:
         """
         Extract the ROS message type for a sensor.
@@ -371,7 +375,7 @@ class SimulationManager:
     #     return {"success": True}
 
     def extract_sensor_ros_msg(
-        self, sensor_name: str, vehicle_name: str = None
+        self, sensor_name: str, vehicle_name: str | None = None
     ) -> Optional[Any]:
         """
         Extract the ROS message for a sensor.
@@ -389,7 +393,7 @@ class SimulationManager:
         return vehicle_manager.extract_sensor_ros_msg(sensor_name)
 
     def get_sensor(
-        self, sensor_name: str, vehicle_name: str = None
+        self, sensor_name: str, vehicle_name: str | None = None
     ) -> Optional[SensorBase]:
         """
         Get a sensor instance.
