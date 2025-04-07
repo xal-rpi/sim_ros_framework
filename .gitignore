@@ -6,9 +6,6 @@ build/
 *.dox
 *.wikidoc
 
-# Nix locks
-flake.lock
-
 # Python cache files
 __pycache__/
 *.py[cod]
