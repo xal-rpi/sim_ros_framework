@@ -375,7 +375,7 @@ class SimulationManager:
     #     return {"success": True}
 
     def extract_sensor_ros_msg(
-        self, sensor_name: str, vehicle_name: str | None = None
+        self, sensor_name: str, vehicle_name: Optional[str] = None
     ) -> Optional[Any]:
         """
         Extract the ROS message for a sensor.
@@ -393,7 +393,7 @@ class SimulationManager:
         return vehicle_manager.extract_sensor_ros_msg(sensor_name)
 
     def get_sensor(
-        self, sensor_name: str, vehicle_name: str | None = None
+        self, sensor_name: str, vehicle_name: Optional[str] = None
     ) -> Optional[SensorBase]:
         """
         Get a sensor instance.
