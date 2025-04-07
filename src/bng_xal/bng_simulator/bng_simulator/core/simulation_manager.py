@@ -141,7 +141,7 @@ class SimulationManager:
             self.logger.info("No existing scenario found.\n")
 
     def proxy_for_vehicle_properties(
-        self, property_name: str, vehicle_name: str | None = None, **kwargs
+        self, property_name: str, vehicle_name: Optional[str] = None, **kwargs
     ) -> Dict[str, Any]:
         """
         Proxy for vehicle properties query functions.
@@ -180,7 +180,7 @@ class SimulationManager:
 
     def teleport_vehicle(
         self,
-        vehicle_name: str | None = None,
+        vehicle_name: Optional[str] = None,
         pos: Optional[List[float]] = None,
         rot_quat: Optional[List[float]] = None,
         reset: bool = True,
@@ -317,7 +317,7 @@ class SimulationManager:
             _config["vehicles_part"][vehicle_name] = veh_model_name
         return _config
 
-    def poll_sensor(self, sensor_name: str, vehicle_name: str | None = None):
+    def poll_sensor(self, sensor_name: str, vehicle_name: Optional[str] = None):
         """
         Poll a sensor for the latest data.
 
@@ -331,7 +331,7 @@ class SimulationManager:
         vehicle_manager.poll_sensor(sensor_name)
 
     def extract_sensor_ros_msg_type(
-        self, sensor_name: str, vehicle_name: str | None = None
+        self, sensor_name: str, vehicle_name: Optional[str] = None
     ) -> Optional[Any]:
         """
         Extract the ROS message type for a sensor.
@@ -351,12 +351,12 @@ class SimulationManager:
     # def control_vehicle(
     #     self,
     #     vehicle_name: str = None,
-    #     steering: float | None = None,
-    #     throttle: float | None = None,
-    #     brake: float | None = None,
-    #     parkingbrake: float | None = None,
-    #     clutch: float | None = None,
-    #     gear: int | None = None,
+    #     steering: Optional[float] = None,
+    #     throttle: Optional[float] = None,
+    #     brake: Optional[float] = None,
+    #     parkingbrake: Optional[float] = None,
+    #     clutch: Optional[float] = None,
+    #     gear: Optional[int] = None,
     # ):
     #     """
     #     Utility function to send desired input to the vehicle.
