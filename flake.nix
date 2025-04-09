@@ -41,9 +41,6 @@
             flake8
             mypy
             pytest
-            python-lsp-server
-            pylsp-mypy
-            pylsp-rope
             pydocstyle
 
             # Install BeamNGpy from PyPI with provided SHA
@@ -84,6 +81,7 @@
 
             # Python with BeamNGpy
             pythonWithBeamNGpy
+            pkgs.pyright
 
             # Fish shell
             pkgs.fish
