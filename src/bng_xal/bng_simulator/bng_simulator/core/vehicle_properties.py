@@ -2,6 +2,7 @@
 Implement additional functionalities for BeamNGpy
 """
 
+from typing import Optional
 from beamngpy import Vehicle
 
 
@@ -270,12 +271,12 @@ def stop_safety_features(vehicle: Vehicle) -> dict:
 def control_vehicle(
     vehicle: Vehicle,
     filter: str = "Direct",
-    throttle: float = None,
-    brake: float = None,
-    clutch: float = None,
-    steering: float = None,
-    parkingbrake: bool = None,
-    gear: int = None,
+    throttle: Optional[float] = None,
+    brake: Optional[float] = None,
+    clutch: Optional[float] = None,
+    steering: Optional[float] = None,
+    parkingbrake: Optional[bool] = None,
+    gear: Optional[int] = None,
 ):
     """
     Handle setting inputs for the vehicle.
