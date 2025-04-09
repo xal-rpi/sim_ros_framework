@@ -214,10 +214,6 @@ class SimulationShell(cmd.Cmd, Node):
         args = {}
         vehicle_name = self.default_vehicle
 
-        # Set default filter type if not provided
-        if "filter=" not in arg:
-            args["filter"] = "Direct"
-
         # Split the argument string and process each key=value pair
         for param in arg.split():
             if "=" in param:
