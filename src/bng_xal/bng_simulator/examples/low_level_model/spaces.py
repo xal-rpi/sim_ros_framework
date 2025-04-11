@@ -57,10 +57,9 @@ class Box(Space):
         """Check whether specific object is within space."""
         # type_cond = isinstance(x, self.dtype)
         # shape_cond = (x.shape == self.shape)
-        range_cond = jnp.logical_and(
-            jnp.all(x >= self.low), jnp.all(x <= self.high)
-        )
+        range_cond = jnp.logical_and(jnp.all(x >= self.low), jnp.all(x <= self.high))
         return range_cond
+
 
 class BoolSpec(Space):
     """
@@ -73,9 +72,9 @@ class BoolSpec(Space):
 
     def sample(self, rng: chex.PRNGKey) -> chex.Array:
         """Sample random action uniformly from set of boolean choices."""
-        return jax.random.randint(
-            rng, shape=self.shape, minval=0, maxval=2
-        ).astype(self.dtype)
+        return jax.random.randint(rng, shape=self.shape, minval=0, maxval=2).astype(
+            self.dtype
+        )
 
     def contains(self, _: jnp.bool_) -> bool:
         """Check whether specific object is within space."""
@@ -87,6 +86,7 @@ class Discrete(Space):
     Minimal jittable class for discrete gymnax spaces.
     TODO: For now this is a 1d space. Make composable for multi-discrete.
     """
+
     def __init__(self, num_categories: int):
         assert num_categories >= 0
         self.n = num_categories
@@ -147,9 +147,7 @@ class Tuple(Space):
     def sample(self, rng: chex.PRNGKey) -> TupleType[chex.Array]:
         """Sample random action from all subspaces."""
         key_split = jax.random.split(rng, self.num_spaces)
-        return tuple(
-            [s.sample(key_split[i]) for i, s in enumerate(self.spaces)]
-        )
+        return tuple([s.sample(key_split[i]) for i, s in enumerate(self.spaces)])
 
     def contains(self, x: jnp.int_) -> bool:
         """Check whether dimensions of object are within subspace."""

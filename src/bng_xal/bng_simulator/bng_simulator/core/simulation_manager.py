@@ -4,6 +4,7 @@ Manages BeamNG simulation lifecycle, scenarios, and vehicles.
 
 import logging
 import traceback
+import os
 
 from typing import Dict, List, Optional, Any
 from copy import deepcopy
@@ -18,7 +19,17 @@ from bng_simulator.vehicle.sensors import SensorBase
 from bng_simulator.utils.math_op import convert_euler_to_quaternion
 import bng_simulator.core.vehicle_properties as vehicle_queries
 
-PI = 3.14159
+# Try to get the directory from the ROS package
+from ament_index_python.packages import get_package_share_directory
+
+try:
+    CONFIG_DIR = os.path.join(get_package_share_directory("bng_simulator"), "config")
+except Exception as e:
+    # Fallback to the source directory approach
+    CONFIG_DIR = os.path.dirname(os.path.abspath(__file__)) + "/../config/"
+
+SCENARIO_DIR = os.path.join(CONFIG_DIR, "scenarios")
+VEHICLES_DIR = os.path.join(CONFIG_DIR, "vehicles")
 
 
 class SimulationManager:
@@ -34,6 +45,7 @@ class SimulationManager:
         Args:
             config (Dict[str, Any]): Simulation configuration dictionary
         """
+        self._PI = 3.14159
         self.logger = logging.getLogger("SimulationManager")
         self.config = deepcopy(config)
 
@@ -55,18 +67,31 @@ class SimulationManager:
         self.post_scenario_configuration()
 
     @classmethod
-    def from_file(cls, config_path: str):
+    def from_file(cls, config: str):
         """
         Create a SimulationManager instance from a configuration file.
 
         Args:
-            config_path (str): Path to the YAML configuration file
+            config (str): Path to the YAML configuration file
 
         Returns:
             SimulationManager: Initialized simulation manager
         """
-        config = load_yaml(config_path)
-        return cls(config)
+        # If already a full path and exists, return it
+        if os.path.isfile(config):
+            return cls(load_yaml(config))
+
+        # Try in the config directory
+        config_path = os.path.join(CONFIG_DIR, config)
+        if os.path.isfile(config_path):
+            return cls(load_yaml(config_path))
+
+        # Try in the scenarios directory
+        scenario_path = os.path.join(SCENARIO_DIR, config)
+        if os.path.isfile(scenario_path):
+            return cls(load_yaml(scenario_path))
+
+        raise FileNotFoundError(f"Couldn't find config file {config}")
 
     def connect(self):
         """Establish connection with BeamNG simulation."""
@@ -200,9 +225,9 @@ class SimulationManager:
             rot_quat = scenario_args.get("rot_quat", [0, 0, 0, 1.0])
         # Check if euler angles are provided
         if "yaw_angle" in kwargs or "pitch_angle" in kwargs or "roll_angle" in kwargs:
-            yaw_rad = kwargs.get("yaw_angle", 0) * (PI / 180)
-            pitch_rad = kwargs.get("pitch_angle", 0) * (PI / 180)
-            roll_rad = kwargs.get("roll_angle", 0) * (PI / 180)
+            yaw_rad = kwargs.get("yaw_angle", 0) * (self._PI / 180)
+            pitch_rad = kwargs.get("pitch_angle", 0) * (self._PI / 180)
+            roll_rad = kwargs.get("roll_angle", 0) * (self._PI / 180)
             rot_quat = convert_euler_to_quaternion(
                 (roll_rad, pitch_rad, yaw_rad)
             )  # TODO : fix type mistmatch

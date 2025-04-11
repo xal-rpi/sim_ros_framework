@@ -20,41 +20,21 @@ from bng_simulator.utils.io_dict_utils import (
 from bng_msgs.srv import ExecuteRequest, StartLogger, StopLogger
 from bng_simulator.logger_process import LoggerProcess
 
-# Store the current directory in a variable
-CONFIG_DIR = os.path.dirname(os.path.abspath(__file__)) + "/../config/"
-SCENARIO_DIR = CONFIG_DIR + "scenarios/"
-
-
-def check_and_update_file_in_scenario_dir(file_name):
-    """
-    Check if the file is in the scenario directory
-
-    Args:
-        file_name (str): Name of the file
-
-    Returns:
-        str: Full path to the file
-    """
-    # Check if the file is in the scenario directory
-    file_path = os.path.join(SCENARIO_DIR, file_name)
-    return file_path if os.path.isfile(file_path) else file_name
-
 
 class SimulationManagerNode(Node):
-    def __init__(self, config_path):
-        """
-        Initialize the ROS node for the BeamNG Simulation Manager
-
-        Args:
-            config_path (str): Path to the simulation configuration file
-        """
+    def __init__(self, config=None):
         super().__init__("sim_manager_node")
 
-        # Load the configuration
-        self.config = load_yaml(config_path)
+        # Declare parameters
+        self.declare_parameter("config", "basic_scenario.yaml")
+
+        # Get parameters - if config_path is not provided, use the parameter
+        if config is None:
+            config_param = self.get_parameter("config").value
+            self.get_logger().info(f"config :{config_param}")
 
         # Create simulation manager
-        self.sim_manager = SimulationManager(self.config)
+        self.sim_manager = SimulationManager.from_file(self.config)
 
         # Set up ExecuteRequest service
         self.service = self.create_service(
@@ -229,20 +209,8 @@ def main(args=None):
     # Initialize ROS
     rclpy.init(args=args)
 
-    # Create and spin the node
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="basic_scenario.yaml",
-        help="The configuration file to use.",
-    )
-    args = parser.parse_args()
-
-    config_path = check_and_update_file_in_scenario_dir(args.config)
-    node = SimulationManagerNode(config_path)
+    # Use ROS argument parsing
+    node = SimulationManagerNode()
     rclpy.spin(node)
 
     # Shutdown ROS and cleanup
@@ -252,11 +220,3 @@ def main(args=None):
 
     node.destroy_node()
     rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    import sys
-    import logging
-
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    main()

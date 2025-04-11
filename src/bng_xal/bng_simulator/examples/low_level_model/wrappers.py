@@ -16,6 +16,7 @@ from flax import struct
 import environment
 import spaces
 
+
 class GymnaxWrapper(object):
     """Base class for Gymnax wrappers."""
 
@@ -34,12 +35,12 @@ class FlattenObservationWrapper(GymnaxWrapper):
     """Flatten the observations of the environment."""
 
     def observation_space(self, params) -> spaces.Box:
-        """ Return the observation space of the environment.
-        
+        """Return the observation space of the environment.
+
         Args:
             params: The parameters of the environment.
                 Optional[environment.EnvParams]
-        
+
         Returns:
             The observation space of the environment.
                 spaces.Box or any other space
@@ -60,13 +61,13 @@ class FlattenObservationWrapper(GymnaxWrapper):
     ) -> Tuple[chex.Array, environment.EnvState]:
         """
         Reset the environment and return a flat observation and the state.
-        
+
         Args:
             key: The PRNG key
                 chex.PRNGKey
             params: The parameters of the environment
                 Optional[environment.EnvParams]
-        
+
         Returns:
             obs: The observation
                 chex.Array
@@ -96,7 +97,7 @@ class FlattenObservationWrapper(GymnaxWrapper):
                 Union[int, float]
             params: The parameters of the environment
                 Optional[environment.EnvParams]
-        
+
         Returns:
             obs: The observation
                 chex.Array
@@ -109,8 +110,7 @@ class FlattenObservationWrapper(GymnaxWrapper):
             info: Additional information
                 dict
         """
-        obs, state, reward, done, info = \
-            self._env.step(key, state, action, params)
+        obs, state, reward, done, info = self._env.step(key, state, action, params)
         obs = jnp.reshape(obs, (-1,))
         return obs, state, reward, done, info
 
@@ -120,6 +120,7 @@ class LogEnvState:
     """
     Log wrapper around a Gym-like environment state.
     """
+
     env_state: environment.EnvState
     episode_returns: float
     episode_lengths: int
@@ -130,6 +131,7 @@ class LogEnvState:
 
 class LogWrapper(GymnaxWrapper):
     """Log the episode returns and lengths."""
+
     @partial(jax.jit, static_argnums=(0,))
     def reset(
         self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
@@ -180,6 +182,7 @@ class ClipAction(GymnaxWrapper):
     """
     Wrapper to clip the action space of the environment.
     """
+
     def __init__(self, env, low=-1.0, high=1.0):
         super().__init__(env)
         self.low = low
@@ -199,6 +202,7 @@ class TransformObservation(GymnaxWrapper):
     """
     Apply a transformation to the observation of the environment.
     """
+
     def __init__(self, env, transform_obs):
         super().__init__(env)
         self.transform_obs = transform_obs
@@ -214,8 +218,7 @@ class TransformObservation(GymnaxWrapper):
         """
         Step the environment and apply the transformation to the observation.
         """
-        obs, state, reward, done, info = \
-            self._env.step(key, state, action, params)
+        obs, state, reward, done, info = self._env.step(key, state, action, params)
         return self.transform_obs(obs), state, reward, done, info
 
 
@@ -223,6 +226,7 @@ class TransformReward(GymnaxWrapper):
     """
     Apply a transformation to the reward of the environment.
     """
+
     def __init__(self, env, transform_reward):
         super().__init__(env)
         self.transform_reward = transform_reward
@@ -231,8 +235,7 @@ class TransformReward(GymnaxWrapper):
         """
         Step the environment and apply the transformation to the reward.
         """
-        obs, state, reward, done, info = \
-            self._env.step(key, state, action, params)
+        obs, state, reward, done, info = self._env.step(key, state, action, params)
         return obs, state, self.transform_reward(reward), done, info
 
 
@@ -240,6 +243,7 @@ class VecEnv(GymnaxWrapper):
     """
     Vectorize a Gym-like environment.
     """
+
     def __init__(self, env):
         super().__init__(env)
         self.reset = jax.vmap(self._env.reset, in_axes=(0, None))
@@ -251,6 +255,7 @@ class NormalizeVecObsEnvState:
     """
     Normalization structure
     """
+
     mean: jnp.ndarray
     var: jnp.ndarray
     count: float
@@ -261,6 +266,7 @@ class NormalizeVecObservation(GymnaxWrapper):
     """
     Normalize the observations of a vectorized environment.
     """
+
     # def __init__(self, env):
     #     super().__init__(env)
 
@@ -285,8 +291,7 @@ class NormalizeVecObservation(GymnaxWrapper):
         new_mean = state.mean + delta * batch_count / tot_count
         m_a = state.var * state.count
         m_b = batch_var * batch_count
-        m_2 = m_a + m_b + \
-            jnp.square(delta) * state.count * batch_count / tot_count
+        m_2 = m_a + m_b + jnp.square(delta) * state.count * batch_count / tot_count
         new_var = m_2 / tot_count
         new_count = tot_count
 
@@ -317,8 +322,7 @@ class NormalizeVecObservation(GymnaxWrapper):
         new_mean = state.mean + delta * batch_count / tot_count
         m_a = state.var * state.count
         m_b = batch_var * batch_count
-        m_2 = m_a + m_b + \
-            jnp.square(delta) * state.count * batch_count / tot_count
+        m_2 = m_a + m_b + jnp.square(delta) * state.count * batch_count / tot_count
         new_var = m_2 / tot_count
         new_count = tot_count
 
@@ -342,6 +346,7 @@ class NormalizeVecRewEnvState:
     """
     Dataclass for storing statistics for normalizing vectorized rewards.
     """
+
     mean: jnp.ndarray
     var: jnp.ndarray
     count: float
@@ -353,6 +358,7 @@ class NormalizeVecReward(GymnaxWrapper):
     """
     Decorator for normalizing vectorized rewards.
     """
+
     def __init__(self, env, gamma):
         super().__init__(env)
         self.gamma = gamma
@@ -391,8 +397,7 @@ class NormalizeVecReward(GymnaxWrapper):
         new_mean = state.mean + delta * batch_count / tot_count
         m_a = state.var * state.count
         m_b = batch_var * batch_count
-        m_2 = m_a + m_b + \
-            jnp.square(delta) * state.count * batch_count / tot_count
+        m_2 = m_a + m_b + jnp.square(delta) * state.count * batch_count / tot_count
         new_var = m_2 / tot_count
         new_count = tot_count
 

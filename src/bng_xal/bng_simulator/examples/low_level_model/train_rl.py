@@ -1,6 +1,8 @@
 import random
+
 # import time
 from typing import Any, Tuple, Callable, Dict, NamedTuple
+
 # from functools import partial
 
 import jax
@@ -17,10 +19,12 @@ from logging_utils import TrainCheckpoints
 
 from engine_model import EngineModelEnv
 
+
 class Transition(NamedTuple):
     """
     Define the transition tuple for the PPO agent
     """
+
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
@@ -29,12 +33,18 @@ class Transition(NamedTuple):
     obs: jnp.ndarray
     info: jnp.ndarray
 
+
 def get_evaluate_env_fn(
-    env : Environment,
-    env_params : EnvParams,
-    init_network : Callable[[jnp.ndarray,], Tuple],
-    num_envs : int,
-    max_iter : int
+    env: Environment,
+    env_params: EnvParams,
+    init_network: Callable[
+        [
+            jnp.ndarray,
+        ],
+        Tuple,
+    ],
+    num_envs: int,
+    max_iter: int,
 ):
     """
     Return a function to evaluate the policies in the environment and
@@ -94,10 +104,9 @@ def get_evaluate_env_fn(
         reward = jnp.where(idx_interest, reward, 0.0)
         log_info = jax.tree_util.tree_map(
             lambda x: jnp.where(
-                idx_interest if x.ndim == 2 else idx_interest[..., None],
-                x, 0.0
+                idx_interest if x.ndim == 2 else idx_interest[..., None], x, 0.0
             ),
-            log_info
+            log_info,
         )
         actual_done_sum = jnp.cumsum(actual_done, axis=0)
         indx_actual_done = actual_done_sum < 1
@@ -116,34 +125,36 @@ def get_evaluate_env_fn(
 
         # Output dictionary
         res_dict = {
-            'Reward/mean': return_value_mean,
-            'Reward/min': return_value_min,
-            'Reward/max': return_value_max,
-            'Reward/episode_length_avg': episode_length_avg,
-            **{
-                f'Info/{k}': v for k, v in log_info.items()
-            }
+            "Reward/mean": return_value_mean,
+            "Reward/min": return_value_min,
+            "Reward/max": return_value_max,
+            "Reward/episode_length_avg": episode_length_avg,
+            **{f"Info/{k}": v for k, v in log_info.items()},
         }
         return res_dict
 
     # TODO: This is needed if we want to call in in async
     # Call this function once at the beginning to compile it
-    res = sim_env( env_params, init_params, jax.random.PRNGKey(0))
+    res = sim_env(env_params, init_params, jax.random.PRNGKey(0))
     jax.block_until_ready(res)
     return sim_env
 
 
 def make_train(
-    env : EngineModelEnv,
-    env_params : EnvParams,
-    init_policy : Callable[[jnp.ndarray,], Tuple],
-    configs : Dict[str, Any],
-    save_name : str,
-    seed : int =0,
-    base_logs_dir : str = "training_files/rl/"
+    env: EngineModelEnv,
+    env_params: EnvParams,
+    init_policy: Callable[
+        [
+            jnp.ndarray,
+        ],
+        Tuple,
+    ],
+    configs: Dict[str, Any],
+    save_name: str,
+    seed: int = 0,
+    base_logs_dir: str = "training_files/rl/",
 ):
-    """A function to design the training function for the cost2go
-    """
+    """A function to design the training function for the cost2go"""
     # Set the random seed
     random.seed(seed)
     np.random.seed(seed)
@@ -152,13 +163,16 @@ def make_train(
     init_network = init_policy
 
     # Extract the relavant training parameters
-    rl_config = configs['rl_agent']
-    config = rl_config # Backward compatibility
+    rl_config = configs["rl_agent"]
+    config = rl_config  # Backward compatibility
 
     # Function for evaluating the environment and logging
     ep_sim_fn = get_evaluate_env_fn(
-        env, env_params, init_network, rl_config["NUM_ENVS_EVAL"],
-        env_params.max_steps_in_episode
+        env,
+        env_params,
+        init_network,
+        rl_config["NUM_ENVS_EVAL"],
+        env_params.max_steps_in_episode,
     )
 
     # Automatically set the number of updates
@@ -173,10 +187,10 @@ def make_train(
 
     # Define the logging function
     def _log_data(
-        _env_params : EnvParams,
-        _policy_params : Dict[str, Any],
-        _rng : jnp.ndarray,
-        extra : dict
+        _env_params: EnvParams,
+        _policy_params: Dict[str, Any],
+        _rng: jnp.ndarray,
+        extra: dict,
     ):
         """
         Log the RL training data
@@ -184,7 +198,7 @@ def make_train(
         # Let's simulate the environment
         if not ckpt_model.should_update():
             ckpt_model.write_checkpoint_and_log_data(
-                None, extra, step_factor = rl_config["NUM_ENVS"]
+                None, extra, step_factor=rl_config["NUM_ENVS"]
             )
             return
 
@@ -193,9 +207,9 @@ def make_train(
 
         # Now let's add the extra information and save it
         rew_sim_env_res = {**sim_env_res, **extra}
-        sim_env_res = {'learned_agent_params': _policy_params, **rew_sim_env_res}
+        sim_env_res = {"learned_agent_params": _policy_params, **rew_sim_env_res}
         ckpt_model.write_checkpoint_and_log_data(
-            sim_env_res, rew_sim_env_res, step_factor = rl_config["NUM_ENVS"]
+            sim_env_res, rew_sim_env_res, step_factor=rl_config["NUM_ENVS"]
         )
 
     # Wrapper around the environment for logging
@@ -205,7 +219,7 @@ def make_train(
         env = NormalizeVecObservation(env)
         env = NormalizeVecReward(env, config["GAMMA"])
 
-    def linear_schedule(count : int):
+    def linear_schedule(count: int):
         """
         Define a linear schedule for the learning rate
         """
@@ -216,17 +230,17 @@ def make_train(
         )
         return config["LR"] * frac
 
-     # Checkpoint object
+    # Checkpoint object
     ckpt_model = TrainCheckpoints(
-        experiment_dir = base_logs_dir,
-        output_name = save_name,
-        ckpt_cfg = configs['track_n_checkpoints'],
-        best_mode = 'max',
-        extra_config_to_save_as_yaml = configs,
-        saving_freq = rl_config['LOG_EVERY_N_UPDATES']
+        experiment_dir=base_logs_dir,
+        output_name=save_name,
+        ckpt_cfg=configs["track_n_checkpoints"],
+        best_mode="max",
+        extra_config_to_save_as_yaml=configs,
+        saving_freq=rl_config["LOG_EVERY_N_UPDATES"],
     )
 
-    def train(rng : jnp.ndarray):
+    def train(rng: jnp.ndarray):
         """
         Main jittable and vectorized training function
         """
@@ -265,6 +279,7 @@ def make_train(
             """
             One step of the training loop
             """
+
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, __):
                 """
@@ -285,8 +300,13 @@ def make_train(
                     rng_step, env_state, action, env_params
                 )
                 transition = Transition(
-                    done, action, value, reward, log_prob,
-                    last_obs, info["truncation_info"]["truncated"]
+                    done,
+                    action,
+                    value,
+                    reward,
+                    log_prob,
+                    last_obs,
+                    info["truncation_info"]["truncated"],
                 )
                 runner_state = (train_state, env_state, obsv, rng)
                 return runner_state, transition
@@ -311,8 +331,7 @@ def make_train(
                     delta = reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = (
                         delta
-                        + config["GAMMA"] * config["GAE_LAMBDA"] * \
-                            (1 - done) * gae
+                        + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     )
                     # Skip the truncated steps
                     gae = jnp.where(truncated, 0.0, gae)
@@ -327,15 +346,14 @@ def make_train(
                 )
                 return advantages, advantages + traj_batch.value
 
-            advantages, targets = _calculate_gae(
-                traj_batch, last_val
-            )
+            advantages, targets = _calculate_gae(traj_batch, last_val)
 
             # UPDATE NETWORK
             def _update_epoch(update_state, ___):
                 """
                 Update per epoch function
                 """
+
                 def _update_minbatch(train_state, batch_info):
                     """
                     Minibatch update function
@@ -355,11 +373,10 @@ def make_train(
                             value - traj_batch.value
                         ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
                         value_losses = jnp.square(value - targets)
-                        value_losses_clipped = \
-                            jnp.square(value_pred_clipped - targets)
-                        value_loss = 0.5 * jnp.maximum(
-                            value_losses, value_losses_clipped
-                        ).mean()
+                        value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                        value_loss = (
+                            0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+                        )
 
                         # CALCULATE ACTOR LOSS
                         # jax.debug.print("Log prob: {}", log_prob)
@@ -387,15 +404,16 @@ def make_train(
                             - config["ENT_COEF"] * entropy
                         )
                         ret_val = {
-                            'Loss/TotalLoss' : total_loss,
-                            'Loss/ValueLoss' : value_loss,
-                            'Loss/ActorLoss' : loss_actor,
-                            'Loss/Entropy' : entropy
+                            "Loss/TotalLoss": total_loss,
+                            "Loss/ValueLoss": value_loss,
+                            "Loss/ActorLoss": loss_actor,
+                            "Loss/Entropy": entropy,
                         }
 
                         # Compute the L-2 norm of the kernel weights of actor and critic
                         # for regularization
                         if config.get("SPECTRAL_REG_PENALTY", 0) > 0:
+
                             def jac_regularizer(_obs, _rng, _params):
                                 """
                                 Compute the jacobian regularization
@@ -404,11 +422,14 @@ def make_train(
                                 mean_val = _pi.mean
                                 # Sample a random obs
                                 _v_obs = jax.random.normal(_rng, mean_val.shape)
-                                _v_obs = _v_obs / (jnp.linalg.norm(_v_obs, axis=-1) + 1e-8)
+                                _v_obs = _v_obs / (
+                                    jnp.linalg.norm(_v_obs, axis=-1) + 1e-8
+                                )
                                 return jnp.sum(mean_val * _v_obs)
+
                             jac_v = jax.grad(jac_regularizer, argnums=0)
                             jac_v = jax.vmap(jac_v, in_axes=(0, 0, None))
-                            num_obs = traj_batch.obs.shape[0] # 128
+                            num_obs = traj_batch.obs.shape[0]  # 128
                             __obs = traj_batch.obs[:num_obs]
                             __rng = jax.random.split(rng, __obs.shape[0])
                             jac_val = jac_v(__obs, __rng, params)
@@ -439,8 +460,9 @@ def make_train(
                 train_state, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
-                assert (batch_size == config["NUM_STEPS"] * config["NUM_ENVS"]),\
-                    "batch size must be equal to number of steps * number of envs"
+                assert (
+                    batch_size == config["NUM_STEPS"] * config["NUM_ENVS"]
+                ), "batch size must be equal to number of steps * number of envs"
                 permutation = jax.random.permutation(_rng, batch_size)
                 batch = (traj_batch, advantages, targets)
                 batch = jax.tree_util.tree_map(
@@ -472,8 +494,9 @@ def make_train(
             # Did the optimization fails? If yes, don't update the prams
             failed_step = jnp.isnan(loss_info["Loss/TotalLoss"]).any()
             train_state = jax.tree_util.tree_map(
-                lambda _x, _y : jnp.where(failed_step, _x, _y),
-                train_state, update_state[0]
+                lambda _x, _y: jnp.where(failed_step, _x, _y),
+                train_state,
+                update_state[0],
             )
             # metric = traj_batch.info
             rng = update_state[-1]

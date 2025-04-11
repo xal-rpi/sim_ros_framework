@@ -2,7 +2,6 @@
 Base code for defining a Gym-like environment.
 """
 
-
 from typing import Tuple, Union, Optional
 from functools import partial
 
@@ -16,6 +15,7 @@ class EnvState:
     """
     State of the environment.
     """
+
     time: int
 
 
@@ -24,6 +24,7 @@ class EnvParams:
     """
     Parameters of the environment.
     """
+
     max_steps_in_episode: int
 
 
@@ -48,9 +49,7 @@ class Environment(object):
         if params is None:
             params = self.default_params
         key, key_reset = jax.random.split(key)
-        obs_st, state_st, reward, done, info = self.step_env(
-            key, state, action, params
-        )
+        obs_st, state_st, reward, done, info = self.step_env(key, state, action, params)
 
         # Check if the episode is truncated
         truncated = info.get("truncation_info", {}).get("truncated", False)

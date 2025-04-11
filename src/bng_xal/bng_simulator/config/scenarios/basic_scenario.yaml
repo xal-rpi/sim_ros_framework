@@ -81,7 +81,7 @@ ros_poll_config:
     #   poll_time: 0.1
     #   publish: True
     gtstate:
-      topic: /ego/basicState
+      topic: /ego/gtstate
       poll_time: 0.15 # Make sure this matches the gfx_update_time and is not 3 times slower
       publish: 1 # 0 is false, 1 is true, 2 is true and publish to all
       # publish_all: True
