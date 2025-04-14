@@ -2,12 +2,12 @@
 Manages BeamNG simulation lifecycle, scenarios, and vehicles.
 """
 
-import logging
 import traceback
 import os
 
 from typing import Dict, List, Optional, Any
 from copy import deepcopy
+import rclpy
 
 from beamngpy import BeamNGpy, Scenario
 from beamngpy.logging import BNGValueError
@@ -38,15 +38,18 @@ class SimulationManager:
     with multiple vehicles.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], logger=None):
         """
         Initialize the simulation manager with a configuration.
 
         Args:
             config (Dict[str, Any]): Simulation configuration dictionary
+            logger: ROS logger instance (optional)
         """
         self._PI = 3.14159
-        self.logger = logging.getLogger("SimulationManager")
+
+        # Use provided logger or create a standard one
+        self.logger = logger or rclpy.logging.get_logger(self.__class__.__name__)
         self.config = deepcopy(config)
 
         self.beamng: Optional[BeamNGpy] = None
@@ -67,29 +70,30 @@ class SimulationManager:
         self.post_scenario_configuration()
 
     @classmethod
-    def from_file(cls, config: str):
+    def from_file(cls, config: str, logger=None):
         """
         Create a SimulationManager instance from a configuration file.
 
         Args:
             config (str): Path to the YAML configuration file
+            logger: ROS logger instance (optional)
 
         Returns:
             SimulationManager: Initialized simulation manager
         """
         # If already a full path and exists, return it
         if os.path.isfile(config):
-            return cls(load_yaml(config))
+            return cls(load_yaml(config), logger=logger)
 
         # Try in the config directory
         config_path = os.path.join(CONFIG_DIR, config)
         if os.path.isfile(config_path):
-            return cls(load_yaml(config_path))
+            return cls(load_yaml(config_path), logger=logger)
 
         # Try in the scenarios directory
         scenario_path = os.path.join(SCENARIO_DIR, config)
         if os.path.isfile(scenario_path):
-            return cls(load_yaml(scenario_path))
+            return cls(load_yaml(scenario_path), logger=logger)
 
         raise FileNotFoundError(f"Couldn't find config file {config}")
 
@@ -100,8 +104,9 @@ class SimulationManager:
         setup_funcs = beamng_info.pop("setup_funcs", {})
 
         self.logger.info("Connecting to BeamNG")
-        self.logger.info(f"Connection parameters: \n{beamng_info}")
-        self.logger.info(f"Launch arguments: \n{launch_info}")
+        self.logger.debug(f"Connection parameters: \n{beamng_info}")
+        self.logger.debug(f"Launch arguments: \n{launch_info}")
+        self.logger.debug(f"Setup arguments: \n{setup_funcs}")
 
         self.beamng = BeamNGpy(**beamng_info)
         self.beamng.open(**launch_info)

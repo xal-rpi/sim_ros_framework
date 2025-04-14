@@ -4,7 +4,6 @@
 Main function to run the Simulation Manager ROS Node
 """
 
-import os
 import rclpy
 from rclpy.node import Node
 from multiprocessing import Queue
@@ -27,14 +26,34 @@ class SimulationManagerNode(Node):
 
         # Declare parameters
         self.declare_parameter("config", "basic_scenario.yaml")
+        self.declare_parameter("log_level", "INFO")
 
-        # Get parameters - if config_path is not provided, use the parameter
+        self.logger = self.get_logger()
+
+        # Get parameters
         if config is None:
-            config_param = self.get_parameter("config").value
-            self.get_logger().info(f"config :{config_param}")
+            self.config = self.get_parameter("config").value
+            self.logger.info(f"config: {self.config}")
+        else:
+            self.config = config
+
+        # Set logger level
+        log_level_str = self.get_parameter("log_level").value.upper()
+        log_level_map = {
+            "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
+            "INFO": rclpy.logging.LoggingSeverity.INFO,
+            "WARN": rclpy.logging.LoggingSeverity.WARN,
+            "ERROR": rclpy.logging.LoggingSeverity.ERROR,
+            "FATAL": rclpy.logging.LoggingSeverity.FATAL,
+        }
+        log_level = log_level_map.get(log_level_str, rclpy.logging.LoggingSeverity.INFO)
+        rclpy.logging.set_logger_level(self.logger.name, log_level)
 
         # Create simulation manager
-        self.sim_manager = SimulationManager.from_file(self.config)
+        self.sim_manager = SimulationManager.from_file(
+            self.config,
+            self.logger.get_child("sim_manager"),
+        )
 
         # Set up ExecuteRequest service
         self.service = self.create_service(
@@ -56,9 +75,7 @@ class SimulationManagerNode(Node):
         self.create_sensor_publishers()
 
         # Logging that the node is initialized
-        self.get_logger().info(
-            f"Simulation Manager Node initialized with config: {config_path}"
-        )
+        self.logger.info(f"Simulation Manager Node initialized.")
 
     def handle_execute_request(self, request, response):
         """
@@ -95,7 +112,7 @@ class SimulationManagerNode(Node):
                 # Fetch the sensor
                 sensor_device = self.sim_manager.get_sensor(sensor_name, veh_name)
                 if sensor_device is None:
-                    self.get_logger().error(
+                    self.logger.error(
                         f"Sensor {sensor_name} not found for vehicle {veh_name}"
                     )
                     continue
@@ -146,7 +163,7 @@ class SimulationManagerNode(Node):
                         }
                     )
             except Exception as e:
-                self.get_logger().error(f"Failed to enqueue logger data: {e}")
+                self.logger.error(f"Failed to enqueue logger data: {e}")
 
         # Now let's publish the data if required
         if publisher is not None:
@@ -166,7 +183,7 @@ class SimulationManagerNode(Node):
         Start the logger process
         """
         if self.logger_process is not None:
-            self.get_logger().error("Logger process already running")
+            self.logger.error("Logger process already running")
             response.success = False
             return response
 
@@ -179,7 +196,7 @@ class SimulationManagerNode(Node):
         )
         self.logger_process.start()
         response.success = True
-        self.get_logger().info("Logger process started")
+        self.logger.info("Logger process started")
         return response
 
     def stop_logger_callback(self, request, response):
@@ -187,7 +204,7 @@ class SimulationManagerNode(Node):
         Stop the logger process
         """
         if self.logger_process is None:
-            self.get_logger().error("Logger process not running")
+            self.logger.error("Logger process not running")
             response.success = False
             return response
         self.logger_process.stop()
@@ -195,7 +212,7 @@ class SimulationManagerNode(Node):
         self.logger_process = None
         self.logger_queue = None
         response.success = True
-        self.get_logger().info("Logger process stopped")
+        self.logger.info("Logger process stopped")
         return response
 
 
