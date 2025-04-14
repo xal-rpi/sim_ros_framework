@@ -21,21 +21,21 @@ from bng_simulator.logger_process import LoggerProcess
 
 
 class SimulationManagerNode(Node):
-    def __init__(self, config=None):
+    def __init__(self, config_path=None):
         super().__init__("sim_manager_node")
 
         # Declare parameters
-        self.declare_parameter("config", "basic_scenario.yaml")
+        self.declare_parameter("config_path", "basic_scenario.yaml")
         self.declare_parameter("log_level", "INFO")
 
         self.logger = self.get_logger()
 
         # Get parameters
-        if config is None:
-            self.config = self.get_parameter("config").value
-            self.logger.info(f"config: {self.config}")
+        if config_path is None:
+            self.config_path = self.get_parameter("config_path").value
+            self.logger.info(f"config: {self.config_path}")
         else:
-            self.config = config
+            self.config_path = config_path
 
         # Set logger level
         log_level_str = self.get_parameter("log_level").value.upper()
@@ -51,7 +51,7 @@ class SimulationManagerNode(Node):
 
         # Create simulation manager
         self.sim_manager = SimulationManager.from_file(
-            self.config,
+            self.config_path,
             self.logger.get_child("sim_manager"),
         )
 

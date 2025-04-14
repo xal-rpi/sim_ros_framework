@@ -2,7 +2,7 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
-import os
+from os import path
 from ament_index_python.packages import get_package_share_directory
 
 
@@ -11,19 +11,17 @@ def generate_launch_description():
     pkg_share = get_package_share_directory("bng_simulator")
 
     # Get default config path
-    default_config_path = os.path.join(pkg_share, "config", "basic_scenario.yaml")
-
-    # Define the default log format - more concise than the default
-    default_log_format = "[{severity}] {message}"
+    default_config_path = path.join(pkg_share, "config", "basic_scenario.yaml")
 
     return LaunchDescription(
         [
             # Launch arguments
             DeclareLaunchArgument(
-                "config",
+                "config_path",
                 default_value=default_config_path,
                 description="Path to the simulation configuration file",
             ),
+            # Better logging
             DeclareLaunchArgument(
                 "log_level",
                 default_value="INFO",
@@ -44,7 +42,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "config": LaunchConfiguration("config"),
+                        "config_path": LaunchConfiguration("config_path"),
                         "log_level": LaunchConfiguration("log_level"),
                     }
                 ],
