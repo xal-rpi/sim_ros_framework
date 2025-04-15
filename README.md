@@ -14,7 +14,133 @@ A comprehensive framework connecting ROS2 with the BeamNG vehicle simulator, ena
 
 ## System Architecture
 
-![System Architecture](https://raw.githubusercontent.com/your-organization/bng_xal/main/docs/images/architecture.png)
+```mermaid
+flowchart TD
+    %% Define styles
+    classDef userInput fill:#e1f5fe,stroke:#01579b
+    classDef pythonNodes fill:#e8f5e9,stroke:#2e7d32
+    classDef rosNodes fill:#fff3e0,stroke:#ff6f00
+    classDef luaNodes fill:#f3e5f5,stroke:#6a1b9a
+    classDef beamngNodes fill:#ffebee,stroke:#b71c1c
+    classDef controllerNodes fill:#f8bbd0,stroke:#880e4f
+    classDef dataFlow stroke:#2196f3,stroke-width:2px
+    classDef commandFlow stroke:#ff5722,stroke-width:2px
+
+    %% User Input at the top
+    User((User)):::userInput
+    
+    %% ROS Environment
+    subgraph ROSEnv ["ROS Environment"]
+        direction TB
+        
+        %% Left side: Simulation components
+        subgraph SimComponents ["Simulation Components"]
+            direction TB
+            SimNode["sim_manager_node.py"]:::rosNodes
+            SimManager["simulation_manager.py"]:::pythonNodes
+            VehicleManager["manager.py"]:::pythonNodes
+            SensorRegistry["SensorRegistry"]:::pythonNodes
+        end
+        
+        %% Right side: Controller components
+        subgraph CtrlComponents ["Controller Components"]
+            direction TB
+            ControllerInterface["controller_interface.py"]:::pythonNodes
+            HighLevelController["high_level_controller.py"]:::controllerNodes
+            HighLevelCompute["controller_core.c"]:::controllerNodes
+            ControllerRegistry["ControllerRegistry"]:::pythonNodes
+            LowLevelController["low_level_controller.py"]:::controllerNodes
+        end
+        
+        %% Bottom: Common ROS components
+        subgraph ROSCommon ["ROS Services & Messages"]
+            ExecuteReq["ExecuteRequest.srv"]:::rosNodes
+            ROSMsgs["ROS Messages"]:::rosNodes
+            LoggerProcess["logger_process.py"]:::pythonNodes
+        end
+        
+        %% Sensors
+        subgraph Sensors ["Sensors"]
+            GtStateSensor["GtState.py"]:::pythonNodes
+            BasicStateSensor["basic_state.py"]:::pythonNodes
+        end
+    end
+    
+    %% Command interface
+    SimShell["sim_shell.py"]:::pythonNodes
+    
+    %% BeamNG Environment
+    subgraph BeamNGEnv ["BeamNG Environment"]
+        direction TB
+        
+        %% Python Interface
+        BeamNGPy["BeamNGpy Interface"]:::pythonNodes
+        
+        %% Lua components grouped by role
+        subgraph LuaSystem ["Lua System"]
+            XlabCore["xlabCore.lua"]:::luaNodes
+            SensorsLua["sensors.lua"]:::luaNodes
+        end
+        
+        subgraph VehicleLua ["Vehicle Lua"]
+            GtStateModule["gtState.lua"]:::luaNodes
+            LowLevelCtrl["lowLevelController.lua"]:::luaNodes
+        end
+        
+        %% Physics Engine
+        BeamNGPhysics["BeamNG Physics Engine"]:::beamngNodes
+    end
+
+    %% Main user interactions
+    User -->|"Launch"|SimNode & ControllerInterface
+    User -->|"Commands"|SimShell
+    
+    %% Main command flowa
+    SimShell -->|"execute_request"|ExecuteReq
+    ExecuteReq -->|"handle request"|SimNode
+    SimNode -->|"process"|SimManager
+    SimManager -->|"control vehicle"|BeamNGPy
+    
+    %% Controller flow
+    ControllerInterface -->|"config & initialize"|SimNode
+    ControllerInterface -->|"config & initialize"|HighLevelController
+    HighLevelController -->|"UDP socket:<br/>send target"|LowLevelCtrl
+    HighLevelController <-->|"compute target"|HighLevelCompute
+    
+    %% Vehicle setup
+    SimManager -->|"setup"|VehicleManager
+    VehicleManager -->|"register"|SensorRegistry & ControllerRegistry
+    ControllerRegistry -->|"create"|LowLevelController
+    SensorRegistry -->|"create"|GtStateSensor & BasicStateSensor
+    
+    %% BeamNG interactions
+    LowLevelController -->|"open controller"|BeamNGPy
+    GtStateSensor -->|"open sensor"|BeamNGPy
+    BeamNGPy -->|"send commands"|XlabCore
+    
+    %% Lua interactions
+    XlabCore -->|"manage sensors"|SensorsLua
+    XlabCore -->|"setup"|LowLevelCtrl
+    SensorsLua -->|"sensor data"|GtStateModule
+    
+    %% Physics interactions
+    LowLevelCtrl & GtStateModule <-->|"update"|BeamNGPhysics
+    
+    %% Data flow back to ROS
+    BeamNGPy -->|"poll data"|GtStateSensor & BasicStateSensor
+    GtStateSensor & BasicStateSensor -->|"convert"|ROSMsgs
+    ROSMsgs -->|"publish"|SimNode
+    SimNode -->|"log data"|LoggerProcess
+    
+    %% Results back to user
+    ROSMsgs -->|"results"|SimShell
+    SimShell -->|"display"|User
+
+    %% Style links for command flow
+    linkStyle 0,1,2,3,4,5,6 stroke:#ff5722,stroke-width:2px
+    %% Style links for data flow
+    linkStyle 7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24 stroke:#2196f3,stroke-width:2px
+```
 
 The system consists of these key components:
 
