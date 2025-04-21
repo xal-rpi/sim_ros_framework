@@ -102,7 +102,8 @@ class SimulationManagerNode(Node):
         """
         Create publishers for sensor data
         """
-        pub_config = self.config.get("ros_poll_config", {})
+        self.get_logger().debug("Creating sensor publishers...")
+        pub_config = self.sim_manager.config.get("ros_poll_config", {})
         for veh_name, sensor_cfg in pub_config.items():
             # Store publishers for each vehicle
             veh_pub = {}
