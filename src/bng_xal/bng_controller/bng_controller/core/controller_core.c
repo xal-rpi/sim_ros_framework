@@ -18,9 +18,9 @@ static PyObject *compute_control_targets(PyObject *self, PyObject *args)
     // ... (extract vehicle state, etc.)
 
     // Compute targets
-    double engine_torque = 1.0;
+    double engine_torque = 100.0;
     double road_wheel_angle = 2.0;
-    double brake_torque = 3.0;
+    double brake_torque = 0.0;
 
     // Return control targets as a tuple
     return Py_BuildValue("(ddd)", engine_torque, road_wheel_angle, brake_torque);

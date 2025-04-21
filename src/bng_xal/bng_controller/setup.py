@@ -33,6 +33,7 @@ setup(
     entry_points={
         "console_scripts": [
             "run_controller = bng_controller.controller_interface:main",
+            "high_level_controller = bng_controller.high_level_controller:main", # Will be started by run_controller
         ],
     },
 )

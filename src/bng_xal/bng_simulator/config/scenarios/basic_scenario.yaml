@@ -75,6 +75,7 @@ vehicles:
     controllers:
       lowlevel:
         type: LowLevelController
+        control_rate: 0.1
         listen_ip: 0.0.0.0
         listen_port: 64257
         send_ip: 172.26.46.86
