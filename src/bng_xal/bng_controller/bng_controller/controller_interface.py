@@ -53,6 +53,8 @@ class ControllerInterface(Node):
             config=self.config_path,
             logger=self.get_logger().get_child("sim_manager"),
         )
+        self.setup_sensor_publishers()
+        self.create_timer(0.1, self.poll_and_publish_sensors)  # Poll sensors at 10Hz
 
         # Get controller configuration
         self.controller_config = {}
@@ -163,7 +165,7 @@ class ControllerInterface(Node):
         for line in iter(pipe.readline, ""):
             if line:
                 line.strip()
-                print(line, flush=True, end='')
+                print(line, flush=True, end="")
 
     def stop_controller(self):
         """Stop the high-level controller."""
@@ -199,6 +201,37 @@ class ControllerInterface(Node):
 
         self.is_running = False
         self.get_logger().info("Controller stopped")
+
+    def setup_sensor_publishers(self):
+        """Create publishers for all sensors in all vehicles"""
+        self.sensor_publishers = {}
+        for vehicle_name in self.sim_manager.get_available_vehicles():
+            vehicle_manager = self.sim_manager.vehicles[vehicle_name]
+            for sensor_name, sensor in vehicle_manager._sensors.items():
+                topic_name = f"/{vehicle_name}/{sensor_name}"
+                msg_type = vehicle_manager.extract_sensor_ros_msg_type(sensor_name)
+                if msg_type:
+                    self.get_logger().info(f"Creating publisher for {topic_name}")
+                    self.sensor_publishers[f"{vehicle_name}/{sensor_name}"] = (
+                        self.create_publisher(msg_type, topic_name, 10)
+                    )
+
+    def poll_and_publish_sensors(self):
+        """Poll all sensors and publish their data"""
+        for vehicle_name in self.sim_manager.get_available_vehicles():
+            vehicle_manager = self.sim_manager.vehicles[vehicle_name]
+            for sensor_name in vehicle_manager._sensors:
+                # Poll the sensor
+                self.sim_manager.poll_sensor(sensor_name, vehicle_name)
+
+                # Get the ROS message
+                msg = self.sim_manager.extract_sensor_ros_msg(sensor_name, vehicle_name)
+
+                # Publish the message if it exists
+                if msg:
+                    pub_key = f"{vehicle_name}/{sensor_name}"
+                    if pub_key in self.sensor_publishers:
+                        self.sensor_publishers[pub_key].publish(msg)
 
 
 def main(args=None):
