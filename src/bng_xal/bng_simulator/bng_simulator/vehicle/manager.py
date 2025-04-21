@@ -8,6 +8,7 @@ from copy import deepcopy
 
 from beamngpy import Vehicle, BeamNGpy
 from bng_simulator.vehicle.sensors import SensorBase, SensorRegistry
+from bng_simulator.vehicle.controllers.base import ControllerRegistry
 from bng_simulator.utils.math_op import convert_euler_to_quaternion
 
 
@@ -31,6 +32,7 @@ class VehicleManager:
         self._sensors: Dict[str, SensorBase] = {}
         self._logger = logging.getLogger(f"{__name__}.VehicleManager")
         self._vehicle: Vehicle = self.create_vehicle_instance()
+        self._controllers = {}  # Dictionary to store controllers
 
     def create_vehicle_instance(self) -> Vehicle:
         """
@@ -82,6 +84,16 @@ class VehicleManager:
             f"Scenario arguments for vehicle --{self._name}--: \n{self._scenario_args}"
         )
         return self._scenario_args
+
+    @property
+    def controllers(self) -> Dict:
+        """
+        Get the controllers.
+
+        Returns:
+            Controllers: The controllers
+        """
+        return self._controllers
 
     @property
     def vehicle(self) -> Vehicle:
@@ -182,3 +194,56 @@ class VehicleManager:
             SensorBase: The sensor instance
         """
         return self._sensors.get(name, None)
+
+    def setup_controllers(self):
+        """Set up controllers for the vehicle."""
+        controllers_config = self._config.get("controllers", {})
+        for controller_name, controller_config in controllers_config.items():
+            self.setup_controller(controller_name, controller_config)
+
+    def setup_controller(self, controller_name: str, controller_config: dict):
+        """Set up a specific controller for the vehicle."""
+        controller_type = controller_config.get("type")
+        if not controller_type:
+            self._logger.error(f"Controller type not specified for {controller_name}")
+            return
+
+        try:
+            controller_class = ControllerRegistry.get_class(controller_type)
+            controller = controller_class(
+                controller_name, self._vehicle, self._beamng, controller_config
+            )
+            self._controllers[controller_name] = controller
+            self._logger.info(
+                f"Controller {controller_name} of type {controller_type} set up"
+            )
+        except ValueError as e:
+            self._logger.error(f"Failed to set up controller {controller_name}: {e}")
+
+    def start_controller(self, controller_name: str):
+        """Start a specific controller."""
+        controller = self._controllers.get(controller_name)
+        if controller:
+            controller.start()
+            self._logger.info(f"Controller {controller_name} started")
+        else:
+            self._logger.error(f"Controller {controller_name} not found")
+
+    def stop_controller(self, controller_name: str):
+        """Stop a specific controller."""
+        controller = self._controllers.get(controller_name)
+        if controller:
+            controller.stop()
+            self._logger.info(f"Controller {controller_name} stopped")
+        else:
+            self._logger.error(f"Controller {controller_name} not found")
+
+    def start_all_controllers(self):
+        """Start all controllers."""
+        for controller_name in self._controllers:
+            self.start_controller(controller_name)
+
+    def stop_all_controllers(self):
+        """Stop all controllers."""
+        for controller_name in self._controllers:
+            self.stop_controller(controller_name)

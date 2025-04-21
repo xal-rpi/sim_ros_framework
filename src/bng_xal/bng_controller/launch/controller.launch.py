@@ -1,37 +1,38 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
+from ament_index_python.packages import get_package_share_directory
+from os import path
 
 
 def generate_launch_description():
+    # Get the package share directory
+    pkg_share = get_package_share_directory("bng_simulator")
+
+    # Get default config path
+    default_config_path = path.join(pkg_share, "config", "basic_scenario.yaml")
     return LaunchDescription(
         [
             # Launch arguments
             DeclareLaunchArgument(
-                "listen_ip",
-                default_value="172.26.32.1",
-                description="IP address to listen for sensor data",
-            ),
-            DeclareLaunchArgument(
-                "listen_port",
-                default_value="64257",
-                description="Port to listen for sensor data",
-            ),
-            DeclareLaunchArgument(
-                "send_ip",
-                default_value="172.26.32.1",
-                description="IP address to send control targets",
-            ),
-            DeclareLaunchArgument(
-                "send_port",
-                default_value="64258",
-                description="Port to send control targets",
-            ),
-            DeclareLaunchArgument(
                 "config_path",
-                default_value="basic_scenario.yaml",
+                default_value=default_config_path,
                 description="Path to BeamNG simulation configuration file",
+            ),
+            # Better logging
+            DeclareLaunchArgument(
+                "log_level",
+                default_value="INFO",
+                description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+            ),
+            SetEnvironmentVariable(
+                name="RCUTILS_CONSOLE_OUTPUT_FORMAT",
+                value="[{severity}] [{name}]: {message}",
+            ),
+            SetEnvironmentVariable(
+                name="RCUTILS_COLORIZED_OUTPUT",
+                value="1",
             ),
             # Controller interface node
             Node(
@@ -41,11 +42,8 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "listen_ip": LaunchConfiguration("listen_ip"),
-                        "listen_port": LaunchConfiguration("listen_port"),
-                        "send_ip": LaunchConfiguration("send_ip"),
-                        "send_port": LaunchConfiguration("send_port"),
                         "config_path": LaunchConfiguration("config_path"),
+                        "log_level": LaunchConfiguration("log_level"),
                     }
                 ],
             ),

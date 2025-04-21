@@ -1,8 +1,15 @@
-from setuptools import find_packages, setup
+from setuptools import find_packages, setup, Extension
 import os
 from glob import glob
 
 package_name = "bng_controller"
+
+# Define the C extension module
+controller_core_module = Extension(
+    "bng_controller.core.controller_core",
+    sources=["bng_controller/core/controller_core.c"],
+    extra_compile_args=["-O3"],  # Optimization flag
+)
 
 setup(
     name=package_name,
@@ -14,11 +21,12 @@ setup(
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
     ],
     install_requires=["setuptools"],
-    zip_safe=True,
+    zip_safe=False,
     maintainer="comev",
     maintainer_email="44554692+comejv@users.noreply.github.com",
     description="High-level controller for BeamNG simulation",
     license="TODO: License declaration",
+    ext_modules=[controller_core_module],
     extras_require={
         "test": ["pytest"],
     },

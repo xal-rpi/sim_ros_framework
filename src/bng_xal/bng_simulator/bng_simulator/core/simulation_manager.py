@@ -141,6 +141,7 @@ class SimulationManager:
         for vehicle_name in self.vehicles:
             vehicle_manager = self.vehicles[vehicle_name]
             vehicle_manager.setup_all_sensors()
+            vehicle_manager.setup_controllers()
 
     def add_vehicle(self, vehicle_name: str, vehicle_config: Dict[str, Any]):
         """
@@ -164,11 +165,11 @@ class SimulationManager:
                 self.logger.info("Stopping the existing scenario...")
                 data = dict(type="StopScenario")
                 self.beamng.scenario._send(data).ack("ScenarioStopped")
-                self.logger.info("Existing scenario stopped.\n")
+                self.logger.info("Existing scenario stopped.")
             else:
-                self.logger.info("No existing scenario found.\n")
+                self.logger.info("No existing scenario found.")
         except BNGValueError:
-            self.logger.info("No existing scenario found.\n")
+            self.logger.info("No existing scenario found.")
 
     def proxy_for_vehicle_properties(
         self, property_name: str, vehicle_name: Optional[str] = None, **kwargs
@@ -190,7 +191,7 @@ class SimulationManager:
         query_func = getattr(vehicle_queries, property_name, None)
 
         if query_func is None:
-            err_msg = f"Query function not found: {property_name}\n"
+            err_msg = f"Query function not found: {property_name}"
             self.logger.error(err_msg)
             return {"error": err_msg}
 
@@ -203,7 +204,6 @@ class SimulationManager:
             err_msg = "Error:\n" + traceback.format_exc()
             self.logger.error(err_msg)
             return {"error": err_msg}
-        self.logger.info("Query executed successfully.")
         # log the query started and the output
         self.logger.debug(f"Query output: \n{query_output}")
         return query_output if query_output is not None else {}
@@ -259,8 +259,6 @@ class SimulationManager:
         Returns:
             Any: The result of the function call. Mostly a dictionary.
         """
-        # Log the request
-        self.logger.info(f"Executing request: {func_name} with args: \n{func_args}")
         # Check if the function is a method of the SimulationManager
         # other than execute_request or proxy_for_vehicle_properties
         if hasattr(self, func_name) and func_name not in [
@@ -269,7 +267,6 @@ class SimulationManager:
         ]:
             method = getattr(self, func_name)
             out = method(**func_args)
-            self.logger.info(f"Request executed successfully.")
             out_mod = {} if out is None else out
             return out_mod if isinstance(out_mod, dict) else {"result": out_mod}
 
@@ -281,7 +278,6 @@ class SimulationManager:
                 current_obj = getattr(current_obj, component)
             out = current_obj(**func_args)
             out_mod = {} if out is None else out
-            self.logger.info(f"Request executed successfully.")
             return out_mod if isinstance(out_mod, dict) else {"result": out_mod}
 
         # We assume it is a proxy for vehicle properties
@@ -440,18 +436,14 @@ class SimulationManager:
         vehicle_manager = self.vehicles[vehicle_name]
         return vehicle_manager.get_sensor(sensor_name)
 
+    def get_controller_config(
+        self, controller_name: str, vehicle_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        if vehicle_name is None:
+            vehicle_name = self.default_vehicle_name
 
-# # Let's create a quick main for testing
-# if __name__ == "__main__":
-#     import sys
-#     import logging
-#     logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-
-#     # Load the simulation configuration
-#     config_path = "../../config/scenarios/basic_scenario.yaml"
-#     sim_manager = SimulationManager.from_file(config_path)
-#     print("Simulation manager created successfully.")
-#     print(f"Scenario: {sim_manager.scenario}")
-#     print(f"Vehicles: {sim_manager.vehicles}")
-#     print("Simulation manager ready for use.")
+        # Get controller config directly from the main config
+        vehicles_config = self.config.get("vehicles", {})
+        vehicle_config = vehicles_config.get(vehicle_name, {})
+        controllers = vehicle_config.get("controllers", {})
+        return controllers.get(controller_name, {})

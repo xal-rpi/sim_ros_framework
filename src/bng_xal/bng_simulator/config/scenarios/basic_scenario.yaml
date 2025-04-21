@@ -72,6 +72,14 @@ vehicles:
         # # Up and dir name are confusing, but it is the way it is
         # dir: [0, -1, 0] # First axis
         # up: [1, 0, 0] # Second axis in right hand rule
+    controllers:
+      lowlevel:
+        type: LowLevelController
+        listen_ip: 0.0.0.0
+        listen_port: 64257
+        send_ip: 172.26.46.86
+        send_port: 64258
+        gt_state_name: "gtstate"
 
 # ROS configuration
 ros_poll_config:
