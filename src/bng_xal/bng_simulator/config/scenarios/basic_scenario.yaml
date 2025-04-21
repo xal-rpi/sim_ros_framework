@@ -81,6 +81,10 @@ vehicles:
         send_ip: 172.26.46.86
         send_port: 64258
         gt_state_name: "gtstate"
+        calibration:
+          steeringP: 1.2
+          throttleP: 1.0
+          brakeP: 1.0
 
 # ROS configuration
 ros_poll_config:
