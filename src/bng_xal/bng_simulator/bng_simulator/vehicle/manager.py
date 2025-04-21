@@ -25,12 +25,12 @@ class VehicleManager:
         config (dict): Vehicle configuration dictionary
     """
 
-    def __init__(self, name: str, beamng: BeamNGpy, config: Dict[str, Any]):
+    def __init__(self, name: str, beamng: BeamNGpy, config: Dict[str, Any], logger = None):
         self._name = name
         self._beamng = beamng
         self._config = deepcopy(config)
         self._sensors: Dict[str, SensorBase] = {}
-        self._logger = logging.getLogger(f"{__name__}.VehicleManager")
+        self._logger = logger or logging.getLogger(f"{__name__}.VehicleManager")
         self._vehicle: Vehicle = self.create_vehicle_instance()
         self._controllers = {}  # Dictionary to store controllers
 
@@ -48,7 +48,7 @@ class VehicleManager:
         self._scenario_args = self._config.pop("scenario_args", {})
 
         # Now log the remaining configuration
-        self._logger.info(f"Vehicle --{self._name}-- configuration: \n{self._config}")
+        self._logger.debug(f"Vehicle --{self._name}-- configuration: \n{self._config}")
 
         # Let's construct the vehicle instance
         return Vehicle(self._name, **self._config)
@@ -109,13 +109,18 @@ class VehicleManager:
         """
         Setup all the sensors for the vehicle.
         """
+        print("sensor", flush=True)
         for name, config in self._sensors_config.items():
+            print("sensor", name, flush=True)
             # Log the sensor setup
-            self._logger.info(
+            self._logger.debug(
                 f"Setting up sensor --{name}-- for vehicle --{self._name}--"
             )
             self._logger.debug(f"Sensor configuration: \n{config}")
             self.setup_sensor(name, config)
+            self._logger.debug(
+                f"Sendor --{name}-- set up for vehicle --{self._name}--"
+            )
 
     def setup_sensor(self, name: str, config: Dict[str, Any]):
         """

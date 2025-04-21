@@ -141,7 +141,8 @@ class SimulationManager:
         for vehicle_name in self.vehicles:
             vehicle_manager = self.vehicles[vehicle_name]
             vehicle_manager.setup_all_sensors()
-            vehicle_manager.setup_controllers()
+            # vehicle_manager.setup_controllers()
+        self.logger.debug("Finished loading sensors")
 
     def add_vehicle(self, vehicle_name: str, vehicle_config: Dict[str, Any]):
         """
@@ -151,7 +152,12 @@ class SimulationManager:
             vehicle_name (str): Name of the vehicle
             vehicle_config (Dict[str, Any]): Vehicle configuration
         """
-        vehicle = VehicleManager(vehicle_name, self.beamng, vehicle_config)
+        vehicle = VehicleManager(
+            vehicle_name,
+            self.beamng,
+            vehicle_config,
+            self.logger.get_child("vehicle_manager"),
+        )
         self.vehicles[vehicle_name] = vehicle
         # Get scenario spawn parameters from vehicle config
         spawn_args = vehicle.get_scenario_args()
@@ -245,6 +251,7 @@ class SimulationManager:
         """
         A set of function to apply after the scenario is created.
         """
+        self.logger.debug("Post scenario config")
         config = self.config.get("post_scenario", {})
         for func_name, func_args in config.items():
             # Execute the request
