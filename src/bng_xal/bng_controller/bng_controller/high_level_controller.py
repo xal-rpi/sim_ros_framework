@@ -17,6 +17,7 @@ except ImportError:
     rclpy.logging.get_logger("controller").error(
         "C extension not found, using Python implementation (empty)"
     )
+
     # Fallback if C extension not built
     class controller_core:
         @staticmethod
@@ -172,7 +173,10 @@ class HighLevelController(Node):
     def _control_callback(self):
         """Control callback function executed at the control rate by ROS timer."""
         callback_time = time.time()
-        self.get_logger().info(f"Control callback executing at {callback_time:.3f}", throttle_duration_sec=1)
+        self.get_logger().info(
+            f"Control callback executing at {callback_time:.3f}",
+            throttle_duration_sec=1,
+        )
 
         # Skip if controller is stopped
         if not self.running:
@@ -213,7 +217,9 @@ class HighLevelController(Node):
             # Convert to JSON and send
             msg_bytes = json.dumps(control_msg).encode("utf-8")
             self.send_socket.sendto(msg_bytes, (self.send_ip, self.send_port))
-            self.get_logger().debug(f"Sent control targets: {control_msg}", throttle_duration_sec=1)
+            self.get_logger().debug(
+                f"Sent control targets: {control_msg}", throttle_duration_sec=1
+            )
         except Exception as e:
             self.get_logger().error(f"Error sending control targets: {e}")
 
@@ -224,30 +230,44 @@ def main(args=None):
 
     controller = None
     try:
-        # Create and start the controller
         controller = HighLevelController()
         controller.start()
-
-        # Use MultiThreadedExecutor to handle callbacks properly alongside threads
         executor = MultiThreadedExecutor()
         executor.add_node(controller)
 
         try:
             controller.get_logger().info("Starting executor...")
             executor.spin()
+        except Exception as e:
+            pass
         finally:
-            controller.get_logger().info("Executor stopped")
+            try:
+                executor.shutdown()
+            except Exception:
+                pass
     except KeyboardInterrupt:
-        controller.get_logger().info("Interrupted by user")
+        pass
     except Exception as e:
         if controller:
-            controller.get_logger().error(f"Exception in main: {e}")
+            try:
+                controller.get_logger().error(f"Exception in main: {e}")
+            except Exception:
+                pass
     finally:
-        # Clean shutdown
         if controller:
-            controller.stop()
-            controller.destroy_node()
-        rclpy.shutdown()
+            try:
+                controller.stop()
+            except Exception:
+                pass
+
+            try:
+                controller.destroy_node()
+            except Exception:
+                pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

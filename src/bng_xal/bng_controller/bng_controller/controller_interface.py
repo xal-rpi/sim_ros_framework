@@ -130,7 +130,7 @@ class ControllerInterface(Node):
 
             # Start process
             if args:
-                cmd += ['--ros-args'] + args
+                cmd += ["--ros-args"] + args
 
             self.get_logger().info(f"Starting controller with command: {' '.join(cmd)}")
             self.controller_process = subprocess.Popen(
@@ -162,7 +162,8 @@ class ControllerInterface(Node):
         """Monitor process output and log it."""
         for line in iter(pipe.readline, ""):
             if line:
-                self.get_logger().info(f"[Controller {name}] {line.strip()}")
+                line.strip()
+                print(line, flush=True, end='')
 
     def stop_controller(self):
         """Stop the high-level controller."""
@@ -211,24 +212,21 @@ def main(args=None):
         node = ControllerInterface()
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print("KeyboardInterrupt caught, shutting down gracefully")
+        pass
     except Exception as e:
         print(f"Exception in main: {e}")
     finally:
-        print("Clean shutdown initiated")
-        try:
-            # Safe cleanup
-            if node is not None:
-                node.stop_controller()
-                node.destroy_node()
-            # Only shutdown if not already shutting down
+        if node is not None:
+            node.stop_controller()
             try:
-                if rclpy.ok():
-                    rclpy.shutdown()
-            except Exception as e:
-                print(f"ROS shutdown error (can be ignored): {e}")
-        except Exception as e:
-            print(f"Error during shutdown: {e}")
+                node.destroy_node()
+            except Exception:
+                pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
