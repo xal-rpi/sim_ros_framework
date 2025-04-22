@@ -454,3 +454,60 @@ class SimulationManager:
         vehicle_config = vehicles_config.get(vehicle_name, {})
         controllers = vehicle_config.get("controllers", {})
         return controllers.get(controller_name, {})
+
+    @staticmethod
+    def _poll_and_publish(
+        node, vehicle_name, sensor_name, sensor, publisher, publish_type
+    ):
+        """Helper: poll sensor and publish based on publish_type"""
+        node.get_logger().debug(
+            f"Polling sensor: {sensor_name} for vehicle {vehicle_name}",
+            throttle_duration_sec=2,
+        )
+        try:
+            sensor.poll()
+            if publisher:
+                if publish_type > 1:
+                    all_data = sensor.get_all_data()
+                    for data in all_data:
+                        msg = sensor.to_ros_msg(data)
+                        if msg:
+                            publisher.publish(msg)
+                else:
+                    msg = sensor.to_ros_msg()
+                    if msg:
+                        publisher.publish(msg)
+        except Exception as e:
+            node.get_logger().error(f"Error polling/publishing {sensor_name}: {e}")
+
+    def register_ros_polling(self, node: rclpy.node.Node):
+        """Set up publishers and timers on the given node based on ros_poll_config"""
+        node.get_logger().debug("Registering ros_poll_config publishers/timers")
+        node.sensor_publishers = {}
+        pub_config = self.config.get("ros_poll_config", {})
+        for veh_name, sensor_cfg in pub_config.items():
+            veh_pub = {}
+            for sensor_name, sensor_info in sensor_cfg.items():
+                sensor_device = self.get_sensor(sensor_name, veh_name)
+                if sensor_device is None:
+                    node.get_logger().error(
+                        f"Sensor {sensor_name} not found for vehicle {veh_name}"
+                    )
+                    continue
+                topic = sensor_info.get("topic", f"/{veh_name}/{sensor_name}")
+                msg_type = sensor_device.ros_msg_type()
+                poll_time = sensor_info.get("poll_time", 0.2)
+                publish = sensor_info.get("publish", 0)
+                publisher = None
+                if publish > 0:
+                    publisher = node.create_publisher(msg_type, topic, 10)
+                # timer uses default args to capture loop variables
+                timer = node.create_timer(
+                    poll_time,
+                    lambda v=veh_name, s=sensor_name, sd=sensor_device, p=publisher, pt=publish: SimulationManager._poll_and_publish(
+                        node, v, s, sd, p, pt
+                    ),
+                )
+                veh_pub[sensor_name] = {"pub": publisher, "timer": timer}
+            if veh_pub:
+                node.sensor_publishers[veh_name] = veh_pub
