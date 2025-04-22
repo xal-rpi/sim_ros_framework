@@ -141,7 +141,7 @@ class SimulationManager:
         for vehicle_name in self.vehicles:
             vehicle_manager = self.vehicles[vehicle_name]
             vehicle_manager.setup_all_sensors()
-            # vehicle_manager.setup_controllers()
+            vehicle_manager.setup_controllers()
         self.logger.debug("Finished loading sensors")
 
     def add_vehicle(self, vehicle_name: str, vehicle_config: Dict[str, Any]):
@@ -460,10 +460,6 @@ class SimulationManager:
         node, vehicle_name, sensor_name, sensor, publisher, publish_type
     ):
         """Helper: poll sensor and publish based on publish_type"""
-        node.get_logger().debug(
-            f"Polling sensor: {sensor_name} for vehicle {vehicle_name}",
-            throttle_duration_sec=2,
-        )
         try:
             sensor.poll()
             if publisher:

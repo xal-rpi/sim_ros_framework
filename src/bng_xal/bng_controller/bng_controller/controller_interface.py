@@ -1,227 +1,67 @@
-#!/usr/bin/env python3
-
-"""
-Interface to connect the high-level controller with the BeamNG simulation.
-"""
-
 import rclpy
+from std_msgs.msg import Bool
 from rclpy.node import Node
-import subprocess
-import threading
-import signal
-
 from bng_simulator.core.simulation_manager import SimulationManager
 
 
 class ControllerInterface(Node):
-    """
-    Interface to connect high-level controller with BeamNG simulation.
-
-    This class launches the high-level controller as a separate ROS node
-    and manages its lifecycle.
-    """
-
     def __init__(self):
-        """Initialize controller interface."""
         super().__init__("controller_interface")
 
-        # Declare parameters
-        self.declare_parameter("config_path", "basic_scenario.yaml")
+        # parameters
+        self.declare_parameter("config_path", "")
+        self.declare_parameter("host_ip", "")
+        self.declare_parameter("listen_port", 0)
+        self.declare_parameter("send_port", 0)
         self.declare_parameter("log_level", "INFO")
         self.declare_parameter("controller_enabled", True)
 
-        # Get parameters
-        self.config_path = self.get_parameter("config_path").value
-        self.controller_enabled = self.get_parameter("controller_enabled").value
-
-        # Setup logger
+        # pull log_level
         self.log_level_str = self.get_parameter("log_level").value.upper()
-        log_level_map = {
+        level_map = {
             "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
-            "INFO": rclpy.logging.LoggingSeverity.INFO,
-            "WARN": rclpy.logging.LoggingSeverity.WARN,
+            "INFO":  rclpy.logging.LoggingSeverity.INFO,
+            "WARN":  rclpy.logging.LoggingSeverity.WARN,
             "ERROR": rclpy.logging.LoggingSeverity.ERROR,
             "FATAL": rclpy.logging.LoggingSeverity.FATAL,
         }
-        log_level = log_level_map.get(
-            self.log_level_str, rclpy.logging.LoggingSeverity.INFO
-        )
-        rclpy.logging.set_logger_level(self.get_logger().name, log_level)
+        severity = level_map.get(self.log_level_str, rclpy.logging.LoggingSeverity.INFO)
+        rclpy.logging.set_logger_level(self.get_logger().name, severity)
 
-        # Create simulation manager
-        self.get_logger().info(f"Loading simulation manager from {self.config_path}")
+        cfg = self.get_parameter("config_path").value
+        self.get_logger().info(f"Loading sim config from {cfg}")
+
+        # create SimulationManager & register ROS polling
         self.sim_manager = SimulationManager.from_file(
-            config=self.config_path,
-            logger=self.get_logger().get_child("sim_manager"),
+            config=cfg, logger=self.get_logger().get_child("sim_manager")
         )
-        self.get_logger().info("Registering sensor publishers via SimulationManager")
         self.sim_manager.register_ros_polling(self)
 
-        # Get controller configuration
-        self.controller_config = {}
+        # publisher to signal that BeamNG is up and sensors are all registered
+        self.sim_ready_pub = self.create_publisher(Bool, "simulation_ready", 1)
+
+        # give ROS a moment to connect subscribers (optional small delay)
+        self.get_logger().info("Simulation ready — publishing readiness signal")
+        ready_msg = Bool()
+        ready_msg.data = True
+        self.sim_ready_pub.publish(ready_msg)
+
+    def destroy_node(self):
         try:
-            self.controller_config = (
-                self.sim_manager.get_controller_config("lowlevel") or {}
-            )
-            self.get_logger().info(f"Found controller config: {self.controller_config}")
-        except Exception as e:
-            self.get_logger().error(f"Error getting controller config: {e}")
-
-        # Controller process
-        self.controller_process = None
-        self.is_running = False
-        self.shutting_down = False
-
-        # Start controller if enabled
-        if self.controller_enabled:
-            self.start_timer = self.create_timer(1.0, self.start_controller_once)
-
-    def start_controller_once(self):
-        """Start controller once then cancel only the start timer."""
-        self.start_controller()
-        # Cancel only the start timer
-        try:
-            self.start_timer.cancel()
+            self.sim_manager.shutdown()
         except Exception:
             pass
-
-    def start_controller(self):
-        """Start the high-level controller as a separate ROS2 node."""
-        if self.is_running:
-            self.get_logger().warning("Controller already running")
-            return True
-
-        try:
-            # Build command with parameters from controller config
-            cmd = ["ros2", "run", "bng_controller", "high_level_controller"]
-            args = []
-
-            # Add parameters from controller config
-            if "listen_ip" in self.controller_config:
-                args.extend(
-                    [
-                        "-p",
-                        f'listen_ip:={self.controller_config["listen_ip"]}',
-                    ]
-                )
-            if "send_port" in self.controller_config:
-                args.extend(
-                    [
-                        "-p",
-                        f'listen_port:={self.controller_config["send_port"]}',
-                    ]
-                )
-            if "send_ip" in self.controller_config:
-                args.extend(["-p", f"send_ip:=172.26.32.1"])  # The Windows host IP
-            if "listen_port" in self.controller_config:
-                args.extend(
-                    [
-                        "-p",
-                        f'send_port:={self.controller_config["listen_port"]}',
-                    ]
-                )
-
-            # Add control rate parameter
-            if "control_rate" in self.controller_config:
-                args.extend(
-                    [
-                        "-p",
-                        f'control_rate:={self.controller_config["control_rate"]}',
-                    ]
-                )
-
-            # Add log level parameter
-            args.extend(["-p", f"log_level:={self.log_level_str}"])
-
-            # Start process
-            if args:
-                cmd += ["--ros-args"] + args
-
-            self.get_logger().info(f"Starting controller with command: {' '.join(cmd)}")
-            self.controller_process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-
-            # Start stdout/stderr monitoring in background
-            self.stdout_thread = threading.Thread(
-                target=self._monitor_output,
-                args=(self.controller_process.stdout, "STDOUT"),
-                daemon=True,
-            )
-            self.stderr_thread = threading.Thread(
-                target=self._monitor_output,
-                args=(self.controller_process.stderr, "STDERR"),
-                daemon=True,
-            )
-            self.stdout_thread.start()
-            self.stderr_thread.start()
-
-            self.is_running = True
-            self.get_logger().info("High-level controller node started")
-            return True
-        except Exception as e:
-            self.get_logger().error(f"Error starting controller: {e}")
-            return False
-
-    def _monitor_output(self, pipe, name):
-        """Monitor process output and log it."""
-        for line in iter(pipe.readline, ""):
-            if line:
-                line.strip()
-                print(line, flush=True, end="")
-
-    def stop_controller(self):
-        """Stop the high-level controller."""
-        if self.shutting_down:
-            self.get_logger().debug("Already shutting down, skipping duplicate stop")
-            return
-
-        self.shutting_down = True
-
-        if not self.is_running:
-            self.get_logger().debug("Controller not running")
-            return
-
-        self.get_logger().info("Stopping controller...")
-
-        if self.controller_process:
-            try:
-                self.controller_process.send_signal(signal.SIGINT)
-
-                self.controller_process = None
-            except Exception as e:
-                self.get_logger().error(f"Error stopping controller: {e}")
-
-        self.is_running = False
-        self.get_logger().info("Controller stopped")
+        super().destroy_node()
 
 
 def main(args=None):
-    """
-    Main function with proper ROS2 shutdown handling
-    """
     rclpy.init(args=args)
-    node = None
-
+    node = ControllerInterface()
     try:
-        node = ControllerInterface()
         rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        print(f"Exception in main: {e}")
     finally:
-        if node is not None:
-            node.stop_controller()
-            try:
-                node.destroy_node()
-            except Exception:
-                pass
-        try:
-            if rclpy.ok():
-                rclpy.shutdown()
-        except Exception:
-            pass
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":

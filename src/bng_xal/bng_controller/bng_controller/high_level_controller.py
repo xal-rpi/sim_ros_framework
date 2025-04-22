@@ -1,451 +1,252 @@
 #!/usr/bin/env python3
-
 import socket
 import json
 import threading
 import time
-from typing import Dict, Any
 
 import rclpy
 from rclpy.node import Node
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-from std_msgs.msg import Float32, Bool
+from std_msgs.msg import Bool, Float32
 from geometry_msgs.msg import Twist
 
-# Import C extension for expensive computations
+# fallback if C extension missing
 try:
     from bng_controller.core import controller_core
 except ImportError:
-    rclpy.logging.get_logger("controller").error(
-        "C extension not found, using Python implementation (empty)"
+    rclpy.logging.get_logger("high_level_controller").error(
+        "C extension not found, using Python fallback"
     )
 
-    # Improved fallback if C extension not built
     class controller_core:
         @staticmethod
-        def compute_control_targets(sensor_data):
-            # Python fallback implementation with basic vehicle dynamics
-
-            # Default values
-            engine_torque = 0.0
-            road_wheel_angle = 0.0
-            brake_torque = 0.0
-
-            return (engine_torque, road_wheel_angle, brake_torque)
+        def compute_control_targets(_):
+            return (0.0, 0.0, 0.0)
 
 
 class HighLevelController(Node):
     def __init__(self):
-        """Initialize the high-level controller node."""
         super().__init__("high_level_controller")
 
-        # Declare parameters
-        self.declare_parameter("log_level", "INFO")
+        # declare all params, including our sim_start_delay
         self.declare_parameter("listen_ip", "0.0.0.0")
         self.declare_parameter("listen_port", 64258)
         self.declare_parameter("send_ip", "172.26.32.1")
         self.declare_parameter("send_port", 64257)
         self.declare_parameter("control_rate", 0.01)
-
-        # Get parameters
-        self.listen_ip = self.get_parameter("listen_ip").value
-        self.listen_port = self.get_parameter("listen_port").value
-        self.send_ip = self.get_parameter("send_ip").value
-        self.send_port = self.get_parameter("send_port").value
-        self.control_rate = self.get_parameter("control_rate").value
-
-        # Setup logger
-        log_level_str = self.get_parameter("log_level").value.upper()
-        log_level_map = {
+        self.declare_parameter("sim_start_delay", 1.0)
+        self.declare_parameter("log_level", "INFO")
+        self.log_level_str = self.get_parameter("log_level").value.upper()
+        level_map = {
             "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
             "INFO": rclpy.logging.LoggingSeverity.INFO,
             "WARN": rclpy.logging.LoggingSeverity.WARN,
             "ERROR": rclpy.logging.LoggingSeverity.ERROR,
             "FATAL": rclpy.logging.LoggingSeverity.FATAL,
         }
-        self.log_level = log_level_map.get(
-            log_level_str, rclpy.logging.LoggingSeverity.INFO
-        )
-        rclpy.logging.set_logger_level(self.get_logger().name, self.log_level)
 
-        # Create callback groups
-        self.timer_callback_group = MutuallyExclusiveCallbackGroup()
-        self.subscription_callback_group = ReentrantCallbackGroup()
+        severity = level_map.get(self.log_level_str, rclpy.logging.LoggingSeverity.INFO)
+        rclpy.logging.set_logger_level(self.get_logger().name, severity)
 
-        # State variables
+        # pull them out
+        self.listen_ip = self.get_parameter("listen_ip").value
+        self.listen_port = self.get_parameter("listen_port").value
+        self.send_ip = self.get_parameter("send_ip").value
+        self.send_port = self.get_parameter("send_port").value
+        self.control_rate = self.get_parameter("control_rate").value
+        self.sim_start_delay = self.get_parameter("sim_start_delay").value
+
+        # State
         self.latest_sensor_data = {}
         self.running = False
         self.exit_event = threading.Event()
         self.message_counter = 0
-        self.last_receive_time = 0
-
-        # Performance monitoring
         self.latency_values = []
-        self.packet_loss_count = 0
-        self.last_command_time = 0
+        self.last_command_time = 0.0
         self.command_counter = 0
 
-        # Control state
-        self.last_command = {
-            "engine_torque": 0.0,
-            "road_wheel_angle": 0.0,
-            "brake_torque": 0.0,
-            "timestamp": 0,
-        }
+        # Publishers & subscribers
+        self.status_pub = self.create_publisher(Bool, "controller_status", 1)
+        self.latency_pub = self.create_publisher(Float32, "controller_latency", 1)
+        self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 1)
+        self.create_subscription(Twist, "cmd_vel", self._cmd_vel_callback, 1)
 
-        # Create publishers
-        self.status_pub = self.create_publisher(Bool, "controller_status", 10)
-        self.latency_pub = self.create_publisher(Float32, "controller_latency", 10)
+        # dummy callbacks / timer (we will only start them after sim_ready)
+        self._init_udp()
+        self.timer = self.create_timer(self.control_rate, self._control_callback)
 
-        # Create subscribers
-        self.cmd_vel_sub = self.create_subscription(
-            Twist,
-            "cmd_vel",
-            self._cmd_vel_callback,
-            10,
-            callback_group=self.subscription_callback_group,
-        )
+        self.get_logger().info("HLC initialized; waiting for simulation_ready")
 
-        # Initialize sockets
-        self._initialize_sockets()
+    def _init_udp(self):
+        """set up UDP sockets but do not start receive loop yet."""
+        self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.listen_socket.bind((self.listen_ip, self.listen_port))
+        # small timeout so recvfrom can check exit_event
+        self.listen_socket.settimeout(0.2)
 
-        # Create control timer
-        self.timer = self.create_timer(
-            self.control_rate,
-            self._control_callback,
-            callback_group=self.timer_callback_group,
-        )
+        self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        # Initially pause the timer
-        self.timer.cancel()
-
-        # Thread for receiving data
-        self.receive_thread = None
-
-        self.consecutive_timeout_detected = False
-
-        self.get_logger().info("High-level controller node initialized")
-
-    def _initialize_sockets(self):
-        """Initialize UDP sockets for communication."""
-        try:
-            # Socket for receiving vehicle state data
-            self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.listen_socket.bind((self.listen_ip, self.listen_port))
-            self.listen_socket.settimeout(0.2)  # 200ms timeout
-
-            # Socket for sending control commands
-            self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-            self.get_logger().info(
-                f"Sockets initialized - Listening on {self.listen_ip}:{self.listen_port}, "
-                f"Sending to {self.send_ip}:{self.send_port}"
-            )
-
-        except Exception as e:
-            self.get_logger().error(f"Failed to initialize sockets: {e}")
-            raise
-
-    def start(self):
-        """Start the controller threads and timer."""
-        if self.running:
-            self.get_logger().warn("Controller already running")
-            return True
-
-        try:
-            self.running = True
-
-            # Publish status
-            status_msg = Bool()
-            status_msg.data = True
-            self.status_pub.publish(status_msg)
-
-            # Start receive thread
-            if not self.receive_thread or not self.receive_thread.is_alive():
-                self.receive_thread = threading.Thread(target=self._receive_sensor_data)
-                self.receive_thread.daemon = True
-                self.receive_thread.start()
-
-            # Start control timer
-            self.timer.reset()
-            self.get_logger().info("Control timer started")
-
-            self.get_logger().info("Controller started")
-
-            return True
-        except Exception as e:
-            self.get_logger().error(f"Failed to start controller: {e}")
-            self.running = False
-            return False
-
-    def stop(self):
-        """Stop the controller threads and timer."""
-        # Prevent multiple calls
-        if not self.running:
+    def _on_sim_ready(self, msg: Bool):
+        """callback when /simulation_ready arrives."""
+        if not msg.data or self.running:
             return
 
-        self.get_logger().info("Stopping controller...")
+        self.get_logger().info(
+            f"Received simulation_ready; delaying start by " f"{self.sim_start_delay}s"
+        )
+        # schedule `start()` on a background timer/thread
+        threading.Timer(self.sim_start_delay, self._delayed_start).start()
 
-        # Set flags to stop threads
-        self.running = False
-        self.exit_event.set()
+    def _delayed_start(self):
+        """Actually start receive-thread + timer."""
+        if self.running:
+            return
 
-        if self.receive_thread:
-            self.receive_thread.join(1)
+        # publish status = True
+        st = Bool()
+        st.data = True
+        self.status_pub.publish(st)
 
-        # Cancel the timer
-        if hasattr(self, "timer") and self.timer:
-            self.timer.cancel()
+        # receive thread
+        self.receive_thread = threading.Thread(
+            target=self._receive_sensor_data, daemon=True
+        )
+        self.running = True
+        self.receive_thread.start()
 
-        # Send zero controls for safety
-        try:
-            self._send_zero_controls()
-        except Exception as e:
-            self.get_logger().error(f"Error sending zero controls: {e}")
-
-        self.get_logger().info("Controller stopped")
-
-    def _send_zero_controls(self):
-        """Send zero controls to safely stop the vehicle."""
-        try:
-            zero_control = {
-                "engine_torque": 0.0,
-                "road_wheel_angle": 0.0,
-                "brake_torque": 1000.0,  # Apply brakes
-                "timestamp": int(time.time()),
-            }
-
-            # Send multiple times to ensure delivery
-            for _ in range(3):
-                msg_bytes = json.dumps(zero_control).encode("utf-8")
-                self.send_socket.sendto(msg_bytes, (self.send_ip, self.send_port))
-                time.sleep(0.05)
-
-            self.get_logger().info("Sent zero controls to stop vehicle")
-        except Exception as e:
-            self.get_logger().error(f"Error sending zero controls: {e}")
+        # now start the control timer
+        self.timer.reset()
+        self.get_logger().info("HLC started")
 
     def _receive_sensor_data(self):
-        """Thread function to receive sensor data from BeamNG."""
-        self.get_logger().info("Receive thread started")
-
-        last_message_time = time.time()
-
+        self.get_logger().info("Receive thread running")
         consecutive_timeouts = 0
-        max_consecutive_timeouts = 5
-
         while self.running and not self.exit_event.is_set():
             try:
-                data, addr = self.listen_socket.recvfrom(8192)
+                data, _ = self.listen_socket.recvfrom(8192)
                 receive_time = time.time()
-                self.last_receive_time = receive_time
-
                 consecutive_timeouts = 0
 
-                # Check for missing packets (detection of packet loss)
-                if receive_time - last_message_time > 2 * self.control_rate:
-                    estimated_missed = max(
-                        0,
-                        int((receive_time - last_message_time) / self.control_rate) - 1,
-                    )
-                    if estimated_missed > 0:
-                        self.packet_loss_count += estimated_missed
-                        self.get_logger().warn(
-                            f"Detected ~{estimated_missed} missed packets"
-                        )
+                sensor = json.loads(data.decode())
+                self.latest_sensor_data = sensor
+                self.message_counter += 1
 
-                last_message_time = receive_time
-
-                try:
-                    # Parse the received data
-                    sensor_data = json.loads(data.decode("utf-8"))
-
-                    # Calculate command-to-response latency if we have sent commands
-                    if self.last_command_time > 0 and "timestamp" in sensor_data:
-                        # Only calculate latency when the response timestamp is newer than our last command
-                        server_timestamp = sensor_data.get("timestamp", 0)
-                        if (
-                            isinstance(server_timestamp, (int, float))
-                            and server_timestamp > self.last_command["timestamp"]
-                        ):
-                            latency = receive_time - self.last_command_time
-                            self.latency_values.append(latency)
-
-                            # Keep only the last 100 latency values
-                            if len(self.latency_values) > 100:
-                                self.latency_values.pop(0)
-
-                            # Publish average latency every 10 messages
-                            if self.message_counter % 10 == 0 and self.latency_values:
-                                avg_latency = sum(self.latency_values) / len(
-                                    self.latency_values
-                                )
-                                latency_msg = Float32()
-                                latency_msg.data = avg_latency
-                                self.latency_pub.publish(latency_msg)
-
-                    # Store the received data
-                    self.latest_sensor_data = sensor_data
-                    self.get_logger().debug(
-                        f"torque: {sensor_data['engine']['torque']}",
-                        throttle_duration_sec=2,
-                    )
-                    self.message_counter += 1
-
-                    # Log every 50th message to reduce log spam
-                    if self.message_counter % 100 == 0:
-                        avg_latency = sum(self.latency_values) / max(
-                            1, len(self.latency_values)
-                        )
-                        self.get_logger().info(
-                            f"Received msg #{self.message_counter}, "
-                            f"Avg latency: {avg_latency*1000:.2f}ms, "
-                            f"Packet loss: {self.packet_loss_count}"
-                        )
-
-                except json.JSONDecodeError as je:
-                    self.get_logger().error(f"Failed to parse JSON: {je}")
+                # latency calc...
+                if self.last_command_time:
+                    latency = receive_time - self.last_command_time
+                    self.latency_values.append(latency)
+                    if len(self.latency_values) > 100:
+                        self.latency_values.pop(0)
+                    if self.message_counter % 10 == 0:
+                        avg = sum(self.latency_values) / len(self.latency_values)
+                        lm = Float32()
+                        lm.data = float(avg)
+                        self.latency_pub.publish(lm)
 
             except socket.timeout:
-                if not self.running or self.exit_event.is_set():
-                    break
-
-                self.get_logger().debug("Socket timeout")
                 consecutive_timeouts += 1
-
-                if consecutive_timeouts >= max_consecutive_timeouts:
-                    self.get_logger().error(
-                        f"Detected {consecutive_timeouts} consecutive timeouts. Setting shutdown flag."
+                # *** no longer killing the node on timeouts! ***
+                if consecutive_timeouts % 50 == 0:
+                    self.get_logger().warn(
+                        f"Still no data after " f"{consecutive_timeouts} timeouts"
                     )
-                    self.consecutive_timeout_detected = True
-                    break
+            except Exception as e:
+                self.get_logger().error(f"Receive error: {e}")
+                break
+
+        self.get_logger().info("Receive thread exiting")
         try:
             self.listen_socket.close()
-        except Exception:
+        except:
             pass
-        self.get_logger().info("Receive thread terminating")
 
     def _cmd_vel_callback(self, msg: Twist):
-        """Process cmd_vel messages."""
-        # This would be used in a complete implementation to set target speeds
-        # and steering angles based on ROS commands from a path planner
-        # For now, we'll just log that we received a command
         self.get_logger().debug(
-            f"Received cmd_vel: linear={msg.linear.x}, angular={msg.angular.z}"
+            f"Got cmd_vel: lin={msg.linear.x}, " f"ang={msg.angular.z}"
         )
 
-        # NOTE: In a complete implementation, you would convert these to target
-        # speed and steering angle, which would then be used in your control loop
-
     def _control_callback(self):
-        """Control callback function executed at the control rate by ROS timer."""
-        callback_time = time.time()
-
-        # Check for shutdown request
-        if self.consecutive_timeout_detected:
-            self.get_logger().info(
-                "Timeout detected flag found, initiating shutdown..."
-            )
-            # Reset the flag to prevent multiple shutdowns
-            self.consecutive_timeout_detected = False
-            raise SystemExit("Shutdown due to consecutive timeouts")
-
-        # Skip if controller is stopped
+        """runs at self.control_rate once we've started."""
         if not self.running:
-            self.get_logger().warn("Control callback running but controller is stopped")
             return
 
-        try:
-            # Compute control targets
-            if not self.latest_sensor_data and self.message_counter == 0:
-                self.get_logger().warn(
-                    "No sensor data received yet, using default controls"
-                )
-                engine_torque = 50.0
-                road_wheel_angle = 0.0
-                brake_torque = 0.0
-            else:
-                # Use core implementation (C extension or Python fallback)
-                engine_torque, road_wheel_angle, brake_torque = (
-                    controller_core.compute_control_targets(self.latest_sensor_data)
-                )
-
-            # Prepare control message
-            control_msg = {
-                "engine_torque": engine_torque,
-                "road_wheel_angle": road_wheel_angle,
-                "brake_torque": brake_torque,
-                "timestamp": int(callback_time * 1000),  # millisecond timestamp
+        now = time.time()
+        if not self.latest_sensor_data:
+            # default startup behavior
+            tgt = {
+                "engine_torque": 0.0,
+                "road_wheel_angle": 0.0,
+                "brake_torque": 0.0,
+                "timestamp": int(now * 1000),
+            }
+        else:
+            et, wa, bt = controller_core.compute_control_targets(
+                self.latest_sensor_data
+            )
+            tgt = {
+                "engine_torque": et,
+                "road_wheel_angle": wa,
+                "brake_torque": bt,
+                "timestamp": int(now * 1000),
             }
 
-            # Send control targets
-            self._send_control_targets(control_msg)
-
-            # Store for latency calculation
-            self.last_command = control_msg
-            self.last_command_time = callback_time
-            self.command_counter += 1
-
-        except Exception as e:
-            self.get_logger().error(f"Error in control loop: {e}")
-
-    def _send_control_targets(self, control_msg: Dict[str, Any]):
-        """Send control targets to BeamNG low-level controller."""
+        # send it
         try:
-            # Convert to JSON and send
-            msg_bytes = json.dumps(control_msg).encode("utf-8")
-            self.send_socket.sendto(msg_bytes, (self.send_ip, self.send_port))
-
-            # Only log occasionally to reduce spam
-            if self.command_counter % 20 == 0:
-                self.get_logger().debug(
-                    f"Sent control #{self.command_counter}: "
-                    f"torque={control_msg['engine_torque']:.1f}, "
-                    f"steer={control_msg['road_wheel_angle']:.2f}, "
-                    f"brake={control_msg['brake_torque']:.1f}"
-                )
+            pkt = json.dumps(tgt).encode("utf-8")
+            self.send_socket.sendto(pkt, (self.send_ip, self.send_port))
+            self.get_logger().debug(
+                f"Send target {tgt}",
+                throttle_duration_sec=2,
+            )
+            self.last_command_time = now
+            self.command_counter += 1
         except Exception as e:
-            self.get_logger().error(f"Error sending control targets: {e}")
+            self.get_logger().error(f"Send error: {e}")
+
+    def stop(self):
+        """stop receive thread + timer + send zeros."""
+        if not self.running:
+            return
+        self.get_logger().info("Stopping HLC...")
+        self.running = False
+        self.exit_event.set()
+        if self.receive_thread:
+            self.receive_thread.join(0.2)
+
+        # send a few zero-commands for safety
+        zero = {
+            "engine_torque": 0.0,
+            "road_wheel_angle": 0.0,
+            "brake_torque": 1000.0,
+            "timestamp": int(time.time() * 1000),
+        }
+        for _ in range(3):
+            try:
+                self.send_socket.sendto(
+                    json.dumps(zero).encode(), (self.send_ip, self.send_port)
+                )
+                time.sleep(0.05)
+            except:
+                pass
+        self.get_logger().info("Zero controls sent")
+
+    def destroy(self):
+        self.stop()
+        try:
+            super().destroy_node()
+        except:
+            pass
 
 
 def main(args=None):
-    """Main function for the high-level controller node."""
     rclpy.init(args=args)
-
-    controller = None
-
+    node = HighLevelController()
     try:
-        # Create and start controller
-        controller = HighLevelController()
-        controller.start()
-
-        # Use single-threaded executor for simplicity
-        rclpy.spin(controller)
-
+        rclpy.spin(node)
     except KeyboardInterrupt:
-        print("KeyboardInterrupt received")
-    except SystemExit as e:
-        print(f"Controlled shutdown: {e}")
-    except Exception as e:
-        print(f"Exception in main: {e}")
+        node.get_logger().info("KeyboardInterrupt, shutting down")
     finally:
-        # Clean shutdown
-        if controller:
-            try:
-                controller.stop()
-            except Exception as e:
-                print(f"Error stopping controller: {e}")
-
-            try:
-                controller.destroy_node()
-            except Exception as e:
-                print(f"Error destroying node: {e}")
-
-        # Shutdown ROS
-        try:
-            rclpy.shutdown()
-        except Exception as e:
-            print(f"Error shutting down rclpy: {e}")
+        node.destroy()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":
