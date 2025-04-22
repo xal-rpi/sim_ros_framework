@@ -2,7 +2,7 @@
 Low-level controller implementation.
 """
 
-from logging import getLogger
+from rclpy import logging
 
 from beamngpy.connection import CommBase
 from beamngpy.logging import LOGGER_ID
@@ -30,7 +30,7 @@ class LowLevelControllerWrapper(CommBase):
     ):
         super().__init__(beamng, vehicle)
 
-        self.logger = getLogger(f"{LOGGER_ID}.LowLevelController")
+        self.logger = logging.get_logger(f"{LOGGER_ID}.LowLevelController")
         self.name = name
         self.vehicle = vehicle
 
@@ -110,7 +110,7 @@ class LowLevelController(ControllerBase):
             config.get("listen_port", 64257),
             config.get("send_ip", "127.0.1.1"),
             config.get("send_port", 64258),
-            gt_state_name,  # Pass the parameter
+            gt_state_name,
         )
 
     def start(self):

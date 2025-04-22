@@ -109,9 +109,7 @@ class VehicleManager:
         """
         Setup all the sensors for the vehicle.
         """
-        print("sensor", flush=True)
         for name, config in self._sensors_config.items():
-            print("sensor", name, flush=True)
             # Log the sensor setup
             self._logger.debug(
                 f"Setting up sensor --{name}-- for vehicle --{self._name}--"
