@@ -4,12 +4,10 @@ import socket
 import json
 import threading
 import time
-import math
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any
 
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from std_msgs.msg import Float32, Bool
 from geometry_msgs.msg import Twist
@@ -42,13 +40,12 @@ class HighLevelController(Node):
         super().__init__("high_level_controller")
 
         # Declare parameters
+        self.declare_parameter("log_level", "INFO")
         self.declare_parameter("listen_ip", "0.0.0.0")
         self.declare_parameter("listen_port", 64258)
         self.declare_parameter("send_ip", "172.26.32.1")
         self.declare_parameter("send_port", 64257)
-        self.declare_parameter(
-            "control_rate", 0.01
-        )
+        self.declare_parameter("control_rate", 0.01)
 
         # Get parameters
         self.listen_ip = self.get_parameter("listen_ip").value
@@ -56,6 +53,20 @@ class HighLevelController(Node):
         self.send_ip = self.get_parameter("send_ip").value
         self.send_port = self.get_parameter("send_port").value
         self.control_rate = self.get_parameter("control_rate").value
+
+        # Setup logger
+        log_level_str = self.get_parameter("log_level").value.upper()
+        log_level_map = {
+            "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
+            "INFO": rclpy.logging.LoggingSeverity.INFO,
+            "WARN": rclpy.logging.LoggingSeverity.WARN,
+            "ERROR": rclpy.logging.LoggingSeverity.ERROR,
+            "FATAL": rclpy.logging.LoggingSeverity.FATAL,
+        }
+        self.log_level = log_level_map.get(
+            log_level_str, rclpy.logging.LoggingSeverity.INFO
+        )
+        rclpy.logging.set_logger_level(self.get_logger().name, self.log_level)
 
         # Create callback groups
         self.timer_callback_group = MutuallyExclusiveCallbackGroup()
@@ -110,6 +121,8 @@ class HighLevelController(Node):
 
         # Thread for receiving data
         self.receive_thread = None
+
+        self.consecutive_timeout_detected = False
 
         self.get_logger().info("High-level controller node initialized")
 
@@ -167,30 +180,28 @@ class HighLevelController(Node):
 
     def stop(self):
         """Stop the controller threads and timer."""
+        # Prevent multiple calls
         if not self.running:
-            self.get_logger().debug("Controller already stopped")
             return
 
         self.get_logger().info("Stopping controller...")
 
-        # Publish status
-        status_msg = Bool()
-        status_msg.data = False
-        self.status_pub.publish(status_msg)
-
-        # Signal threads to exit
+        # Set flags to stop threads
         self.running = False
         self.exit_event.set()
 
-        # Send zero control commands before stopping
-        self._send_zero_controls()
+        if self.receive_thread:
+            self.receive_thread.join(1)
 
         # Cancel the timer
-        self.timer.cancel()
+        if hasattr(self, "timer") and self.timer:
+            self.timer.cancel()
 
-        # Wait for threads to terminate
-        if self.receive_thread and self.receive_thread.is_alive():
-            self.receive_thread.join(timeout=1.0)
+        # Send zero controls for safety
+        try:
+            self._send_zero_controls()
+        except Exception as e:
+            self.get_logger().error(f"Error sending zero controls: {e}")
 
         self.get_logger().info("Controller stopped")
 
@@ -220,11 +231,16 @@ class HighLevelController(Node):
 
         last_message_time = time.time()
 
+        consecutive_timeouts = 0
+        max_consecutive_timeouts = 5
+
         while self.running and not self.exit_event.is_set():
             try:
                 data, addr = self.listen_socket.recvfrom(8192)
                 receive_time = time.time()
                 self.last_receive_time = receive_time
+
+                consecutive_timeouts = 0
 
                 # Check for missing packets (detection of packet loss)
                 if receive_time - last_message_time > 2 * self.control_rate:
@@ -270,6 +286,10 @@ class HighLevelController(Node):
 
                     # Store the received data
                     self.latest_sensor_data = sensor_data
+                    self.get_logger().debug(
+                        f"torque: {sensor_data['engine']['torque']}",
+                        throttle_duration_sec=2,
+                    )
                     self.message_counter += 1
 
                     # Log every 50th message to reduce log spam
@@ -287,13 +307,22 @@ class HighLevelController(Node):
                     self.get_logger().error(f"Failed to parse JSON: {je}")
 
             except socket.timeout:
-                # This is normal, continue
-                continue
-            except Exception as e:
-                if self.running and not self.exit_event.is_set():
-                    self.get_logger().error(f"Error receiving sensor data: {e}")
-                break
+                if not self.running or self.exit_event.is_set():
+                    break
 
+                self.get_logger().debug("Socket timeout")
+                consecutive_timeouts += 1
+
+                if consecutive_timeouts >= max_consecutive_timeouts:
+                    self.get_logger().error(
+                        f"Detected {consecutive_timeouts} consecutive timeouts. Setting shutdown flag."
+                    )
+                    self.consecutive_timeout_detected = True
+                    break
+        try:
+            self.listen_socket.close()
+        except Exception:
+            pass
         self.get_logger().info("Receive thread terminating")
 
     def _cmd_vel_callback(self, msg: Twist):
@@ -311,6 +340,15 @@ class HighLevelController(Node):
     def _control_callback(self):
         """Control callback function executed at the control rate by ROS timer."""
         callback_time = time.time()
+
+        # Check for shutdown request
+        if self.consecutive_timeout_detected:
+            self.get_logger().info(
+                "Timeout detected flag found, initiating shutdown..."
+            )
+            # Reset the flag to prevent multiple shutdowns
+            self.consecutive_timeout_detected = False
+            raise SystemExit("Shutdown due to consecutive timeouts")
 
         # Skip if controller is stopped
         if not self.running:
@@ -375,46 +413,39 @@ def main(args=None):
     rclpy.init(args=args)
 
     controller = None
+
     try:
+        # Create and start controller
         controller = HighLevelController()
         controller.start()
 
-        executor = MultiThreadedExecutor()
-        executor.add_node(controller)
+        # Use single-threaded executor for simplicity
+        rclpy.spin(controller)
 
-        try:
-            controller.get_logger().info("Starting executor...")
-            executor.spin()
-        except Exception as e:
-            controller.get_logger().error(f"Error in executor: {e}")
-        finally:
-            try:
-                executor.shutdown()
-            except Exception:
-                pass
     except KeyboardInterrupt:
-        pass
+        print("KeyboardInterrupt received")
+    except SystemExit as e:
+        print(f"Controlled shutdown: {e}")
     except Exception as e:
-        if controller:
-            try:
-                controller.get_logger().error(f"Exception in main: {e}")
-            except Exception:
-                pass
+        print(f"Exception in main: {e}")
     finally:
+        # Clean shutdown
         if controller:
             try:
                 controller.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error stopping controller: {e}")
 
             try:
                 controller.destroy_node()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error destroying node: {e}")
+
+        # Shutdown ROS
         try:
             rclpy.shutdown()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error shutting down rclpy: {e}")
 
 
 if __name__ == "__main__":
