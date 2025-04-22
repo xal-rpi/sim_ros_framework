@@ -8,7 +8,6 @@ import rclpy
 from rclpy.node import Node
 import subprocess
 import threading
-import os
 import signal
 
 from bng_simulator.core.simulation_manager import SimulationManager
@@ -36,7 +35,7 @@ class ControllerInterface(Node):
         self.controller_enabled = self.get_parameter("controller_enabled").value
 
         # Setup logger
-        log_level_str = self.get_parameter("log_level").value.upper()
+        self.log_level_str = self.get_parameter("log_level").value.upper()
         log_level_map = {
             "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
             "INFO": rclpy.logging.LoggingSeverity.INFO,
@@ -44,7 +43,9 @@ class ControllerInterface(Node):
             "ERROR": rclpy.logging.LoggingSeverity.ERROR,
             "FATAL": rclpy.logging.LoggingSeverity.FATAL,
         }
-        log_level = log_level_map.get(log_level_str, rclpy.logging.LoggingSeverity.INFO)
+        log_level = log_level_map.get(
+            self.log_level_str, rclpy.logging.LoggingSeverity.INFO
+        )
         rclpy.logging.set_logger_level(self.get_logger().name, log_level)
 
         # Create simulation manager
@@ -53,8 +54,6 @@ class ControllerInterface(Node):
             config=self.config_path,
             logger=self.get_logger().get_child("sim_manager"),
         )
-        self.setup_sensor_publishers()
-        self.create_timer(0.1, self.poll_and_publish_sensors)  # Poll sensors at 10Hz
 
         # Get controller configuration
         self.controller_config = {}
@@ -75,11 +74,20 @@ class ControllerInterface(Node):
         if self.controller_enabled:
             self.create_timer(1.0, self.start_controller_once)
 
+        # Store sensor publishers
+        self.sensor_publishers = {}
+
+        # Create the publishers for sensor data
+        self.create_sensor_publishers()
+
     def start_controller_once(self):
-        """Start controller once then cancel the timer."""
+        """Start controller once then cancel only the start timer."""
         self.start_controller()
-        for timer in self.timers:
-            timer.cancel()
+        # Cancel only the start timer
+        try:
+            self.start_timer.cancel()
+        except Exception:
+            pass
 
     def start_controller(self):
         """Start the high-level controller as a separate ROS2 node."""
@@ -127,8 +135,7 @@ class ControllerInterface(Node):
                 )
 
             # Add log level parameter
-            log_level = self.get_parameter("log_level").value
-            args.extend(["-p", f"log_level:={log_level}"])
+            args.extend(["-p", f"log_level:={self.log_level_str}"])
 
             # Start process
             if args:
@@ -183,17 +190,7 @@ class ControllerInterface(Node):
 
         if self.controller_process:
             try:
-                # Send SIGINT (equivalent to Ctrl+C) for clean shutdown
-                os.kill(self.controller_process.pid, signal.SIGINT)
-
-                # Wait for process to terminate
-                try:
-                    self.controller_process.wait(timeout=5.0)
-                except subprocess.TimeoutExpired:
-                    self.get_logger().warning(
-                        "Controller process didn't exit, killing..."
-                    )
-                    self.controller_process.kill()
+                self.controller_process.send_signal(signal.SIGINT)
 
                 self.controller_process = None
             except Exception as e:
@@ -202,36 +199,58 @@ class ControllerInterface(Node):
         self.is_running = False
         self.get_logger().info("Controller stopped")
 
-    def setup_sensor_publishers(self):
-        """Create publishers for all sensors in all vehicles"""
-        self.sensor_publishers = {}
-        for vehicle_name in self.sim_manager.get_available_vehicles():
-            vehicle_manager = self.sim_manager.vehicles[vehicle_name]
-            for sensor_name, sensor in vehicle_manager._sensors.items():
-                topic_name = f"/{vehicle_name}/{sensor_name}"
-                msg_type = vehicle_manager.extract_sensor_ros_msg_type(sensor_name)
-                if msg_type:
-                    self.get_logger().info(f"Creating publisher for {topic_name}")
-                    self.sensor_publishers[f"{vehicle_name}/{sensor_name}"] = (
-                        self.create_publisher(msg_type, topic_name, 10)
+    def create_sensor_publishers(self):
+        """Create publishers for all sensors from ros_poll_config."""
+        self.get_logger().debug("Creating sensor publishers...")
+        pub_config = self.sim_manager.config.get("ros_poll_config", {})
+
+        for veh_name, sensor_cfg in pub_config.items():
+            veh_pub = {}
+            for sensor_name, sensor_info in sensor_cfg.items():
+                sensor_device = self.sim_manager.get_sensor(sensor_name, veh_name)
+                if sensor_device is None:
+                    self.get_logger().error(
+                        f"Sensor {sensor_name} not found for vehicle {veh_name}"
                     )
+                    continue
 
-    def poll_and_publish_sensors(self):
-        """Poll all sensors and publish their data"""
-        for vehicle_name in self.sim_manager.get_available_vehicles():
-            vehicle_manager = self.sim_manager.vehicles[vehicle_name]
-            for sensor_name in vehicle_manager._sensors:
-                # Poll the sensor
-                self.sim_manager.poll_sensor(sensor_name, vehicle_name)
+                topic = sensor_info.get("topic", f"/{veh_name}/{sensor_name}")
+                msg_type = sensor_device.ros_msg_type()
+                poll_time = sensor_info.get("poll_time", 0.2)
+                publish = sensor_info.get("publish", 0)
 
-                # Get the ROS message
-                msg = self.sim_manager.extract_sensor_ros_msg(sensor_name, vehicle_name)
+                publisher = None
+                if publish > 0:
+                    publisher = self.create_publisher(msg_type, topic, 10)
 
-                # Publish the message if it exists
-                if msg:
-                    pub_key = f"{vehicle_name}/{sensor_name}"
-                    if pub_key in self.sensor_publishers:
-                        self.sensor_publishers[pub_key].publish(msg)
+                timer = self.create_timer(
+                    poll_time,
+                    lambda v=veh_name, s=sensor_name, sd=sensor_device, p=publisher, pt=publish: self.poll_and_publish_sensor_data(
+                        v, s, sd, p, pt
+                    ),
+                )
+                veh_pub[sensor_name] = {"pub": publisher, "timer": timer}
+
+            if veh_pub:
+                self.sensor_publishers[veh_name] = veh_pub
+
+    def poll_and_publish_sensor_data(
+        self, vehicle_name, sensor_name, sensor, publisher, publish_type
+    ):
+        """Poll and publish sensor data."""
+        sensor.poll()
+
+        if publisher is not None:
+            if publish_type > 1:
+                all_data = sensor.get_all_data()
+                for data in all_data:
+                    msg = sensor.to_ros_msg(data)
+                    if msg is not None:
+                        publisher.publish(msg)
+            else:
+                msg = sensor.to_ros_msg()
+                if msg is not None:
+                    publisher.publish(msg)
 
 
 def main(args=None):
