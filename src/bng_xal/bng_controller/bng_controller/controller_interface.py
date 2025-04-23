@@ -1,3 +1,4 @@
+from sys import exit, stderr
 import rclpy
 from std_msgs.msg import Bool
 from rclpy.node import Node
@@ -20,8 +21,8 @@ class ControllerInterface(Node):
         self.log_level_str = self.get_parameter("log_level").value.upper()
         level_map = {
             "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
-            "INFO":  rclpy.logging.LoggingSeverity.INFO,
-            "WARN":  rclpy.logging.LoggingSeverity.WARN,
+            "INFO": rclpy.logging.LoggingSeverity.INFO,
+            "WARN": rclpy.logging.LoggingSeverity.WARN,
             "ERROR": rclpy.logging.LoggingSeverity.ERROR,
             "FATAL": rclpy.logging.LoggingSeverity.FATAL,
         }
@@ -56,12 +57,28 @@ class ControllerInterface(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ControllerInterface()
+    node = None
+    exit_code = 0
+
     try:
+        node = ControllerInterface()
         rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt caught, cleaning up interface...")
+
+    except Exception as e:
+        print("Uncaught exception:", e, file=stderr)
+        exit_code = 1
+
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        if node is not None:
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+
+    exit(exit_code)
 
 
 if __name__ == "__main__":
