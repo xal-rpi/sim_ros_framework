@@ -73,6 +73,7 @@ class HighLevelController(Node):
 
         # UDP sockets
         self._init_udp()
+        self.max_consec_timeouts = 30
 
         # control timer
         self.timer = self.create_timer(self.control_rate, self._control_callback)
@@ -138,10 +139,12 @@ class HighLevelController(Node):
 
             except socket.timeout:
                 consecutive_timeouts += 1
-                if consecutive_timeouts % 50 == 0:
-                    self.get_logger().warn(
-                        f"No data after {consecutive_timeouts}" " consecutive timeouts"
+                if consecutive_timeouts % self.max_consec_timeouts == 0:
+                    self.get_logger().error(
+                        f"No data after {consecutive_timeouts} consecutive timeouts, shutting down controller..."
                     )
+                    self.exit_event.set()
+                    break
             except Exception as e:
                 self.get_logger().error(f"Receive error: {e}")
                 break
@@ -156,6 +159,9 @@ class HighLevelController(Node):
         self.get_logger().debug(f"Got cmd_vel: lin={msg.linear.x}, ang={msg.angular.z}")
 
     def _control_callback(self):
+        if self.exit_event.is_set():
+            self.stop()
+            return
         if not self.running:
             return
         now = time.time()
@@ -201,13 +207,16 @@ class HighLevelController(Node):
             "brake_torque": 1000.0,
             "timestamp": int(time.time() * 1000),
         }
-        for _ in range(3):
+
+        # TODO : Does not work
+        for _ in range(1):
             try:
                 self.send_socket.sendto(
-                    json.dumps(zero).encode(), (self.send_ip, self.send_port)
+                    json.dumps(zero).encode("utf-8"), (self.send_ip, self.send_port)
                 )
                 time.sleep(0.05)
-            except Exception:
+            except Exception as e:
+                self.get_logger().debug(f"Could not send zero target: {e}")
                 pass
         self.get_logger().info("Zero controls sent")
 
