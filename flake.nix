@@ -29,10 +29,10 @@
         # Define beamngpy with its propagated dependencies using the proper attribute.
         beamngpy = pkgs.python3Packages.buildPythonPackage rec {
           pname = "beamngpy";
-          version = "1.30";
+          version = "1.31";
           src = pkgs.fetchPypi {
             inherit pname version;
-            sha256 = "sha256-2lsuxJ6zCx2jFEx3t7UbT6RORd7D82YjK7jIk0tfD0w=";
+            sha256 = "sha256-M6SVi7R5i4MGGhgU2jOIbhRrGpI2oQ8BUB0d1sO8O1c=";
           };
           propagatedBuildInputs = [
             pkgs.python3Packages.numpy
@@ -109,7 +109,6 @@
           ];
 
           ROS_DOMAIN_ID = "42";
-          # RMW_IMPLEMENTATION = "rmw-fastrtps_cpp";
 
           shellHook = ''
             echo "Entering ROS2 + BeamNG Nix shell..."

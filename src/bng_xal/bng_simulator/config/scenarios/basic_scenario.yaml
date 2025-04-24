@@ -2,10 +2,11 @@
 
 # Simulator configuration
 beamng:
-  host: 172.26.32.1
-  port: 64256
+  home: /home/come/Documents/BeamNG/BeamNG.tech.v0.34.2.0/
+  host: 127.0.0.1
+  port: 25252
   open_args:
-    launch: False
+    launch: True
     debug: False
   setup_funcs:
     beamng.settings.set_deterministic:
@@ -76,9 +77,9 @@ vehicles:
       lowlevel:
         type: LowLevelController
         control_rate: 0.1
-        listen_ip: 0.0.0.0
+        listen_ip: localhost
         listen_port: 64257
-        send_ip: 172.26.46.86
+        send_ip: localhost
         send_port: 64258
         gt_state_name: "gtstate"
         calibration:
