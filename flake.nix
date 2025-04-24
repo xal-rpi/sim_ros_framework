@@ -29,10 +29,10 @@
         # Define beamngpy with its propagated dependencies using the proper attribute.
         beamngpy = pkgs.python3Packages.buildPythonPackage rec {
           pname = "beamngpy";
-          version = "1.31";
+          version = "1.32";
           src = pkgs.fetchPypi {
             inherit pname version;
-            sha256 = "sha256-M6SVi7R5i4MGGhgU2jOIbhRrGpI2oQ8BUB0d1sO8O1c=";
+            sha256 = "sha256-A1uV2/F5fnGK3MoAtW+cXGUDMbhqDebVfHb9Q1gPj0s=";
           };
           propagatedBuildInputs = [
             pkgs.python3Packages.numpy
