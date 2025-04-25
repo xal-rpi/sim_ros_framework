@@ -20,7 +20,6 @@ from bng_simulator.utils.config_manager import ConfigManager
 # Try to get the directory from the ROS package
 from ament_index_python.packages import get_package_share_directory
 
-
 class SimulationManager:
     """
     Manages the entire lifecycle of a BeamNG simulation on a scenario
@@ -62,17 +61,9 @@ class SimulationManager:
     def from_file(cls, config: str, logger=None):
         """
         Create a SimulationManager instance from a configuration file.
-
-        Args:
-            config (str): Path to the YAML configuration file
-            logger: ROS logger instance (optional)
-
-        Returns:
-            SimulationManager: Initialized simulation manager
         """
         cfg = ConfigManager.get_config(config)
-
-        raise cls(cfg, logger=logger)
+        return cls(cfg, logger=logger)
 
     def connect(self):
         """Establish connection with BeamNG simulation."""

@@ -33,6 +33,11 @@ The system consists of these key components:
 - Python 3.8+
 - Operating System:
   - Windows with WSL2, or
+    * To use localhost (127.0.0.1) instead of discovering WSL2’s IP, create a `%UserProfile%\.wslconfig` file containing:
+    ```yaml
+      [wsl2]
+      networkingMode=mirrored
+    ```
   - Native Linux (in beta for BeamNG.tech)
 
 ## Installation
@@ -69,11 +74,17 @@ The system consists of these key components:
 
 1. Ensure BeamNG.tech is installed and configured according to the BeamNG documentation
 2. Set up network communication:
-   - For WSL2, find the correct IP address:
-     ```bash
-     ip route show | grep -i default | awk '{ print $3}'
++   - For WSL2, use localhost directly if you’ve enabled mirrored networking:
+     ```yaml
+     # %UserProfile%\.wslconfig
+     [wsl2]
+     networkingMode=mirrored
      ```
-   - Update the IP in your scenario configuration files
+     Otherwise, discover the WSL2 IP:
+     ```bash
+     ip route show | grep -i default | awk '{ print $3 }'
+     ```
+   - Update the IP (127.0.0.1 or discovered) in your scenario configuration files
 
 ### YAML Configuration Structure
 
@@ -82,7 +93,7 @@ Simulation scenarios and vehicles are configured via YAML files located in the `
 ```yaml
 # Example configuration snippet
 beamng:
-  host: 172.26.32.1
+  host: 172.26.32.1 # IP found in previous step
   port: 64256
   
 scenario:

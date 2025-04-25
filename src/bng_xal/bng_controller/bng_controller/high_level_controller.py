@@ -13,7 +13,6 @@ from geometry_msgs.msg import Twist
 from bng_controller.core import controller_core
 from bng_simulator.utils.config_manager import ConfigManager
 
-
 class HighLevelController(Node):
     def __init__(self):
         super().__init__("high_level_controller")
@@ -70,16 +69,16 @@ class HighLevelController(Node):
 
     def _init_udp(self):
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.listen_socket.bind(("0.0.0.0", self.send_port))
+        self.listen_socket.bind((self.send_ip, self.send_port))
         self.listen_socket.settimeout(0.2)
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def _on_sim_ready(self, msg: Bool):
-        if not msg.data or self.running:
-            return
         self.get_logger().info(
             f"Received simulation_ready; delaying start by " f"{self.sim_start_delay}s"
         )
+        if not msg.data or self.running:
+            return
         threading.Timer(self.sim_start_delay, self._delayed_start).start()
 
     def _delayed_start(self):
@@ -174,10 +173,7 @@ class HighLevelController(Node):
         try:
             pkt = json.dumps(tgt).encode("utf-8")
             self.send_socket.sendto(pkt, (self.listen_ip, self.listen_port))
-            self.get_logger().debug(
-                f"Sent to {self.listen_ip}:{self.listen_port} target {tgt}",
-                throttle_duration_sec=2,
-            )
+            self.get_logger().debug(f"Send target {tgt}", throttle_duration_sec=2)
             self.last_command_time = now
         except Exception as e:
             self.get_logger().error(f"Send error: {e}")
