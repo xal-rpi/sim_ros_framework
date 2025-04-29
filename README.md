@@ -192,6 +192,9 @@ ros2 service call /start_logger bng_msgs/srv/StartLogger "{save_location: '/tmp/
    **Problem:** Sensors not publishing data  
    **Solution:** Check sensor configuration and poll rates
 
+5. **SUID sandbox not configured properly**
+   **Solution:** `sudo chown root:root BeamNG.tech.v0.35.5.0/BinLinux/chrome-sandbox && sudo chmod 4755 BeamNG.tech.v0.35.5.0/BinLinux/chrome-sandbox`
+
 ## Acknowledgments
 
 - BeamNG.tech team for providing the simulation environment
