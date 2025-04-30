@@ -7,7 +7,7 @@ from os import path
 
 
 def generate_launch_description():
-    pkg_share   = get_package_share_directory("bng_simulator")
+    pkg_share = get_package_share_directory("bng_simulator")
     default_cfg = path.join(pkg_share, "config", "basic_scenario.yaml")
 
     return LaunchDescription(
@@ -24,55 +24,34 @@ def generate_launch_description():
                 description="Your nodes' log level (DEBUG,INFO,WARN,ERROR)",
             ),
             DeclareLaunchArgument(
-                "listen_ip",
-                default_value="0.0.0.0",
-                description="HLC UDP listen IP",
-            ),
-            DeclareLaunchArgument(
-                "listen_port",
-                default_value="64258",
-                description="HLC UDP listen port",
-            ),
-            DeclareLaunchArgument(
-                "send_ip",
-                default_value="172.26.32.1",
-                description="HLC UDP send IP",
-            ),
-            DeclareLaunchArgument(
-                "send_port",
-                default_value="64257",
-                description="HLC UDP send port",
-            ),
-            DeclareLaunchArgument(
-                "control_rate",
-                default_value="0.01",
-                description="HLC control loop period (s)",
-            ),
-            DeclareLaunchArgument(
                 "sim_start_delay",
                 default_value="1.0",
                 description="Delay after sim_ready before HLC starts (s)",
             ),
-
+            DeclareLaunchArgument(
+                "extra_log",
+                default_value="False",
+                description="if true, show all modules log",
+            ),
             # prettier logs
             SetEnvironmentVariable(
                 "RCUTILS_CONSOLE_OUTPUT_FORMAT",
                 "[{severity}] [{name}]: {message}",
             ),
             SetEnvironmentVariable("RCUTILS_COLORIZED_OUTPUT", "1"),
-
             # 1) Controller interface node
             Node(
                 package="bng_controller",
                 executable="run_controller",
                 name="controller_interface",
                 output="screen",
+                emulate_tty=True,
                 parameters=[
-                    {"config_path":  LaunchConfiguration("config_path")},
-                    {"log_level":    LaunchConfiguration("log_level")},
+                    {"config_path": LaunchConfiguration("config_path")},
+                    {"log_level": LaunchConfiguration("log_level")},
+                    {"extra_log": LaunchConfiguration("extra_log")},
                 ],
             ),
-
             # 2) High-level controller node
             Node(
                 package="bng_controller",
@@ -80,13 +59,10 @@ def generate_launch_description():
                 name="high_level_controller",
                 output="screen",
                 parameters=[
-                    {"log_level":        LaunchConfiguration("log_level")},
-                    {"listen_ip":        LaunchConfiguration("listen_ip")},
-                    {"listen_port":      LaunchConfiguration("listen_port")},
-                    {"send_ip":          LaunchConfiguration("send_ip")},
-                    {"send_port":        LaunchConfiguration("send_port")},
-                    {"control_rate":     LaunchConfiguration("control_rate")},
-                    {"sim_start_delay":  LaunchConfiguration("sim_start_delay")},
+                    {"config_path": LaunchConfiguration("config_path")},
+                    {"log_level": LaunchConfiguration("log_level")},
+                    {"sim_start_delay": LaunchConfiguration("sim_start_delay")},
+                    {"extra_log": LaunchConfiguration("extra_log")},
                 ],
             ),
         ]

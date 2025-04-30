@@ -4,6 +4,8 @@ from std_msgs.msg import Bool
 from rclpy.node import Node
 from bng_simulator.core.simulation_manager import SimulationManager
 
+import logging
+
 
 class ControllerInterface(Node):
     def __init__(self):
@@ -11,11 +13,9 @@ class ControllerInterface(Node):
 
         # parameters
         self.declare_parameter("config_path", "")
-        self.declare_parameter("host_ip", "")
-        self.declare_parameter("listen_port", 0)
-        self.declare_parameter("send_port", 0)
         self.declare_parameter("log_level", "INFO")
         self.declare_parameter("controller_enabled", True)
+        self.declare_parameter("extra_log", False)
 
         # pull log_level
         self.log_level_str = self.get_parameter("log_level").value.upper()
@@ -32,6 +32,18 @@ class ControllerInterface(Node):
         cfg = self.get_parameter("config_path").value
         self.get_logger().info(f"Loading sim config from {cfg}")
 
+        # Catch all debug
+        if self.get_parameter("extra_log").value:
+            for h in logging.root.handlers[:]:
+                logging.root.removeHandler(h)
+
+            fmt = "[%(levelname)s] [%(name)s]: %(message)s"
+            logging.basicConfig(
+                level=logging.DEBUG,
+                stream=stderr,
+                format=fmt,
+            )
+
         # create SimulationManager & register ROS polling
         self.sim_manager = SimulationManager.from_file(
             config=cfg, logger=self.get_logger().get_child("sim_manager")
@@ -41,7 +53,6 @@ class ControllerInterface(Node):
         # publisher to signal that BeamNG is up and sensors are all registered
         self.sim_ready_pub = self.create_publisher(Bool, "simulation_ready", 1)
 
-        # give ROS a moment to connect subscribers (optional small delay)
         self.get_logger().info("Simulation ready — publishing readiness signal")
         ready_msg = Bool()
         ready_msg.data = True

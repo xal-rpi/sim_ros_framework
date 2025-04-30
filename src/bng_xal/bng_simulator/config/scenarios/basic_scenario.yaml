@@ -2,12 +2,14 @@
 
 # Simulator configuration
 beamng:
-  home: /home/come/Documents/BeamNG/BeamNG.tech.v0.34.2.0/
   host: 127.0.0.1
   port: 25252
   open_args:
-    launch: True
+    launch: False
     debug: False
+    extensions:
+      - vehicle/xlab/xlabCore
+      - ge/xlab/xlabCore
   setup_funcs:
     beamng.settings.set_deterministic:
       steps_per_second: 60
@@ -74,14 +76,14 @@ vehicles:
         # dir: [0, -1, 0] # First axis
         # up: [1, 0, 0] # Second axis in right hand rule
     controllers:
-      lowlevel:
-        type: LowLevelController
+      LowLevelController: # The python class used
+        type: default # The lua controller used
         control_rate: 0.1
-        listen_ip: localhost
+        listen_ip: 127.0.0.1
         listen_port: 64257
-        send_ip: localhost
+        send_ip: 127.0.0.1
         send_port: 64258
-        gt_state_name: "gtstate"
+        gt_state_name: gtstate
         calibration:
           steeringP: 1.2
           throttleP: 1.0

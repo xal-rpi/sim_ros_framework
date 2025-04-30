@@ -3,6 +3,7 @@ Implements the custom ground truth state sensor.
 """
 
 from logging import getLogger
+from sys import stderr
 
 import numpy as np
 
@@ -140,9 +141,14 @@ class GtStateWrapper(CommBase):
         data["isSnappingDesired"] = is_snapping_desired
         data["isForceInsideTriangle"] = is_force_inside_triangle
         data["isDirWorldSpace"] = True
-        self.send_ack_ge(
-            type="XlabCommand", xtype="OpenGtState", ack="OpenedGtState", **data
-        )
+        args = {
+            "type": "XlabCommand",
+            "xtype": "OpenGtState",
+            "ack": "OpenedGtState",
+            **data,
+        }
+        print(args, flush=True, file=stderr)
+        self.send_ack_ge(**args)
         self.logger.info(f"Opened GtState sensor: {name} \n{data}")
 
     def _close_gt_state(

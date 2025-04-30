@@ -22,11 +22,12 @@ class LowLevelControllerWrapper(CommBase):
         name: str,
         vehicle: Vehicle,
         beamng: BeamNGpy,
-        listen_ip: str = "127.0.1.1",
+        listen_ip: str = "127.0.0.1",
         listen_port: int = 64257,
-        send_ip: str = "127.0.1.1",
+        send_ip: str = "127.0.0.1",
         send_port: int = 64258,
-        gt_state_name: str = None,
+        gt_state_name: str = "gtstate",
+        ctrl_type: str = "default",
     ):
         super().__init__(beamng, vehicle)
 
@@ -43,6 +44,7 @@ class LowLevelControllerWrapper(CommBase):
             send_ip,
             send_port,
             gt_state_name,
+            ctrl_type,
         )
 
     def remove(self) -> None:
@@ -58,15 +60,17 @@ class LowLevelControllerWrapper(CommBase):
         listen_port: int,
         send_ip: str,
         send_port: int,
-        gt_state_name: str = None,
+        gt_state_name: str,
+        ctrl_type: str,
     ) -> None:
         data = dict()
         data["name"] = name
         data["vid"] = vehicle.vid
-        data["listen_ip"] = listen_ip
-        data["listen_port"] = listen_port
-        data["send_ip"] = send_ip
-        data["send_port"] = send_port
+        data["listenIp"] = listen_ip
+        data["listenPort"] = listen_port
+        data["sendIp"] = send_ip
+        data["sendPort"] = send_port
+        data["controllerType"] = ctrl_type
 
         # Add gtStateName if provided
         if gt_state_name:
@@ -98,19 +102,17 @@ class LowLevelController(ControllerBase):
     def __init__(self, name: str, vehicle: Vehicle, beamng: BeamNGpy, config: dict):
         super().__init__(name, vehicle, beamng, config)
 
-        # Get the gt_state_name from config
-        gt_state_name = config.get("gt_state_name", None)
-
         # Create the controller instance
         self._controller = LowLevelControllerWrapper(
             name,
             vehicle,
             beamng,
-            config.get("listen_ip", "127.0.1.1"),
+            config.get("listen_ip", "127.0.0.1"),
             config.get("listen_port", 64257),
-            config.get("send_ip", "127.0.1.1"),
+            config.get("send_ip", "127.0.0.1"),
             config.get("send_port", 64258),
-            gt_state_name,
+            config.get("gt_state_name", None),
+            config.get("type", "default"),
         )
 
     def start(self):

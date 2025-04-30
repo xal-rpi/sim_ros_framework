@@ -3,7 +3,6 @@ Manages BeamNG simulation lifecycle, scenarios, and vehicles.
 """
 
 import traceback
-import os
 
 from typing import Dict, List, Optional, Any
 from copy import deepcopy
@@ -12,24 +11,14 @@ import rclpy
 from beamngpy import BeamNGpy, Scenario
 from beamngpy.logging import BNGValueError
 
-from bng_simulator.utils.io_dict_utils import load_yaml
-
 from bng_simulator.vehicle.manager import VehicleManager
 from bng_simulator.vehicle.sensors import SensorBase
 from bng_simulator.utils.math_op import convert_euler_to_quaternion
 import bng_simulator.core.vehicle_properties as vehicle_queries
+from bng_simulator.utils.config_manager import ConfigManager
 
 # Try to get the directory from the ROS package
 from ament_index_python.packages import get_package_share_directory
-
-try:
-    CONFIG_DIR = os.path.join(get_package_share_directory("bng_simulator"), "config")
-except Exception as e:
-    # Fallback to the source directory approach
-    CONFIG_DIR = os.path.dirname(os.path.abspath(__file__)) + "/../config/"
-
-SCENARIO_DIR = os.path.join(CONFIG_DIR, "scenarios")
-VEHICLES_DIR = os.path.join(CONFIG_DIR, "vehicles")
 
 
 class SimulationManager:
@@ -81,21 +70,9 @@ class SimulationManager:
         Returns:
             SimulationManager: Initialized simulation manager
         """
-        # If already a full path and exists, return it
-        if os.path.isfile(config):
-            return cls(load_yaml(config), logger=logger)
+        cfg = ConfigManager.get_config(config)
 
-        # Try in the config directory
-        config_path = os.path.join(CONFIG_DIR, config)
-        if os.path.isfile(config_path):
-            return cls(load_yaml(config_path), logger=logger)
-
-        # Try in the scenarios directory
-        scenario_path = os.path.join(SCENARIO_DIR, config)
-        if os.path.isfile(scenario_path):
-            return cls(load_yaml(scenario_path), logger=logger)
-
-        raise FileNotFoundError(f"Couldn't find config file {config}")
+        raise cls(cfg, logger=logger)
 
     def connect(self):
         """Establish connection with BeamNG simulation."""
@@ -251,7 +228,6 @@ class SimulationManager:
         """
         A set of function to apply after the scenario is created.
         """
-        self.logger.debug("Post scenario config")
         config = self.config.get("post_scenario", {})
         for func_name, func_args in config.items():
             # Execute the request

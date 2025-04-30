@@ -10,31 +10,17 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, Float32
 from geometry_msgs.msg import Twist
 
-# fallback if C extension missing
-try:
-    from bng_controller.core import controller_core
-except ImportError:
-    rclpy.logging.get_logger("high_level_controller").error(
-        "C extension not found, using Python fallback"
-    )
-
-    class controller_core:
-        @staticmethod
-        def compute_control_targets(_):
-            return (0.0, 0.0, 0.0)
+from bng_controller.core import controller_core
+from bng_simulator.utils.config_manager import ConfigManager
 
 
 class HighLevelController(Node):
     def __init__(self):
         super().__init__("high_level_controller")
         # --- parameters ---
-        self.declare_parameter("listen_ip", "0.0.0.0")
-        self.declare_parameter("listen_port", 64258)
-        self.declare_parameter("send_ip", "172.26.32.1")
-        self.declare_parameter("send_port", 64257)
-        self.declare_parameter("control_rate", 0.01)
         self.declare_parameter("sim_start_delay", 1.0)
         self.declare_parameter("log_level", "INFO")
+        self.declare_parameter("config_path", "")
 
         # set log level
         lvl = self.get_parameter("log_level").value.upper()
@@ -48,12 +34,14 @@ class HighLevelController(Node):
         severity = lvl_map.get(lvl, rclpy.logging.LoggingSeverity.INFO)
         rclpy.logging.set_logger_level(self.get_logger().name, severity)
 
-        # pull parameters
-        self.listen_ip = self.get_parameter("listen_ip").value
-        self.listen_port = self.get_parameter("listen_port").value
-        self.send_ip = self.get_parameter("send_ip").value
-        self.send_port = self.get_parameter("send_port").value
-        self.control_rate = self.get_parameter("control_rate").value
+        # pull parameters from config
+        cfg = self.get_parameter("config_path").value
+        self.config = ConfigManager.get_config(cfg)
+        self.listen_ip = self.config.get("listen_ip", "127.0.0.1")
+        self.listen_port = self.config.get("listen_port", 64257)
+        self.send_ip = self.config.get("send_ip", "127.0.0.1")
+        self.send_port = self.config.get("send_port", 64258)
+        self.control_rate = self.config.get("control_rate", 0.01)
         self.sim_start_delay = self.get_parameter("sim_start_delay").value
 
         # internal state
@@ -82,7 +70,7 @@ class HighLevelController(Node):
 
     def _init_udp(self):
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.listen_socket.bind((self.listen_ip, self.listen_port))
+        self.listen_socket.bind(("0.0.0.0", self.send_port))
         self.listen_socket.settimeout(0.2)
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -185,8 +173,11 @@ class HighLevelController(Node):
 
         try:
             pkt = json.dumps(tgt).encode("utf-8")
-            self.send_socket.sendto(pkt, (self.send_ip, self.send_port))
-            self.get_logger().debug(f"Send target {tgt}", throttle_duration_sec=2)
+            self.send_socket.sendto(pkt, (self.listen_ip, self.listen_port))
+            self.get_logger().debug(
+                f"Sent to {self.listen_ip}:{self.listen_port} target {tgt}",
+                throttle_duration_sec=2,
+            )
             self.last_command_time = now
         except Exception as e:
             self.get_logger().error(f"Send error: {e}")
@@ -204,7 +195,7 @@ class HighLevelController(Node):
         zero = {
             "engine_torque": 0.0,
             "road_wheel_angle": 0.0,
-            "brake_torque": 1000.0,
+            "brake_torque": 0.0,
             "timestamp": int(time.time() * 1000),
         }
 
@@ -212,7 +203,7 @@ class HighLevelController(Node):
         for _ in range(1):
             try:
                 self.send_socket.sendto(
-                    json.dumps(zero).encode("utf-8"), (self.send_ip, self.send_port)
+                    json.dumps(zero).encode("utf-8"), (self.listen_ip, self.listen_port)
                 )
                 time.sleep(0.05)
             except Exception as e:

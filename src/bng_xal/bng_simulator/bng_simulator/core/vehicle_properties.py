@@ -4,6 +4,10 @@ Implement additional functionalities for BeamNGpy
 
 from typing import Optional
 from beamngpy import Vehicle
+from logging import getLogger
+from beamngpy.logging import LOGGER_ID
+
+logger = getLogger(f"{LOGGER_ID}.vehicle_properties")
 
 
 def set_gearbox_index(vehicle: Vehicle, gear_index: int):

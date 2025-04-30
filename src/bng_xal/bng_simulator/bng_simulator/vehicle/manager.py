@@ -25,7 +25,9 @@ class VehicleManager:
         config (dict): Vehicle configuration dictionary
     """
 
-    def __init__(self, name: str, beamng: BeamNGpy, config: Dict[str, Any], logger = None):
+    def __init__(
+        self, name: str, beamng: BeamNGpy, config: Dict[str, Any], logger=None
+    ):
         self._name = name
         self._beamng = beamng
         self._config = deepcopy(config)
@@ -51,7 +53,9 @@ class VehicleManager:
         self._logger.debug(f"Vehicle --{self._name}-- configuration: \n{self._config}")
 
         # Let's construct the vehicle instance
-        return Vehicle(self._name, **self._config)
+        return Vehicle(
+            self._name, **self._config, extensions=["extensions/xlab/xlabCore"]
+        )
 
     def get_scenario_args(self):
         """
@@ -111,14 +115,8 @@ class VehicleManager:
         """
         for name, config in self._sensors_config.items():
             # Log the sensor setup
-            self._logger.debug(
-                f"Setting up sensor --{name}-- for vehicle --{self._name}--"
-            )
-            self._logger.debug(f"Sensor configuration: \n{config}")
             self.setup_sensor(name, config)
-            self._logger.debug(
-                f"Sendor --{name}-- set up for vehicle --{self._name}--"
-            )
+            self._logger.debug(f"Sendor --{name}-- set up for vehicle --{self._name}--")
 
     def setup_sensor(self, name: str, config: Dict[str, Any]):
         """
@@ -211,8 +209,10 @@ class VehicleManager:
             self._logger.error(f"Controller type not specified for {controller_name}")
             return
 
+        self._logger.debug(f"{controller_config}")
+
         try:
-            controller_class = ControllerRegistry.get_class(controller_type)
+            controller_class = ControllerRegistry.get_class(controller_name)
             controller = controller_class(
                 controller_name, self._vehicle, self._beamng, controller_config
             )
