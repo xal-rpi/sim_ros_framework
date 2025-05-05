@@ -21,17 +21,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "log_level",
                 default_value="INFO",
-                description="Your nodes' log level (DEBUG,INFO,WARN,ERROR)",
-            ),
-            DeclareLaunchArgument(
-                "sim_start_delay",
-                default_value="1.0",
-                description="Delay after sim_ready before HLC starts (s)",
-            ),
-            DeclareLaunchArgument(
-                "extra_log",
-                default_value="False",
-                description="if true, show all modules log",
+                description="Your nodes' log level (FULL,DEBUG,INFO,WARN,ERROR,FATAL)",
             ),
             # prettier logs
             SetEnvironmentVariable(
@@ -49,7 +39,6 @@ def generate_launch_description():
                 parameters=[
                     {"config_path": LaunchConfiguration("config_path")},
                     {"log_level": LaunchConfiguration("log_level")},
-                    {"extra_log": LaunchConfiguration("extra_log")},
                 ],
             ),
             # 2) High-level controller node
@@ -61,8 +50,6 @@ def generate_launch_description():
                 parameters=[
                     {"config_path": LaunchConfiguration("config_path")},
                     {"log_level": LaunchConfiguration("log_level")},
-                    {"sim_start_delay": LaunchConfiguration("sim_start_delay")},
-                    {"extra_log": LaunchConfiguration("extra_log")},
                 ],
             ),
         ]

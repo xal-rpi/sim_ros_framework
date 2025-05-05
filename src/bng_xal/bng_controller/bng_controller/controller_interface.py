@@ -14,12 +14,11 @@ class ControllerInterface(Node):
         # parameters
         self.declare_parameter("config_path", "")
         self.declare_parameter("log_level", "INFO")
-        self.declare_parameter("controller_enabled", True)
-        self.declare_parameter("extra_log", False)
 
         # pull log_level
         self.log_level_str = self.get_parameter("log_level").value.upper()
         level_map = {
+            "FULL": rclpy.logging.LoggingSeverity.DEBUG,
             "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
             "INFO": rclpy.logging.LoggingSeverity.INFO,
             "WARN": rclpy.logging.LoggingSeverity.WARN,
@@ -30,10 +29,9 @@ class ControllerInterface(Node):
         rclpy.logging.set_logger_level(self.get_logger().name, severity)
 
         cfg = self.get_parameter("config_path").value
-        self.get_logger().info(f"Loading sim config from {cfg}")
 
-        # Catch all debug
-        if self.get_parameter("extra_log").value:
+        # Catch all debug from external modules
+        if self.log_level_str == "FULL":
             for h in logging.root.handlers[:]:
                 logging.root.removeHandler(h)
 
