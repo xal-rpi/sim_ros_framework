@@ -3,7 +3,9 @@ import socket
 import json
 import threading
 import time
+import logging
 from sys import exit, stderr
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -13,43 +15,88 @@ from geometry_msgs.msg import Twist
 from bng_controller.core import controller_core
 from bng_simulator.utils.config_manager import ConfigManager
 
+
+class PerformanceMetrics:
+    def __init__(self, window_size: int = 100):
+        self._latencies = deque(maxlen=window_size)
+        self.max_latency = 0.0
+
+    def add(self, sample: float):
+        """Add a new latency sample (in seconds)."""
+        self._latencies.append(sample)
+        if sample > self.max_latency:
+            self.max_latency = sample
+
+    @property
+    def average(self) -> float:
+        """Return the average over the current window (or 0.0 if empty)."""
+        if not self._latencies:
+            return 0.0
+        return sum(self._latencies) / len(self._latencies)
+
+
 class HighLevelController(Node):
     def __init__(self):
         super().__init__("high_level_controller")
         # --- parameters ---
-        self.declare_parameter("sim_start_delay", 1.0)
-        self.declare_parameter("log_level", "INFO")
         self.declare_parameter("config_path", "")
+        self.declare_parameter("log_level", "INFO")
 
         # set log level
-        lvl = self.get_parameter("log_level").value.upper()
+        self.log_level_str = self.get_parameter("log_level").value.upper()
         lvl_map = {
+            "FULL": rclpy.logging.LoggingSeverity.DEBUG,
             "DEBUG": rclpy.logging.LoggingSeverity.DEBUG,
             "INFO": rclpy.logging.LoggingSeverity.INFO,
             "WARN": rclpy.logging.LoggingSeverity.WARN,
             "ERROR": rclpy.logging.LoggingSeverity.ERROR,
             "FATAL": rclpy.logging.LoggingSeverity.FATAL,
         }
-        severity = lvl_map.get(lvl, rclpy.logging.LoggingSeverity.INFO)
+        severity = lvl_map.get(self.log_level_str, rclpy.logging.LoggingSeverity.INFO)
         rclpy.logging.set_logger_level(self.get_logger().name, severity)
+
+        # Catch all debug from external modules
+        if self.log_level_str == "FULL":
+            for h in logging.root.handlers[:]:
+                logging.root.removeHandler(h)
+
+            fmt = "[%(levelname)s] [%(name)s]: %(message)s"
+            logging.basicConfig(
+                level=logging.DEBUG,
+                stream=stderr,
+                format=fmt,
+            )
 
         # pull parameters from config
         cfg = self.get_parameter("config_path").value
         self.config = ConfigManager.get_config(cfg)
-        self.listen_ip = self.config.get("listen_ip", "127.0.0.1")
-        self.listen_port = self.config.get("listen_port", 64257)
-        self.send_ip = self.config.get("send_ip", "127.0.0.1")
-        self.send_port = self.config.get("send_port", 64258)
-        self.control_rate = self.config.get("control_rate", 0.01)
-        self.sim_start_delay = self.get_parameter("sim_start_delay").value
+
+        llc_cfg = self.config["vehicles"]["ego"]["controllers"]["LowLevelController"]
+        self.listen_ip = llc_cfg.get("listen_ip", "127.0.0.1")
+        self.listen_port = llc_cfg.get("listen_port", 25252)
+        self.send_ip = llc_cfg.get("send_ip", "127.0.0.1")
+        self.send_port = llc_cfg.get("send_port", 25252)
+
+        hlc_cfg = self.config["high_level_controller"]
+        self.control_fn_name = hlc_cfg["control_fn"]
+        self.control_rate = hlc_cfg["control_rate"]
+
+        try:
+            self.compute_control = getattr(controller_core, self.control_fn_name)
+        except AttributeError:
+            raise RuntimeError(
+                f"No function '{self.control_fn_name}' in controller_core"
+            )
+
+        self.sim_start_delay = 1  # second
 
         # internal state
         self.latest_sensor_data = {}
         self.running = False
         self.exit_event = threading.Event()
-        self.receive_thread = None
+        # real time metrics
+        self.metrics = PerformanceMetrics(window_size=100)
         self.last_command_time = 0.0
-        self.latency_values = []
         self.message_counter = 0
 
         # pubs & subs
@@ -74,11 +121,11 @@ class HighLevelController(Node):
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def _on_sim_ready(self, msg: Bool):
+        if not msg.data or self.running:
+            return
         self.get_logger().info(
             f"Received simulation_ready; delaying start by " f"{self.sim_start_delay}s"
         )
-        if not msg.data or self.running:
-            return
         threading.Timer(self.sim_start_delay, self._delayed_start).start()
 
     def _delayed_start(self):
@@ -109,20 +156,19 @@ class HighLevelController(Node):
                 recv_time = time.time()
                 consecutive_timeouts = 0
                 sensor = json.loads(data.decode())
-                self.latest_sensor_data = sensor
                 self.message_counter += 1
+                # stash both simtime and the low‐level realtime
+                self.latest_sensor_data = sensor
 
-                # latency
+                # wall clock latency
                 if self.last_command_time:
                     lat = recv_time - self.last_command_time
-                    self.latency_values.append(lat)
-                    if len(self.latency_values) > 100:
-                        self.latency_values.pop(0)
+                    self.metrics.add(lat)
+                    # publish every 10 messages
                     if self.message_counter % 10 == 0:
-                        avg = sum(self.latency_values) / len(self.latency_values)
-                        lm = Float32()
-                        lm.data = float(avg)
-                        self.latency_pub.publish(lm)
+                        m = Float32()
+                        m.data = float(self.metrics.average)
+                        self.latency_pub.publish(m)
 
             except socket.timeout:
                 consecutive_timeouts += 1
@@ -151,30 +197,23 @@ class HighLevelController(Node):
             return
         if not self.running:
             return
-        now = time.time()
-        if not self.latest_sensor_data:
-            tgt = {
-                "engine_torque": 0.0,
-                "road_wheel_angle": 0.0,
-                "brake_torque": 0.0,
-                "timestamp": int(now * 1000),
-            }
-        else:
-            et, wa, bt = controller_core.compute_control_targets(
-                self.latest_sensor_data
-            )
-            tgt = {
-                "engine_torque": et,
-                "road_wheel_angle": wa,
-                "brake_torque": bt,
-                "timestamp": int(now * 1000),
-            }
+
+        self.get_logger().debug(
+            f"Calling {self.control_fn_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
+            throttle_duration_sec=2,
+        )
+        targets = self.compute_control(
+            self.latest_sensor_data, self.control_rate, self.metrics.max_latency
+        )
 
         try:
-            pkt = json.dumps(tgt).encode("utf-8")
+            pkt = json.dumps(targets).encode("utf-8")
             self.send_socket.sendto(pkt, (self.listen_ip, self.listen_port))
-            self.get_logger().debug(f"Send target {tgt}", throttle_duration_sec=2)
-            self.last_command_time = now
+            self.get_logger().debug(
+                f"Sent to {self.listen_ip}:{self.listen_port} target {targets}",
+                throttle_duration_sec=2,
+            )
+            self.last_command_time = time.time()
         except Exception as e:
             self.get_logger().error(f"Send error: {e}")
 
@@ -192,10 +231,9 @@ class HighLevelController(Node):
             "engine_torque": 0.0,
             "road_wheel_angle": 0.0,
             "brake_torque": 0.0,
-            "timestamp": int(time.time() * 1000),
+            "time": 0,  # apply immediately
         }
 
-        # TODO : Does not work
         for _ in range(1):
             try:
                 self.send_socket.sendto(
