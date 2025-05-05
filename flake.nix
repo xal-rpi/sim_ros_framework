@@ -82,30 +82,29 @@
         devShells.default = pkgs.mkShell {
           name = "bng-ros-dev-fish";
 
-          packages = [
-            pkgs.colcon
-            pkgs.cmake
-            pkgs.ninja
-            pkgs.pkg-config
-            pkgs.gnumake
-            pkgs.gcc
-            pkgs.gdb
-            pkgs.binutils
+          packages = with pkgs; [
+            colcon
+            cmake
+            ninja
+            pkg-config
+            gnumake
+            gcc
+            gdb
+            binutils
 
             pythonWithBeamNGpy
 
-            pkgs.pyright
-            pkgs.python3Packages.setuptools
-            pkgs.python3Packages.wheel
-            pkgs.python3Packages.pip
-            pkgs.python3Packages.cython
+            pyright
+            python3Packages.setuptools
+            python3Packages.wheel
+            python3Packages.pip
+            python3Packages.cython
 
             rosEnv
 
-            pkgs.nixgl.auto.nixGLDefault
-            pkgs.qt5.qtbase
+            qt5.qtbase
 
-            pkgs.fishPlugins.bass
+            fishPlugins.bass
           ];
 
           ROS_DOMAIN_ID = "42";
