@@ -3,7 +3,7 @@ from setuptools import setup, Extension
 controller_core_module = Extension(
     "bng_controller.core.controller_core",
     sources=["controller_core.c"],
-    extra_compile_args=["-O3"],  # Optimization flag
+    extra_compile_args=["-O3"],
 )
 
 setup(

@@ -1,0 +1,19 @@
+[
+  {
+    "arguments": [
+      "/nix/store/f0m6caffiykyvsjim9376a3hx2yj2ghj-gcc-wrapper-14.2.1.20250322/bin/gcc",
+      "-I/nix/store/xyzihsdhqpxsc4rc8wyk3wdjkx15s0lc-python3-3.12.8-env/include/python3.12",
+      "-fPIC",
+      "-I/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core/venv/include",
+      "-I/nix/store/0l539chjmcq5kdd43j6dgdjky4sjl7hl-python3-3.12.8/include/python3.12",
+      "-c",
+      "-O3",
+      "-o",
+      "build/temp.linux-x86_64-cpython-312/controller_core.o",
+      "controller_core.c"
+    ],
+    "directory": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core",
+    "file": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core/controller_core.c",
+    "output": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core/build/temp.linux-x86_64-cpython-312/controller_core.o"
+  }
+]
