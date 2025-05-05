@@ -104,11 +104,7 @@ class GtStateWrapper(CommBase):
         return readings_data
 
     def _get_gt_state_id(self) -> int:
-        return int(
-            self.send_recv_ge(type="XlabCommand", xtype="GetGtStateId", name=self.name)[
-                "data"
-            ]
-        )
+        return int(self.send_recv_ge(type="GetGtStateId", name=self.name)["data"])
 
     def _open_gt_state(
         self,
@@ -142,8 +138,7 @@ class GtStateWrapper(CommBase):
         data["isForceInsideTriangle"] = is_force_inside_triangle
         data["isDirWorldSpace"] = True
         args = {
-            "type": "XlabCommand",
-            "xtype": "OpenGtState",
+            "type": "OpenGtState",
             "ack": "OpenedGtState",
             **data,
         }
@@ -155,8 +150,7 @@ class GtStateWrapper(CommBase):
         self,
     ) -> None:
         self.send_ack_ge(
-            type="XlabCommand",
-            xtype="CloseGtState",
+            type="CloseGtState",
             ack="ClosedGtState",
             name=self.name,
             vid=self.vehicle.vid,
@@ -164,9 +158,7 @@ class GtStateWrapper(CommBase):
         self.logger.info(f'Closed GtState sensor: "{self.name}"')
 
     def _poll_gt_state_ge(self) -> StrDict:
-        return self.send_recv_ge(
-            type="XlabCommand", xtype="PollGtStateGE", name=self.name
-        )["data"]
+        return self.send_recv_ge(type="PollGtStateGE", name=self.name)["data"]
 
     def extract_vehicle_properties(self):
         """

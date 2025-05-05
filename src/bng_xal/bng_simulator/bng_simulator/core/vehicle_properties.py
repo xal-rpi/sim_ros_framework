@@ -20,7 +20,7 @@ def set_gearbox_index(vehicle: Vehicle, gear_index: int):
     """
     # Vehicle root node
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="SetGearboxIndex", gearIndex=gear_index)
+    data = dict(type="SetGearboxIndex", gearIndex=gear_index)
     veh_root._send(data).ack("SetGearboxIndex")
 
 
@@ -33,7 +33,7 @@ def get_gearbox_info(vehicle: Vehicle):
     """
     # Vehicle root node
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="GetGearboxInfo")
+    data = dict(type="GetGearboxInfo")
     return veh_root._send(data).recv()["data"]
 
 
@@ -45,7 +45,7 @@ def set_ABS(vehicle: Vehicle, enabled: bool = False):
         enabled: True to enable ABS, False to disable
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="SetABS", enabled=enabled)
+    data = dict(type="SetABS", enabled=enabled)
     veh_root._send(data).ack("SetABS")
 
 
@@ -57,7 +57,7 @@ def get_ABS(vehicle: Vehicle) -> dict:
             - hasAbs (bool): True if vehicle has ABS capability
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="GetABS")
+    data = dict(type="GetABS")
     return veh_root._send(data).recv()["data"]
 
 
@@ -69,7 +69,7 @@ def set_ESC(vehicle: Vehicle, enabled: bool = False):
         enabled: True to enable ESC, False to disable
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="SetESC", enabled=enabled)
+    data = dict(type="SetESC", enabled=enabled)
     veh_root._send(data).ack("SetESC")
 
 
@@ -82,7 +82,7 @@ def get_ESC(vehicle: Vehicle) -> dict:
             - hasESC (bool): True if vehicle has ESC capability
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="GetESC")
+    data = dict(type="GetESC")
     return veh_root._send(data).recv()["data"]
 
 
@@ -95,7 +95,7 @@ def set_4WD_mode(vehicle: Vehicle, mode: str = "", range_mode: str = ""):
         range_mode: 'low' or 'high' (optional)
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="Set4wdMode", mode=mode, rangeMode=range_mode)
+    data = dict(type="Set4wdMode", mode=mode, rangeMode=range_mode)
     veh_root._send(data).ack("Set4wdMode")
 
 
@@ -109,7 +109,7 @@ def get_4WD_mode(vehicle: Vehicle) -> dict:
             - is4wdCapable (bool): True if vehicle has 4WD capability
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="Get4wdMode")
+    data = dict(type="Get4wdMode")
     return veh_root._send(data).recv()["data"]
 
 
@@ -123,7 +123,7 @@ def lock_diff(vehicle: Vehicle, diff: str = "front", lock: bool = True):
     """
     assert diff in ["front", "rear"], "Invalid diff type"
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="LockDiff", diff=diff, lock=lock)
+    data = dict(type="LockDiff", diff=diff, lock=lock)
     veh_root._send(data).ack("LockDiff")
 
 
@@ -139,7 +139,7 @@ def get_diff_lock_state(vehicle: Vehicle, diff: str = "front") -> dict:
             - mode (str): Current differential mode
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="GetDiffLockState", diff=diff)
+    data = dict(type="GetDiffLockState", diff=diff)
     return veh_root._send(data).recv()["data"]
 
 
@@ -182,9 +182,7 @@ def get_vehicle_properties(vehicle: Vehicle, world_space: bool = False) -> dict:
             - vehInertia (dict): Inertia tensor components with keys: xx, yy, zz, xy, xz, yz.
     """
     veh_root = vehicle._root
-    data = dict(
-        type="XlabCommand", xtype="GetVehicleProperties", worldSpace=world_space
-    )
+    data = dict(type="GetVehicleProperties", worldSpace=world_space)
     return veh_root._send(data).recv()["data"]
 
 
@@ -201,7 +199,7 @@ def get_vehicle_principal_axis(vehicle: Vehicle) -> dict:
             - vectorLeft (dict): Left direction vector {x,y,z}
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="GetVehiclePrincipalAxis")
+    data = dict(type="GetVehiclePrincipalAxis")
     return veh_root._send(data).recv()["data"]
 
 
@@ -217,7 +215,7 @@ def get_powertrain_properties(vehicle: Vehicle) -> dict:
             - diffTorqueSplit (float): Torque distribution (differentials)
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="GetPowertrainProperties")
+    data = dict(type="GetPowertrainProperties")
     return veh_root._send(data).recv()["data"]
 
 
@@ -228,7 +226,7 @@ def get_controller_infos(vehicle: Vehicle) -> dict:
         dict: Mapping of controller names to their type strings
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="GetControllerInfos")
+    data = dict(type="GetControllerInfos")
     return veh_root._send(data).recv()["data"]
 
 
@@ -249,7 +247,7 @@ def get_engine_infos(vehicle: Vehicle) -> dict:
             superchargerBoostMax (float): Maximum supercharger boost pressure in PSI, or -1 if not available.
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="EngineInfos")
+    data = dict(type="EngineInfos")
     return veh_root._send(data).recv()["data"]
 
 
@@ -268,7 +266,7 @@ def stop_safety_features(vehicle: Vehicle) -> dict:
               to their corresponding type strings.
     """
     veh_root = vehicle._root
-    data = dict(type="XlabCommand", xtype="StopSafetyFeatures")
+    data = dict(type="StopSafetyFeatures")
     return veh_root._send(data).recv()["data"]
 
 
@@ -316,5 +314,5 @@ def control_vehicle(
     if gear is not None:
         dict_inputs["gear"] = gear
     dict_inputs["filter"] = filter
-    data = dict(type="XlabCommand", xtype="SetInputs", **dict_inputs)
+    data = dict(type="SetInputs", **dict_inputs)
     veh_root._send(data).ack("Controlled")

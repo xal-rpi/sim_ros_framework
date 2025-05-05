@@ -8,8 +8,7 @@ beamng:
     launch: False
     debug: False
     extensions:
-      - vehicle/xlab/xlabCore
-      - ge/xlab/xlabCore
+      - xlab/xlabCore
   setup_funcs:
     beamng.settings.set_deterministic:
       steps_per_second: 60
@@ -77,8 +76,8 @@ vehicles:
         # up: [1, 0, 0] # Second axis in right hand rule
     controllers:
       LowLevelController: # The python class used
-        type: default # The lua controller used
-        control_rate: 0.1
+        type: framework # The lua controller used
+        control_rate: 0.005
         listen_ip: 127.0.0.1
         listen_port: 64257
         send_ip: 127.0.0.1
@@ -88,6 +87,10 @@ vehicles:
           steeringP: 1.2
           throttleP: 1.0
           brakeP: 1.0
+
+high_level_controller:
+  control_fn: compute_control_empty # The C function used
+  control_rate: 0.01
 
 # ROS configuration
 ros_poll_config:

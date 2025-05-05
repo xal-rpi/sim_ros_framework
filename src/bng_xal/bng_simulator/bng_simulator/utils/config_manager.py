@@ -78,7 +78,7 @@ class ConfigManager:
                 return cls._cache[abs_path]
 
         raise FileNotFoundError(
-            f"Config file '{filename_or_path}' not found in:\n" f"  • {candidates}"
+            f"Config file '{filename_or_path}' not found in: {candidates}"
         )
 
     @classmethod

@@ -17,8 +17,6 @@ from bng_simulator.utils.math_op import convert_euler_to_quaternion
 import bng_simulator.core.vehicle_properties as vehicle_queries
 from bng_simulator.utils.config_manager import ConfigManager
 
-# Try to get the directory from the ROS package
-from ament_index_python.packages import get_package_share_directory
 
 class SimulationManager:
     """
@@ -61,8 +59,16 @@ class SimulationManager:
     def from_file(cls, config: str, logger=None):
         """
         Create a SimulationManager instance from a configuration file.
+
+        Args:
+            config (str): Path to the YAML configuration file
+            logger: ROS logger instance (optional)
+
+        Returns:
+            SimulationManager: Initialized simulation manager
         """
         cfg = ConfigManager.get_config(config)
+
         return cls(cfg, logger=logger)
 
     def connect(self):

@@ -11,7 +11,6 @@ import os
 from typing import Dict, Any, Optional, Tuple
 
 import yaml
-import json
 
 
 def full_path(file_path: str) -> str:

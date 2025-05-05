@@ -77,15 +77,12 @@ class LowLevelControllerWrapper(CommBase):
             data["gtStateName"] = gt_state_name
             self.logger.info(f"Using gtState sensor: {gt_state_name} for controller")
 
-        self.send_ack_ge(
-            type="XlabCommand", xtype="OpenController", ack="OpenedController", **data
-        )
+        self.send_ack_ge(type="OpenController", ack="OpenedController", **data)
         self.logger.info(f"Opened LowLevelController: {name} \n{data}")
 
     def _close_controller(self) -> None:
         self.send_ack_ge(
-            type="XlabCommand",
-            xtype="CloseController",
+            type="CloseController",
             ack="ClosedController",
             name=self.name,
             vid=self.vehicle.vid,
