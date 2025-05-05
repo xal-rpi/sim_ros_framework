@@ -36,24 +36,6 @@ local common = {
   socketIn = nil,
   socketOut = nil,
 
-  -- performance & metrics
-  calibration = {
-    steeringP = 1.2,
-    steeringI = 0.0,
-    steeringD = 0.05,
-    steeringDeadzone = 0.01,
-    throttleP = 1.0,
-    throttleI = 0.2,
-    throttleD = 0.05,
-    throttleMinRamp = 1.0,
-    throttleMaxRamp = 10.0,
-    brakeP = 1.0,
-    brakeI = 0.2,
-    brakeD = 0.0,
-    brakeMinRamp = 1.0,
-    brakeMaxRamp = 5.0,
-  },
-
   performanceMetrics = {
     latency = nil,
     avgLatency = 0,
@@ -93,15 +75,16 @@ local activeController = nil
 
 -- Cache vehicle state via gtState or fallback
 local function updateVehicleAndCacheState()
-  local now = os.clock()
+  local now = common.getSimTime()
 
-  -- pull from gtState if available
+  -- pull from gtState if available, cache every 0.1 s
   if common.gtStateManager and common.gtStateSensorId then
     if not common.cachedGtReading or (now - common.lastGtReadingTime > 0.1) then
-      if common.gtStateManager.getGtStateReadings then
-        common.cachedGtReading = common.gtStateManager.getGtStateReadings(common.gtStateSensorId)[1]
-      elseif common.gtStateManager.geGtStateReading then
-        common.cachedGtReading = common.gtStateManager.geGtStateReading(common.gtStateSensorId)
+      local mgr = common.gtStateManager
+      if mgr.getGtStateReadings then
+        common.cachedGtReading = mgr.getGtStateReadings(common.gtStateSensorId)[1]
+      elseif mgr.geGtStateReading then
+        common.cachedGtReading = mgr.geGtStateReading(common.gtStateSensorId)
       end
       common.lastGtReadingTime = now
       if not common.cachedGtReading then log('W', logTag, 'No reading from gtState sensor') end
@@ -110,22 +93,20 @@ local function updateVehicleAndCacheState()
 
   local vs = common.vehicleState
   if common.cachedGtReading then
+    local r = common.cachedGtReading
     -- engine
-    vs.rpm = common.cachedGtReading.RPM or electrics.values.rpm or 0
-    vs.engineTorque = common.cachedGtReading.engineTorque or 0
+    vs.rpm = r.RPM or electrics.values.rpm or 0
+    vs.engineTorque = r.engineTorque or 0
     -- speed
-    vs.wheelspeed = common.cachedGtReading.vel
-        and math.sqrt(
-          (common.cachedGtReading.vel[1] or 0) ^ 2
-            + (common.cachedGtReading.vel[2] or 0) ^ 2
-            + (common.cachedGtReading.vel[3] or 0) ^ 2
-        )
+    vs.wheelspeed = (
+      r.vel and math.sqrt((r.vel[1] or 0) ^ 2 + (r.vel[2] or 0) ^ 2 + (r.vel[3] or 0) ^ 2)
+    )
       or electrics.values.wheelspeed
       or 0
     -- steering
-    vs.currentSteeringAngle = common.cachedGtReading.steering or electrics.values.steering or 0
+    vs.currentSteeringAngle = r.steering or electrics.values.steering or 0
     -- gear
-    if common.cachedGtReading.gearRatio then vs.gearRatio = common.cachedGtReading.gearRatio end
+    if r.gearRatio then vs.gearRatio = r.gearRatio end
   else
     -- fallback to electrics / powertrain
     local e = powertrain.getDevice('mainEngine')
@@ -139,38 +120,61 @@ local function updateVehicleAndCacheState()
     if gb then vs.gearRatio = gb.gearRatio or 1 end
   end
 
-  -- occasional caching of static values
-  if not vs.maxValuesInitialized or (now % 5 < 0.1) then
-    local e = powertrain.getDevice('mainEngine')
-    if e then
-      vs.maxRPM = e.maxRPM or 7000
-      vs.maxTorque = e.maxTorque or 500
-      if e.torqueData and e.torqueData.curves and e.torqueData.finalCurveName then
-        vs.torqueCurve = e.torqueData.curves[e.torqueData.finalCurveName].torque
-      end
+  return common.cachedGtReading
+end
+
+local function initVehicleStaticValues()
+  log('I', logTag, 'Starting static values init')
+  local vs = common.vehicleState
+
+  local e = powertrain.getDevice('mainEngine')
+  if e then
+    vs.maxRPM = e.maxRPM or 7000
+    vs.maxTorque = e.maxTorque or 500
+    if e.torqueData and e.torqueData.curves and e.torqueData.finalCurveName then
+      local name = e.torqueData.finalCurveName
+      vs.torqueCurve = e.torqueData.curves[name].torque
+    else
+      log('W', logTag, 'torque data unavailable')
     end
-    if wheels and wheels.wheels and wheels.wheels[0] then
-      vs.wheelRadius = wheels.wheels[0].radius or vs.wheelRadius
-    end
-    if hydros and hydros.hydros then
-      for _, h in pairs(hydros.hydros) do
-        if h.inputSource == 'steering_input' and h.steeringWheelLock then
-          vs.maxSteeringAngle = math.rad(h.steeringWheelLock) / 2
+  else
+    log('W', logTag, 'main engine unavailable')
+  end
+
+  if wheels and wheels.wheels and wheels.wheels[0] then
+    vs.wheelRadius = wheels.wheels[0].radius or vs.wheelRadius
+  else
+    log('W', logTag, 'wheels data unavailable')
+  end
+
+  if hydros then
+    for _, h in pairs(hydros.hydros) do
+      --check if it's a steering hydro
+      if h.inputSource == 'steering_input' then
+        --if the value is present, scale the values
+        if h.steeringWheelLock then
+          vs.maxSteeringAngle = math.abs(h.steeringWheelLock) / 2
+          log('I', logTag, 'max steering angle = ' .. vs.maxSteeringAngle)
           break
         end
       end
     end
-    if v and v.data and v.data.nodes then
-      local sum = 0
-      for _, n in pairs(v.data.nodes) do
-        if n.nodeWeight then sum = sum + n.nodeWeight end
-      end
-      if sum > 0 then vs.mass = sum end
-    end
-    vs.maxValuesInitialized = true
+  else
+    log('W', logTag, 'hydros unavailable')
   end
 
-  return common.cachedGtReading
+  if v and v.data and v.data.nodes then
+    local sum = 0
+    for _, n in pairs(v.data.nodes) do
+      if n.nodeWeight then sum = sum + n.nodeWeight end
+    end
+    if sum > 0 then
+      vs.mass = sum
+      log('I', logTag, 'Total vehicle mass = ' .. vs.mass)
+    end
+  else
+    log('W', logTag, 'v.data.nodes unavailable')
+  end
 end
 
 local function commonInit(data)
@@ -205,16 +209,10 @@ local function commonInit(data)
   common.sendPort = data.sendPort
 
   -- Override any calibration params
-  if data.calibration then
-    for k, v in pairs(data.calibration) do
-      if common.calibration[k] ~= nil then
-        common.calibration[k] = v
-        log('I', logTag, string.format('calibration.%s = %s', k, tostring(v)))
-      else
-        log('W', logTag, 'Unknown calibration parameter: ' .. k)
-      end
-    end
-  end
+  if data.calibration then M.calibrate(data.calibration) end
+
+  -- init vehicle state
+  initVehicleStaticValues()
 
   -- gtState sensor ID
   common.gtStateSensorId = data.gtStateSensorId
@@ -228,7 +226,7 @@ local function commonInit(data)
 
   -- Create & bind UDP sockets
   common.socketIn = socket.udp()
-  local ok, err = common.socketIn:setsockname('0.0.0.0', common.listenPort)
+  local ok, err = common.socketIn:setsockname(common.listenIp, common.listenPort)
   if not ok then
     log('E', logTag, 'Failed to bind socketIn: ' .. tostring(err))
     return false
