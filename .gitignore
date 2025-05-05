@@ -12,6 +12,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.cache
 
 # Distribution / packaging
 build/

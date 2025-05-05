@@ -33,11 +33,6 @@ The system consists of these key components:
 - Python 3.8+
 - Operating System:
   - Windows with WSL2, or
-    * To use localhost (127.0.0.1) instead of discovering WSL2’s IP, create a `%UserProfile%\.wslconfig` file containing:
-    ```yaml
-      [wsl2]
-      networkingMode=mirrored
-    ```
   - Native Linux (in beta for BeamNG.tech)
 
 ## Installation
@@ -74,17 +69,11 @@ The system consists of these key components:
 
 1. Ensure BeamNG.tech is installed and configured according to the BeamNG documentation
 2. Set up network communication:
-+   - For WSL2, use localhost directly if you’ve enabled mirrored networking:
-     ```yaml
-     # %UserProfile%\.wslconfig
-     [wsl2]
-     networkingMode=mirrored
-     ```
-     Otherwise, discover the WSL2 IP:
+   - For WSL2, find the correct IP address and update the IP in your scenario configuration files:
      ```bash
-     ip route show | grep -i default | awk '{ print $3 }'
+     ip route show | grep -i default | awk '{ print $3}'
      ```
-   - Update the IP (127.0.0.1 or discovered) in your scenario configuration files
+   - On linux using the default `127.0.0.1` config should work.
 
 ### YAML Configuration Structure
 
@@ -93,9 +82,9 @@ Simulation scenarios and vehicles are configured via YAML files located in the `
 ```yaml
 # Example configuration snippet
 beamng:
-  host: 172.26.32.1 # IP found in previous step
+  host: 172.26.32.1
   port: 64256
-  
+
 scenario:
   level: smallgrid
   name: basic
@@ -108,13 +97,27 @@ vehicles:
         type: GtState
         gfx_update_time: 0.15
         physics_update_time: 0.005
+        num_physics_steps_for_gfx_save: 1
+    controllers:
+      LowLevelController: # The python class used
+        type: default # The lua controller used
+        control_rate: 0.1
+        listen_ip: 127.0.0.1
+        listen_port: 64257
+        send_ip: 127.0.0.1
+        send_port: 64258
+        gt_state_name: gtstate
+        calibration:
+          steeringP: 1.2
+          throttleP: 1.0
+          brakeP: 1.0
 ```
 
 ## Usage
 
 ### Launch Commands
 
-1. **Start the simulator:**
+1. **Start only the simulator with sensors:**
    ```bash
    ros2 launch bng_simulator simulator.launch.py
    ```
@@ -124,10 +127,9 @@ vehicles:
    ros2 launch bng_controller controller.launch.py
    ```
 
-3. **Custom configuration:**
-   ```bash
-   ros2 launch bng_simulator simulator.launch.py config_path:=/path/to/config.yaml
-   ```
+Available options :
+- Custom configuration: `config_path:=/path/to/config.yaml `
+- Log level: `log_level:={FATAL,ERROR,WARN,INFO,DEBUG,FULL}` 
 
 ### Launch File Parameters
 
@@ -136,14 +138,14 @@ vehicles:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `config_path` | `[pkg_share]/config/basic_scenario.yaml` | Path to the simulation configuration file |
-| `log_level` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
+| `log_level` | `INFO` | Logging level (FULL, DEBUG, INFO, WARNING, ERROR, FATAl). FULL also shows the debug info of external libraries such as rclpy and beamngpy|
 
 #### Controller Launch Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `config_path` | `[pkg_share]/config/basic_scenario.yaml` | Path to BeamNG simulation configuration file |
-| `log_level` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
+| `config_path` | `[pkg_share]/config/basic_scenario.yaml` | Path to the simulation configuration file |
+| `log_level` | `INFO` | Logging level (FULL, DEBUG, INFO, WARNING, ERROR, FATAl). FULL also shows the debug info of external libraries such as rclpy and beamngpy|
 
 ### Interactive Shell
 
@@ -176,24 +178,21 @@ ros2 service call /start_logger bng_msgs/srv/StartLogger "{save_location: '/tmp/
 
 ### Common Issues
 
-1. **BeamNG Focus Issue**  
-   **Problem:** BeamNG.tech requires focus when managing scenarios  
+1. **BeamNG Focus Issue**
+   **Problem:** BeamNG.tech requires focus when managing scenarios
    **Solution:** Ensure the BeamNG window is focused, not minimized
 
-2. **IP Configuration**  
-   **Problem:** Incorrect IP address prevents communication  
+2. **IP Configuration**
+   **Problem:** Incorrect IP address prevents communication
    **Solution:** Verify the IP in scenario config matches WSL2 IP
 
-3. **Vehicle Control Instability**  
-   **Problem:** Vehicles may behave erratically after teleportation  
+3. **Vehicle Control Instability**
+   **Problem:** Vehicles may behave erratically after teleportation
    **Solution:** Reset vehicle state with `teleport vehicle_name=ego reset=true`
 
-4. **Sensor Data Missing**  
-   **Problem:** Sensors not publishing data  
+4. **Sensor Data Missing**
+   **Problem:** Sensors not publishing data
    **Solution:** Check sensor configuration and poll rates
-
-5. **SUID sandbox not configured properly**
-   **Solution:** `sudo chown root:root BeamNG.tech.v0.35.5.0/BinLinux/chrome-sandbox && sudo chmod 4755 BeamNG.tech.v0.35.5.0/BinLinux/chrome-sandbox`
 
 ## Acknowledgments
 
