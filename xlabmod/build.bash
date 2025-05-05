@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# target zip
-MOD_ZIP="${HOME}/.local/share/BeamNG.drive/0.35/mods/xlab.zip"
+GIT_ROOT=$(git rev-parse --show-toplevel)
+cd "${GIT_ROOT}/xlabmod"
 
-# ensure target dir exists
-mkdir -p "$(dirname "$MOD_ZIP")"
+# target zip
+MOD_DIR="${HOME}/.local/share/BeamNG.drive/0.35/mods"
+MOD_ZIP="${MOD_DIR}/xlab.zip"
+
+# ensure target dirs exist
+mkdir -p "$(dirname "$MOD_DIR")"
 
 # remove any existing zip
 rm -f "$MOD_ZIP"
 
 # list of globs or paths you want in the mod
-# (git ls-files will only output those that are tracked)
 declare -a WANT="*.lua"
 
 # collect only tracked files matching WANT
@@ -24,10 +27,6 @@ if [ ${#FILES[@]} -eq 0 ]; then
 fi
 
 # zip them with STORE (no compression), preserving paths
-# -0    : store only
-# -q    : quiet
-# -@    : read file-list from stdin
-printf '%s\n' "${FILES[@]}" \
-  | zip -q "$MOD_ZIP" -@
+printf '%s\n' "${FILES[@]}" | zip -q -0 "$MOD_ZIP" -@
 
 echo "Wrote ${#FILES[@]} files to $MOD_ZIP"
