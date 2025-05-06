@@ -75,57 +75,60 @@ M.handlePollGtStateGE = function(request)
 end
 
 M.handleOpenController = function(request)
-  local name = request['name']
+  local name = request.name
   log('I', logTag, 'Opening LowLevelController: ' .. (name or 'unnamed'))
 
-  local vid = scenetree.findObject(request['vid']):getID()
-  local listenIp = request['listenIp']
-  local listenPort = request['listenPort']
-  local sendIp = request['sendIp']
-  local sendPort = request['sendPort']
-  local controllerType = request['controllerType']
+  -- lookup the real vehicle ID
+  local rawVid = request.vid
+  local obj = scenetree.findObject(rawVid)
+  if not obj then
+    log('E', logTag, 'Vehicle object not found: ' .. tostring(rawVid))
+    request:sendACK('OpenedController', false)
+    return
+  end
+  local vid = obj:getID()
 
-  -- Link to gtState sensor if provided
-  local gtStateName = request['gtStateName']
-  local gtStateSensorId = nil
-  if gtStateName and GtStates[gtStateName] then
-    gtStateSensorId = GtStates[gtStateName]
-    log(
-      'I',
-      logTag,
-      'Controller will use gtState sensor: ' .. gtStateName .. ' (ID: ' .. gtStateSensorId .. ')'
-    )
-  else
-    log(
-      'W',
-      logTag,
-      'No valid gtState sensor name provided, controller will use limited vehicle state'
-    )
+  -- build our data table, filtering out unwanted keys
+  local skipKeys = {
+    name = true,
+    vid = true,
+    type = true,
+    ack = true,
+    _id = true,
+    handled = true,
+  }
+  local data = { controllerId = name }
+  for k, v in pairs(request) do
+    if not skipKeys[k] then
+      local vt = type(v)
+      if vt == 'string' or vt == 'number' or vt == 'boolean' or vt == 'table' then data[k] = v end
+    end
   end
 
-  -- Create the controller data
-  local data = {
-    controllerId = name,
-    listenIp = listenIp,
-    listenPort = listenPort,
-    sendIp = sendIp,
-    sendPort = sendPort,
-    gtStateSensorId = gtStateSensorId,
-    controllerType = controllerType,
-  }
+  -- handle gtStateName → gtStateSensorId
+  if data.gtStateName then
+    local sid = GtStates[data.gtStateName]
+    if sid then
+      data.gtStateSensorId = sid
+      log('I', logTag, 'Using gtState sensor: ' .. data.gtStateName .. ' (ID:' .. sid .. ')')
+    else
+      log('W', logTag, 'No valid gtState name, using limited vehicle state')
+    end
+    data.gtStateName = nil
+  end
 
-  -- Serialize data and send to vehicle
-  local serializedData = string.format('extensions.xlab_controller.create(%q)', lpack.encode(data))
-  be:queueObjectLua(vid, serializedData)
+  -- send into the vehicle
+  local payload = lpack.encode(data)
+  local cmd = string.format('extensions.xlab_controller.create(%q)', payload)
+  be:queueObjectLua(vid, cmd)
 
-  -- Configure and start the controller
+  -- track it
   Controllers[name] = {
     vid = vid,
-    gtStateSensorId = gtStateSensorId,
-    gtStateName = gtStateName,
+    gtStateSensorId = data.gtStateSensorId,
   }
 
-  log('I', logTag, string.format('Opened %s:%s ', name, controllerType))
+  log('I', logTag, string.format('Opened %s:%s', name, data.controllerType or ''))
   request:sendACK('OpenedController')
 end
 
