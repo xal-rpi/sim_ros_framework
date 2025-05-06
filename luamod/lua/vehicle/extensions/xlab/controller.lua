@@ -4,24 +4,18 @@ local M = {}
 -- Module state variables
 local controllers = {} -- Collection of active Groundtruth state sensors
 
-function M.create(data)
-  -- Create a controller instance for this GtState sensor
-  local decodedData = lpack.decode(data)
-  local controllerData = {
-    controllerId = decodedData.controllerId,
-    listenIp = decodedData.listenIp,
-    listenPort = decodedData.listenPort,
-    sendIp = decodedData.sendIp,
-    sendPort = decodedData.sendPort,
-    gtStateSensorId = decodedData.gtStateSensorId,
-    controllerType = decodedData.controllerType,
-  }
+M.create = function(data)
+  local decoded = lpack.decode(data)
+  local controllerData = {}
+  for k, v in pairs(decoded) do
+    controllerData[k] = v
+  end
 
-  controllers[decodedData.controllerId] = {
+  controllers[decoded.controllerId] = {
     data = controllerData,
     controller = controller.loadControllerExternal(
       'xlab/controller_manager',
-      'controller' .. decodedData.controllerId,
+      'controller' .. decoded.controllerId,
       controllerData
     ),
   }
