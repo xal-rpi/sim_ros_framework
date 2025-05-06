@@ -35,6 +35,7 @@ local common = {
   sendPort = nil,
   socketIn = nil,
   socketOut = nil,
+  controllerRate = 0,
 
   performanceMetrics = {
     latency = nil,
@@ -62,11 +63,11 @@ local common = {
     engineTorque = 0,
     maxTorque = 0,
     maxRPM = 0,
-    currentSteeringAngle = 0,
-    maxSteeringAngle = 0.7,
+    currentStWheelAngle = 0,
+    -- maxSteeringAngle = 40, -- road wheel angle
     wheelRadius = 0.3,
     gearRatio = 1,
-    mass = 1500,
+    mass = 1200,
     torqueCurve = {},
   },
 }
@@ -81,9 +82,7 @@ local function updateVehicleAndCacheState()
   if common.gtStateManager and common.gtStateSensorId then
     if not common.cachedGtReading or (now - common.lastGtReadingTime > 0.1) then
       local mgr = common.gtStateManager
-      if mgr.getGtStateReadings then
-        common.cachedGtReading = mgr.getGtStateReadings(common.gtStateSensorId)[1]
-      elseif mgr.geGtStateReading then
+      if mgr.geGtStateReading then
         common.cachedGtReading = mgr.geGtStateReading(common.gtStateSensorId)
       end
       common.lastGtReadingTime = now
@@ -104,7 +103,7 @@ local function updateVehicleAndCacheState()
       or electrics.values.wheelspeed
       or 0
     -- steering
-    vs.currentSteeringAngle = r.steering or electrics.values.steering or 0
+    vs.currentStWheelAngle = r.steering or electrics.values.steering or 0
     -- gear
     if r.gearRatio then vs.gearRatio = r.gearRatio end
   else
@@ -115,7 +114,7 @@ local function updateVehicleAndCacheState()
       vs.engineTorque = e.outputTorque or 0
     end
     vs.wheelspeed = electrics.values.wheelspeed or 0
-    vs.currentSteeringAngle = electrics.values.steering or 0
+    vs.currentStWheelAngle = electrics.values.steering or 0
     local gb = powertrain.getDevice('gearbox')
     if gb then vs.gearRatio = gb.gearRatio or 1 end
   end
@@ -147,21 +146,22 @@ local function initVehicleStaticValues()
     log('W', logTag, 'wheels data unavailable')
   end
 
-  if hydros then
-    for _, h in pairs(hydros.hydros) do
-      --check if it's a steering hydro
-      if h.inputSource == 'steering_input' then
-        --if the value is present, scale the values
-        if h.steeringWheelLock then
-          vs.maxSteeringAngle = math.abs(h.steeringWheelLock) / 2
-          log('I', logTag, 'max steering angle = ' .. vs.maxSteeringAngle)
-          break
-        end
-      end
-    end
-  else
-    log('W', logTag, 'hydros unavailable')
-  end
+  -- This gets steering column angle, not wheel angle
+  -- if hydros then
+  --   for _, h in pairs(hydros.hydros) do
+  --     --check if it's a steering hydro
+  --     if h.inputSource == 'steering_input' then
+  --       --if the value is present, scale the values
+  --       if h.steeringWheelLock then
+  --         vs.maxSteeringAngle = math.abs(h.steeringWheelLock) / 2
+  --         log('I', logTag, 'max steering angle = ' .. vs.maxSteeringAngle)
+  --         break
+  --       end
+  --     end
+  --   end
+  -- else
+  --   log('W', logTag, 'hydros unavailable')
+  -- end
 
   if v and v.data and v.data.nodes then
     local sum = 0
@@ -208,8 +208,8 @@ local function commonInit(data)
   common.sendIp = data.sendIp
   common.sendPort = data.sendPort
 
-  -- Override any calibration params
-  if data.calibration then M.calibrate(data.calibration) end
+  -- Controller rate
+  common.controllerRate = data.controllerRate
 
   -- init vehicle state
   initVehicleStaticValues()
@@ -218,7 +218,6 @@ local function commonInit(data)
   common.gtStateSensorId = data.gtStateSensorId
   if extensions.xlab_gtState then
     common.gtStateManager = extensions.xlab_gtState
-    log('I', logTag, 'Found xlab_gtState extension')
   else
     log('W', logTag, 'gtState extension not found')
   end
@@ -232,7 +231,7 @@ local function commonInit(data)
     return false
   end
   common.socketIn:settimeout(0)
-  log('I', logTag, 'Bound UDP receive socket on *:' .. common.listenPort)
+  log('D', logTag, 'Bound UDP receive socket on' .. common.listenIp .. ':' .. common.listenPort)
 
   common.socketOut = socket.udp()
   common.socketOut:settimeout(0)
@@ -259,6 +258,13 @@ function M.init(data)
   end
 
   activeController = ctl
+
+  -- Override any calibration params
+  if data.calibration then
+    M.calibrate(data.calibration)
+  else
+    log('W', logTag, 'No calibration data sent')
+  end
   if activeController.init then activeController.init(common) end
 end
 
@@ -287,7 +293,9 @@ end
 
 function M.calibrate(params)
   if activeController and activeController.calibrate then
-    activeController.calibrate(params, common)
+    activeController.calibrate(params)
+  else
+    log('W', logTag, 'No controller found for calibration')
   end
 end
 
