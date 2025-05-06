@@ -6,8 +6,10 @@
 local M = {}
 
 -- Import necessary math functions for performance
-local sqrt, abs, acos, max = math.sqrt, math.abs, math.acos, math.max
+local sqrt, abs, acos, max, min = math.sqrt, math.abs, math.acos, math.max, math.min
 local constants = { rpmToAV = 0.104719755, avToRPM = 9.549296596425384 }
+
+local function sign(x) return max(min((x * 1e200) * 1e200, 1), -1) end
 
 -- Logging tag for debugging purposes
 local logTag = 'GtState'
@@ -282,31 +284,35 @@ local function update(dtSim)
   local quatEst = getQuaternionFromDir(currentDir, worldLeft, worldThird) -- qx, qy, qz, qw
 
   -- ----------------------------------------------------------------------
-  --                     WheelSpeed Calculation                          --
+  --                     WheelAngle Calculation                          --
   -- ----------------------------------------------------------------------
-  local wheel_fr_info = getWheelInfos(wheel_fr)
-  -- wheel_fr_info.angle = acos(
-  --     obj:nodeVecPlanarCosRightForward(wheel_fr.node1, wheel_fr.node2)
-  -- ) * signSteering
-  wheel_fr_info.angle = currVeh:nodeVecPlanarCosRightForward(wheel_fr.node1, wheel_fr.node2)
-  local wheel_fl_info = getWheelInfos(wheel_fl)
-  -- wheel_fl_info.angle = acos(
-  --     obj:nodeVecPlanarCosRightForward(wheel_fl.node2, wheel_fl.node1)
-  -- ) * signSteering
-  wheel_fl_info.angle = currVeh:nodeVecPlanarCosRightForward(wheel_fl.node2, wheel_fl.node1)
+  local signSteering = sign(electrics.values.steering_input)
 
-  -- Calculating steering angle for rear wheels is probably unnecessary/useless
+  -- helper: planar angle (deg) between two nodes, with sign
+  local function planarAngleDeg(nodeA, nodeB, signSteer)
+    local cosAng = obj:nodeVecPlanarCosRightForward(nodeA, nodeB)
+    -- guard against tiny numerical drift
+    cosAng = math.max(-1, math.min(1, cosAng))
+    local angRad = acos(cosAng) * signSteer
+    return math.deg(angRad)
+  end
+
+  -- front right
+  local wheel_fr_info = getWheelInfos(wheel_fr)
+  wheel_fr_info.angle = planarAngleDeg(wheel_fr.node1, wheel_fr.node2, signSteering)
+
+  -- front left (note swapped order if needed)
+  local wheel_fl_info = getWheelInfos(wheel_fl)
+  wheel_fl_info.angle = planarAngleDeg(wheel_fl.node2, wheel_fl.node1, signSteering)
+
+  -- rear right
   local wheel_rr_info = getWheelInfos(wheel_rr)
-  -- wheel_rr_info.angle = acos(
-  --     obj:nodeVecPlanarCosRightForward(wheel_rr.node1, wheel_rr.node2)
-  -- )
-  wheel_rr_info.angle = currVeh:nodeVecPlanarCosRightForward(wheel_rr.node1, wheel_rr.node2)
+  wheel_rr_info.angle = planarAngleDeg(wheel_rr.node1, wheel_rr.node2, signSteering)
+
+  -- rear left
   local wheel_rl_info = getWheelInfos(wheel_rl)
-  -- wheel_rl_info.angle = acos(
-  --     obj:nodeVecPlanarCosRightForward(wheel_rl.node2, wheel_rl.node1)
-  -- )
-  wheel_rl_info.angle = currVeh:nodeVecPlanarCosRightForward(wheel_rl.node2, wheel_rl.node1)
-  -- -- ------------------------------------------------------------------------
+  wheel_rl_info.angle = planarAngleDeg(wheel_rl.node2, wheel_rl.node1, signSteering)
+  --  -------------------------------------------------------
 
   -- These inputs are updated at a lower frequency than the physics steps.
   local elecVals = electrics.values
