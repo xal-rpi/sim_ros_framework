@@ -4,8 +4,7 @@ local common
 local logTag = 'controller_default'
 
 -- Module-local state
-local updateRate = 0.02 -- 50 Hz
-local updateTimer = 0
+local updateAccum = 0
 local messageCounter = 0
 local nowSim = 0
 
@@ -30,7 +29,25 @@ local controllerState = {
   lastAppliedSteering = 0,
 
   prevTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
-  nextTargets = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
+  nextTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
+}
+
+local calibration = {
+  steeringP = 1,
+  steeringI = 0.0,
+  steeringD = 0.0,
+  steeringDeadzone = 0.01,
+  throttleP = 1.0,
+  throttleI = 0.2,
+  throttleD = 0.05,
+  throttleMinRamp = 1.0,
+  throttleMaxRamp = 10.0,
+  brakeP = 1.0,
+  brakeI = 0.2,
+  brakeD = 0.0,
+  brakeMinRamp = 1.0,
+  brakeMaxRamp = 5.0,
+  maxSteeringAngle = 40,
 }
 
 -- Parse incoming JSON control message
@@ -141,7 +158,7 @@ local function createStateMessage()
     engine = {
       rpm = vr.RPM or vs.rpm,
       torque = vr.engineTorque or vs.engineTorque,
-      throttle = vr.throttle or electrics.values.throttle or 0,
+      throttle = vr.throttle or 0,
       max_torque = vs.maxTorque,
       max_rpm = vs.maxRPM,
     },
@@ -177,11 +194,11 @@ local function createStateMessage()
 
     -- Vehicle control inputs
     controls = {
-      steering = vr.steering or vs.currentSteeringAngle,
-      throttle = vr.throttle or electrics.values.throttle or 0,
-      brake = vr.brake or electrics.values.brake or 0,
-      clutch = vr.clutch or electrics.values.clutch or 0,
-      parkingbrake = vr.pbrake or electrics.values.parkingbrake or 0,
+      steering = vr.steering,
+      throttle = vr.throttle,
+      brake = vr.brake,
+      clutch = vr.clutch,
+      parkingbrake = vr.pbrake,
     },
   }
   local ok, js = pcall(jsonEncode, state)
@@ -209,21 +226,31 @@ local function calculateThrottleFromTorque(reqT, rpm)
 end
 
 local function updateSteeringPID(target, current, dt)
-  controllerState.steeringError = target - current
+  -- Compute error in degrees
+  local e = target - current
+
+  -- Deadzone: if error is small, treat as zero
+  if math.abs(e) < calibration.steeringDeadzone then e = 0 end
+
+  -- Integral term (limit accumulation when large command)
   if math.abs(controllerState.lastAppliedSteering) < 1.0 then
-    controllerState.steeringErrorIntegral = controllerState.steeringErrorIntegral
-      + controllerState.steeringError * dt
+    controllerState.steeringErrorIntegral = controllerState.steeringErrorIntegral + e * dt
   end
-  local deriv = (controllerState.steeringError - controllerState.steeringErrorPrev) / dt
-  controllerState.steeringErrorPrev = controllerState.steeringError
-  if math.abs(controllerState.steeringError) < common.calibration.steeringDeadzone then
-    controllerState.steeringError = 0
-  end
-  local out = common.calibration.steeringP * controllerState.steeringError
-    + common.calibration.steeringI * controllerState.steeringErrorIntegral
-    + common.calibration.steeringD * deriv
-  local val = out / (common.vehicleState.maxSteeringAngle + 1e-6)
-  return math.min(math.max(val, -1), 1)
+
+  -- Derivative term
+  local d = (e - controllerState.steeringErrorPrev) / (dt + 1e-6)
+  controllerState.steeringErrorPrev = e
+
+  -- PID output (still in degrees * gain)
+  local steer = calibration.steeringP * e
+    + calibration.steeringI * controllerState.steeringErrorIntegral
+    + calibration.steeringD * d
+
+  -- Clamp to [-1,1]
+  steer = math.max(-1, math.min(1, steer))
+
+  controllerState.lastAppliedSteering = steer
+  return steer
 end
 
 local function applyRateLimit(cur, tgt, minR, maxR, dt)
@@ -252,6 +279,7 @@ local function applyTargets(dt)
   -- lerp each channel
   local desiredTorque = p.engine_torque + (n.engine_torque - p.engine_torque) * f
   local desiredSteerAng = p.road_wheel_angle + (n.road_wheel_angle - p.road_wheel_angle) * f
+  local desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
   local desiredBrakeT = p.brake_torque + (n.brake_torque - p.brake_torque) * f
 
   -- throttle
@@ -259,18 +287,22 @@ local function applyTargets(dt)
   thr = applyRateLimit(
     controllerState.lastAppliedThrottle,
     thr,
-    common.calibration.throttleMinRamp,
-    common.calibration.throttleMaxRamp,
+    calibration.throttleMinRamp,
+    calibration.throttleMaxRamp,
     dt
   )
   controllerState.lastAppliedThrottle = thr
 
   -- steering via PID
-  local steer = updateSteeringPID(
-    desiredSteerAng,
-    common.vehicleState.currentSteeringAngle * common.vehicleState.maxSteeringAngle,
-    dt
-  )
+  local vr = common.cachedGtReading or {}
+  local angFR = vr.wheelFR.angle
+  local angFL = vr.wheelFL.angle
+  local currentWheelAng = (angFR + angFL) / 2
+  local maxAng = calibration.maxSteeringAngle
+  local current_steer = currentWheelAng / maxAng
+  current_steer = math.max(-1, math.min(1, current_steer))
+  local steer = updateSteeringPID(desiredSteer, current_steer, dt)
+  controllerState.lastAppliedSteering = steer
 
   -- brake
   local estMax = common.vehicleState.mass * 10
@@ -278,8 +310,8 @@ local function applyTargets(dt)
   br = applyRateLimit(
     controllerState.lastAppliedBrake,
     br,
-    common.calibration.brakeMinRamp,
-    common.calibration.brakeMaxRamp,
+    calibration.brakeMinRamp,
+    calibration.brakeMaxRamp,
     dt
   )
   controllerState.lastAppliedBrake = br
@@ -314,6 +346,8 @@ local function applyTargets(dt)
           simTimeApplied
         )
       )
+      log('D', logTag, 'desired ' .. desiredSteer .. ' / current ' .. current_steer)
+      log('D', logTag, 'target ang ' .. desiredSteerAng .. ' / current ang ' .. currentWheelAng)
     end
   end
 end
@@ -327,6 +361,15 @@ end
 
 function M.update(dt)
   if not common.isRunning then return end
+
+  -- limit rate
+  updateAccum = updateAccum + dt
+  if updateAccum >= common.controllerRate then
+    updateAccum = updateAccum - common.controllerRate
+  else
+    return
+  end
+
   nowSim = common.getSimTime()
   -- track true update rate
   realUpdateCount = realUpdateCount + 1
@@ -357,15 +400,13 @@ function M.update(dt)
   common.updateGtReading()
 
   -- 3) always apply controls (with interpolation) every frame
-  applyTargets(dt)
+  applyTargets(common.controllerRate) -- dt) fixed rate for better PID
 
   -- 4) send state message at fixed rate
-  updateTimer = updateTimer + dt
-  if common.socketOut and updateTimer >= updateRate then
+  if common.socketOut then
     local s, se = createStateMessage(), nil
     _, se = common.socketOut:sendto(s, common.sendIp, common.sendPort)
     if se then log('E', logTag, 'socketOut err=' .. tostring(se)) end
-    updateTimer = updateTimer - updateRate
   elseif not common.socketOut then
     log('E', logTag, 'socketOut is nil')
   end
@@ -379,10 +420,13 @@ function M.stop() log('I', logTag, 'Default controller cleanup') end
 function M.setGtStateSensor(id) common.gtStateSensorId = id end
 
 function M.calibrate(params)
+  log('I', logTag, 'Calibrating controller')
   for k, v in pairs(params) do
-    if common.calibration[k] ~= nil then
-      common.calibration[k] = v
-      log('I', logTag, 'cal.' .. k .. '=' .. tostring(v))
+    if calibration[k] ~= nil then
+      calibration[k] = v
+      log('I', logTag, '    ' .. k .. '=' .. tostring(v))
+    else
+      log('W', logTag, 'calibration entry ' .. k .. ' not found')
     end
   end
 end
@@ -401,7 +445,7 @@ function M.reset()
     prevTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
     nextTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
   }
-  updateTimer = 0
+  updateAccum = 0
   messageCounter = 0
   common.lastGtReadingTime = 0
   common.cachedGtReading = nil
@@ -412,7 +456,7 @@ function M.getStatus()
   return {
     isRunning = common.isRunning,
     performanceMetrics = common.performanceMetrics,
-    calibration = common.calibration,
+    calibration = calibration,
     controllerState = controllerState,
   }
 end
