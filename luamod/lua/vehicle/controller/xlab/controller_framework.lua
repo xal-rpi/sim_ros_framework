@@ -22,6 +22,8 @@ local controllerState = {
   nextTarget = { time = 0 },
 }
 
+local calibration = {}
+
 -- Parse incoming JSON control message
 local function parseMessage(msg)
   if not msg or msg == '' then return false end
@@ -187,9 +189,11 @@ function M.setGtStateSensor(id) common.gtStateSensorId = id end
 
 function M.calibrate(params)
   for k, v in pairs(params) do
-    if common.calibration[k] ~= nil then
-      common.calibration[k] = v
+    if calibration[k] ~= nil then
+      calibration[k] = v
       log('I', logTag, 'cal.' .. k .. '=' .. tostring(v))
+    else
+      log('W', logTag, 'calibration entry ' .. k .. ' not found')
     end
   end
 end
@@ -210,7 +214,7 @@ function M.getStatus()
   return {
     isRunning = common.isRunning,
     performanceMetrics = common.performanceMetrics,
-    calibration = common.calibration,
+    calibration = calibration,
     controllerState = controllerState,
     targets = common.targets,
   }
