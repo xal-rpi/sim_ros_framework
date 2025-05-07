@@ -54,7 +54,7 @@ class VehicleManager:
 
         # Let's construct the vehicle instance
         return Vehicle(
-            self._name, **self._config, extensions=["extensions/xlab/xlabCore"]
+            self._name, **self._config, extensions=["xlab/xlabCore"]
         )
 
     def get_scenario_args(self):
@@ -116,7 +116,7 @@ class VehicleManager:
         for name, config in self._sensors_config.items():
             # Log the sensor setup
             self.setup_sensor(name, config)
-            self._logger.debug(f"Sendor --{name}-- set up for vehicle --{self._name}--")
+            self._logger.debug(f"Sensor --{name}-- set up for vehicle --{self._name}--")
 
     def setup_sensor(self, name: str, config: Dict[str, Any]):
         """
@@ -204,7 +204,7 @@ class VehicleManager:
 
     def setup_controller(self, controller_name: str, controller_config: dict):
         """Set up a specific controller for the vehicle."""
-        controller_type = controller_config.get("type")
+        controller_type = controller_config.get("controllerType")
         if not controller_type:
             self._logger.error(f"Controller type not specified for {controller_name}")
             return
