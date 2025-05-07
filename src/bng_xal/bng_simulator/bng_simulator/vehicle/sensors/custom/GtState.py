@@ -254,13 +254,6 @@ class GtState(SensorBase):
         for data in self._all_data:
             # Let's convert the steering to radians
             data["steering"] = data["steering"] * self.__DEG_TO_RAD
-            # Let's convert the wheel angles, typically they are cos(angle) so need to convert to angle
-            sign_steering = np.sign(data["steering"])
-            for wheel in ["wheelFR", "wheelFL", "wheelRR", "wheelRL"]:
-                _sign_steering = sign_steering if wheel in ["wheelFR", "wheelFL"] else 1
-                data[wheel]["angle"] = float(
-                    np.arccos(data[wheel]["angle"]) * _sign_steering
-                )
 
     def ros_msg_type(self):
         """
