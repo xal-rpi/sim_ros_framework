@@ -194,6 +194,14 @@ ros2 service call /start_logger bng_msgs/srv/StartLogger "{save_location: '/tmp/
    **Problem:** Sensors not publishing data
    **Solution:** Check sensor configuration and poll rates
 
+5. **Request not handled by BNG:**
+   **Problem:** The controller crashes with `The request was not handled by BeamNG.tech` error after having hot reloaded the mod
+   **Solution:** Restart BNG
+
+6. **Torque target not applied properly:**
+   **Problem:** The reported torque is different from the target torque
+   **Solution:** Ensure units are metric in the GUI settings of BNG
+
 ## Acknowledgments
 
 - BeamNG.tech team for providing the simulation environment
