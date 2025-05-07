@@ -72,10 +72,10 @@ class HighLevelController(Node):
         self.config = ConfigManager.get_config(cfg)
 
         llc_cfg = self.config["vehicles"]["ego"]["controllers"]["LowLevelController"]
-        self.listen_ip = llc_cfg.get("listen_ip", "127.0.0.1")
-        self.listen_port = llc_cfg.get("listen_port", 25252)
-        self.send_ip = llc_cfg.get("send_ip", "127.0.0.1")
-        self.send_port = llc_cfg.get("send_port", 25252)
+        self.listen_ip = llc_cfg.get("listenIp", "127.0.0.1")
+        self.listen_port = llc_cfg.get("listenPort", 0)
+        self.send_ip = llc_cfg.get("sendIp", "127.0.0.1")
+        self.send_port = llc_cfg.get("sendPort", 0)
 
         hlc_cfg = self.config["high_level_controller"]
         self.control_fn_name = hlc_cfg["control_fn"]
@@ -117,6 +117,7 @@ class HighLevelController(Node):
     def _init_udp(self):
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listen_socket.bind((self.send_ip, self.send_port))
+        self.get_logger().info(f"Bound listen socket to {self.send_ip}:{self.send_port}")
         self.listen_socket.settimeout(0.2)
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -195,12 +196,12 @@ class HighLevelController(Node):
         if self.exit_event.is_set():
             self.stop()
             return
-        if not self.running:
+        if not self.running or self.latest_sensor_data == {}:
             return
 
         self.get_logger().debug(
             f"Calling {self.control_fn_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
-            throttle_duration_sec=2,
+            throttle_duration_sec=10,
         )
         targets = self.compute_control(
             self.latest_sensor_data, self.control_rate, self.metrics.max_latency
