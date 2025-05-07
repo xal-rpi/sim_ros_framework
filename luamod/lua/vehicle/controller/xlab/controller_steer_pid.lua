@@ -33,8 +33,8 @@ local controllerState = {
 }
 
 local calibration = {
-  steeringP = 1,
-  steeringI = 0.0,
+  steeringP = 0.36,
+  steeringI = 0.7,
   steeringD = 0.0,
   steeringDeadzone = 0.01,
   throttleP = 1.0,

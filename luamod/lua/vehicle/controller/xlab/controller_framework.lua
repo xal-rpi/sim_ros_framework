@@ -7,8 +7,7 @@ local logTag = 'controller_framework'
 local _ = nil
 
 -- Module-local state
-local updateRate = 0.02 -- 50 Hz
-local updateTimer = 0
+local updateAccum = 0
 local messageCounter = 0
 local nowSim = 0
 
@@ -136,6 +135,15 @@ end
 
 function M.update(dt)
   if not common.isRunning then return end
+
+  -- limit rate
+  updateAccum = updateAccum + dt
+  if updateAccum >= common.controllerRate then
+    updateAccum = updateAccum - common.controllerRate
+  else
+    return
+  end
+
   nowSim = common.getSimTime()
   -- track true update rate
   realUpdateCount = realUpdateCount + 1
@@ -169,12 +177,10 @@ function M.update(dt)
   applyTargets(dt)
 
   -- 4) send state message at fixed rate
-  updateTimer = updateTimer + dt
-  if common.socketOut and updateTimer >= updateRate then
+  if common.socketOut then
     local s, se = createStateMessage(), nil
     _, se = common.socketOut:sendto(s, common.sendIp, common.sendPort)
     if se then log('E', logTag, 'socketOut err=' .. tostring(se)) end
-    updateTimer = updateTimer - updateRate
   elseif not common.socketOut then
     log('E', logTag, 'socketOut is nil')
   end
@@ -188,6 +194,7 @@ function M.stop() log('I', logTag, 'Default controller cleanup') end
 function M.setGtStateSensor(id) common.gtStateSensorId = id end
 
 function M.calibrate(params)
+  log('I', logTag, 'Calibrating controller')
   for k, v in pairs(params) do
     if calibration[k] ~= nil then
       calibration[k] = v
@@ -216,7 +223,6 @@ function M.getStatus()
     performanceMetrics = common.performanceMetrics,
     calibration = calibration,
     controllerState = controllerState,
-    targets = common.targets,
   }
 end
 

@@ -3,13 +3,13 @@ local M = {}
 local common
 local logTag = 'controller_default'
 
+-- local throwaway to avoid global definition warning
+local _ = nil
+
 -- Module-local state
 local updateAccum = 0
 local messageCounter = 0
 local nowSim = 0
-
--- local throwaway to avoid global definition warning
-local _ = nil
 
 -- for logging real update rate
 local nowClock = 0
@@ -33,15 +33,11 @@ local controllerState = {
 }
 
 local calibration = {
-  steeringP = 1,
-  steeringI = 0.0,
-  steeringD = 0.0,
-  steeringDeadzone = 0.01,
   throttleP = 1.0,
   throttleI = 0.2,
   throttleD = 0.05,
-  throttleMinRamp = 1.0,
-  throttleMaxRamp = 10.0,
+  throttleMinRamp = 0.0,
+  throttleMaxRamp = 5.0,
   brakeP = 1.0,
   brakeI = 0.2,
   brakeD = 0.0,
@@ -211,46 +207,19 @@ end
 
 -- helpers for throttle/steering/brake
 local function getMaxTorqueAtRPM(rpm)
-  local vs = common.vehicleState
-  local curve = vs.torqueCurve
-  if not curve or not rpm then return vs.maxTorque or 500 end
-  local key = math.floor(rpm / 50) * 50
-  key = math.max(0, math.min(key, vs.maxRPM or key))
-  return curve[key] or vs.maxTorque or 500
+  local vs, curve = common.vehicleState, common.vehicleState.torqueCurve
+  if not curve or not rpm then return vs.maxTorque end
+  local lo = math.floor(rpm / 50) * 50
+  local hi = math.min(lo + 50, vs.maxRPM or lo)
+  local Tlo, Thi = curve[lo] or 0, curve[hi] or 0
+  local w = (rpm - lo) / (hi - lo)
+  return Tlo * (1 - w) + Thi * w
 end
 
 local function calculateThrottleFromTorque(reqT, rpm)
   local maxT = getMaxTorqueAtRPM(rpm)
   local r = reqT / (maxT + 1e-6)
   return math.min(math.max(r, 0), 1)
-end
-
-local function updateSteeringPID(target, current, dt)
-  -- Compute error in degrees
-  local e = target - current
-
-  -- Deadzone: if error is small, treat as zero
-  if math.abs(e) < calibration.steeringDeadzone then e = 0 end
-
-  -- Integral term (limit accumulation when large command)
-  if math.abs(controllerState.lastAppliedSteering) < 1.0 then
-    controllerState.steeringErrorIntegral = controllerState.steeringErrorIntegral + e * dt
-  end
-
-  -- Derivative term
-  local d = (e - controllerState.steeringErrorPrev) / (dt + 1e-6)
-  controllerState.steeringErrorPrev = e
-
-  -- PID output (still in degrees * gain)
-  local steer = calibration.steeringP * e
-    + calibration.steeringI * controllerState.steeringErrorIntegral
-    + calibration.steeringD * d
-
-  -- Clamp to [-1,1]
-  steer = math.max(-1, math.min(1, steer))
-
-  controllerState.lastAppliedSteering = steer
-  return steer
 end
 
 local function applyRateLimit(cur, tgt, minR, maxR, dt)
@@ -293,17 +262,6 @@ local function applyTargets(dt)
   )
   controllerState.lastAppliedThrottle = thr
 
-  -- steering via PID
-  local vr = common.cachedGtReading or {}
-  local angFR = vr.wheelFR.angle
-  local angFL = vr.wheelFL.angle
-  local currentWheelAng = (angFR + angFL) / 2
-  local maxAng = calibration.maxSteeringAngle
-  local current_steer = currentWheelAng / maxAng
-  current_steer = math.max(-1, math.min(1, current_steer))
-  local steer = updateSteeringPID(desiredSteer, current_steer, dt)
-  controllerState.lastAppliedSteering = steer
-
   -- brake
   local estMax = common.vehicleState.mass * 10
   local br = math.min(math.max(desiredBrakeT / estMax, 0), 1)
@@ -318,7 +276,7 @@ local function applyTargets(dt)
 
   -- send into BeamNG
   input.event('throttle', thr, FILTER_AI)
-  input.event('steering', steer, FILTER_AI)
+  input.event('steering', desiredSteer, FILTER_AI)
   input.event('brake', br, FILTER_AI)
 
   -- latency metrics (ring-buffer of size N=100)
@@ -346,8 +304,6 @@ local function applyTargets(dt)
           simTimeApplied
         )
       )
-      log('D', logTag, 'desired ' .. desiredSteer .. ' / current ' .. current_steer)
-      log('D', logTag, 'target ang ' .. desiredSteerAng .. ' / current ang ' .. currentWheelAng)
     end
   end
 end
@@ -400,7 +356,7 @@ function M.update(dt)
   common.updateGtReading()
 
   -- 3) always apply controls (with interpolation) every frame
-  applyTargets(common.controllerRate) -- dt) fixed rate for better PID
+  applyTargets(dt)
 
   -- 4) send state message at fixed rate
   if common.socketOut then
