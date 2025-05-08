@@ -53,9 +53,7 @@ class VehicleManager:
         self._logger.debug(f"Vehicle --{self._name}-- configuration: \n{self._config}")
 
         # Let's construct the vehicle instance
-        return Vehicle(
-            self._name, **self._config, extensions=["xlab/xlabCore"]
-        )
+        return Vehicle(self._name, **self._config, extensions=["xlab/xlabCore"])
 
     def get_scenario_args(self):
         """

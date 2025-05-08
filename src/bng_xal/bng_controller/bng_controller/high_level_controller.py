@@ -117,7 +117,9 @@ class HighLevelController(Node):
     def _init_udp(self):
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listen_socket.bind((self.send_ip, self.send_port))
-        self.get_logger().info(f"Bound listen socket to {self.send_ip}:{self.send_port}")
+        self.get_logger().info(
+            f"Bound listen socket to {self.send_ip}:{self.send_port}"
+        )
         self.listen_socket.settimeout(0.2)
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
