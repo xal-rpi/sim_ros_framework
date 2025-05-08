@@ -85,6 +85,10 @@ vehicles:
         gtStateName: gtstate
         calibration:
           maxSteeringAngle : 40 # has to be obtained manually
+          throttleP : 0.020
+          throttleI : 0.000
+          throttleD : 0.000
+
 
 high_level_controller:
   control_fn: compute_control_pid # The C function used
