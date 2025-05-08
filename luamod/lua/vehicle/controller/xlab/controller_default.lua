@@ -18,9 +18,8 @@ local realUpdateCount = 0
 
 -- controller internal state, now with two target slots
 local controllerState = {
-  steeringError = 0,
-  steeringErrorIntegral = 0,
-  steeringErrorPrev = 0,
+  torqueErrorIntegral = 0,
+  torqueErrorPrev = 0,
   brakeError = 0,
   brakeErrorIntegral = 0,
   brakeErrorPrev = 0,
@@ -28,21 +27,19 @@ local controllerState = {
   lastAppliedBrake = 0,
   lastAppliedSteering = 0,
 
-  prevTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
-  nextTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
+  prevTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
+  nextTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
 }
 
 local calibration = {
   throttleP = 1.0,
   throttleI = 0.2,
-  throttleD = 0.05,
-  throttleMinRamp = 0.0,
-  throttleMaxRamp = 5.0,
+  throttleD = 0.2,
   brakeP = 1.0,
   brakeI = 0.2,
   brakeD = 0.0,
-  brakeMinRamp = 1.0,
-  brakeMaxRamp = 5.0,
+  brakeMinRamp = 0.0,
+  brakeMaxRamp = 50.0,
   maxSteeringAngle = 40,
 }
 
@@ -61,7 +58,7 @@ local function parseMessage(msg)
   end
 
   -- must have the three control channels
-  if not data.engine_torque or not data.road_wheel_angle or not data.brake_torque then
+  if not data.wheel_torque or not data.road_wheel_angle or not data.brake_torque then
     log('E', logTag, 'Incomplete control message')
     return false
   end
@@ -86,9 +83,9 @@ local function parseMessage(msg)
   -- shift our two‐slot target buffer
   controllerState.prevTarget = controllerState.nextTarget
   controllerState.nextTarget = {
-    engine_torque = data.engine_torque,
-    road_wheel_angle = data.road_wheel_angle,
-    brake_torque = data.brake_torque,
+    wheelTorque = data.wheel_torque,
+    roadWheelAngle = data.road_wheel_angle,
+    brakeTorque = data.brake_torque,
     time = reachTime,
   }
 
@@ -152,8 +149,8 @@ local function createStateMessage()
 
     -- Engine data
     engine = {
-      rpm = vr.RPM or vs.rpm,
-      torque = vr.engineTorque or vs.engineTorque,
+      rpm = vr.RPM,
+      torque = vr.wheelTorque,
       throttle = vr.throttle or 0,
       max_torque = vs.maxTorque,
       max_rpm = vs.maxRPM,
@@ -163,7 +160,7 @@ local function createStateMessage()
     gearbox = {
       gear = vr.gear or 0,
       gear_index = vr.gearIndex or 0,
-      gear_ratio = vr.gearRatio or vs.gearRatio or 0,
+      gear_ratio = vr.gearRatio or 0,
     },
 
     -- Wheel data
@@ -205,35 +202,15 @@ local function createStateMessage()
   return js
 end
 
--- helpers for throttle/steering/brake
-local function getMaxTorqueAtRPM(rpm)
-  local vs, curve = common.vehicleState, common.vehicleState.torqueCurve
-  if not curve or not rpm then return vs.maxTorque end
-  local lo = math.floor(rpm / 50) * 50
-  local hi = math.min(lo + 50, vs.maxRPM or lo)
-  local Tlo, Thi = curve[lo] or 0, curve[hi] or 0
-  local w = (rpm - lo) / (hi - lo)
-  return Tlo * (1 - w) + Thi * w
-end
-
-local function calculateThrottleFromTorque(reqT, rpm)
-  local maxT = getMaxTorqueAtRPM(rpm)
-  local r = reqT / (maxT + 1e-6)
-  return math.min(math.max(r, 0), 1)
-end
-
-local function applyRateLimit(cur, tgt, minR, maxR, dt)
-  local diff = tgt - cur
-  local rate = minR + (maxR - minR) * math.abs(diff)
-  local d = math.min(math.abs(diff), rate * dt) * (diff < 0 and -1 or 1)
-  return cur + d
-end
-
 -- apply computed controls by interpolating between prevTarget→nextTarget
 local function applyTargets(dt)
+  local vs = common.vehicleState
+  local vr = common.cachedGtReading
+  local cs = controllerState
+
   -- interpolation factor
-  local p = controllerState.prevTarget
-  local n = controllerState.nextTarget
+  local p = cs.prevTarget
+  local n = cs.nextTarget
   local t0, t1 = p.time or nowSim, n.time or nowSim
   local f = 1
   if t1 > t0 then
@@ -246,33 +223,77 @@ local function applyTargets(dt)
   end
 
   -- lerp each channel
-  local desiredTorque = p.engine_torque + (n.engine_torque - p.engine_torque) * f
-  local desiredSteerAng = p.road_wheel_angle + (n.road_wheel_angle - p.road_wheel_angle) * f
+  local desiredWheelT = p.wheelTorque + (n.wheelTorque - p.wheelTorque) * f
+
+  local desiredSteerAng = p.roadWheelAngle + (n.roadWheelAngle - p.roadWheelAngle) * f
   local desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
-  local desiredBrakeT = p.brake_torque + (n.brake_torque - p.brake_torque) * f
 
+  local desiredBrakeT = p.brakeTorque + (n.brakeTorque - p.brakeTorque) * f
+
+  ------------------------------------------------------------------------
+  -- steering
+  ------------------------------------------------------------------------
+  cs.lastAppliedSteering = desiredSteer
+
+  ------------------------------------------------------------------------
   -- throttle
-  local thr = calculateThrottleFromTorque(desiredTorque, common.vehicleState.rpm)
-  thr = applyRateLimit(
-    controllerState.lastAppliedThrottle,
-    thr,
-    calibration.throttleMinRamp,
-    calibration.throttleMaxRamp,
-    dt
-  )
-  controllerState.lastAppliedThrottle = thr
+  ------------------------------------------------------------------------
+  local thr = 0
+  local desiredEngineT = 0
+  local actualEngineT = 0
+  local errorN = 0
+  local dErrorN = 0
+  local ff = 0
+  local totalRatio = 0
+  if desiredWheelT > 0 then
+    local maxT = vs.maxTorque
 
+    local pt = powertrain.getDevice
+    local gearbox = pt('gearbox')
+
+    -- pick the cumulative ratio:
+    totalRatio = gearbox.children[1].cumulativeGearRatio * vr.gearRatio
+    desiredEngineT = desiredWheelT / (totalRatio + 1e-6)
+
+    actualEngineT = vr.flywheelTorque
+
+    -- 1) feed-forward
+    ff = common.torqueLookup.calculateThrottleFromTorque(desiredEngineT, vr.RPM)
+    ff = math.min(1, math.max(0, ff))
+
+    -- 2) normalized error
+    errorN = (desiredEngineT - vr.flywheelTorque) / vs.maxTorque
+
+    -- 3) integral
+    cs.torqueErrorIntegral = cs.torqueErrorIntegral + errorN * dt
+
+    -- 4) derivative
+    dErrorN = (errorN - cs.torqueErrorPrev) / dt
+    cs.torqueErrorPrev = errorN
+
+    -- 5) PID on normalized error
+    local P_term = calibration.throttleP * errorN
+    local I_term = calibration.throttleI * cs.torqueErrorIntegral
+    local D_term = calibration.throttleD * dErrorN
+    local thrUnlim = ff + P_term + I_term + D_term
+
+    -- 6) anti-windup
+    if (thrUnlim > 1 and errorN > 0) or (thrUnlim < 0 and errorN < 0) then
+      cs.torqueErrorIntegral = cs.torqueErrorIntegral - errorN * dt
+    end
+
+    -- 7) clamp
+    thr = math.min(1, math.max(0, thrUnlim))
+  end
+
+  cs.lastAppliedThrottle = thr
+
+  ------------------------------------------------------------------------
   -- brake
-  local estMax = common.vehicleState.mass * 10
+  ------------------------------------------------------------------------
+  local estMax = vs.mass * 10
   local br = math.min(math.max(desiredBrakeT / estMax, 0), 1)
-  br = applyRateLimit(
-    controllerState.lastAppliedBrake,
-    br,
-    calibration.brakeMinRamp,
-    calibration.brakeMaxRamp,
-    dt
-  )
-  controllerState.lastAppliedBrake = br
+  cs.lastAppliedBrake = br
 
   -- send into BeamNG
   input.event('throttle', thr, FILTER_AI)
@@ -297,11 +318,30 @@ local function applyTargets(dt)
         logTag,
         string.format(
           'Applied: thr=%.2f str=%.2f br=%.2f avgLat=%.1fms\nSimTime=%.3f',
-          controllerState.lastAppliedThrottle,
-          controllerState.lastAppliedSteering,
-          controllerState.lastAppliedBrake,
+          cs.lastAppliedThrottle,
+          cs.lastAppliedSteering,
+          cs.lastAppliedBrake,
           common.performanceMetrics.avgLatency * 1000,
           simTimeApplied
+        )
+      )
+      local wheelAct = vr.wheelRL.propTorque + vr.wheelRR.propTorque
+      log(
+        'I',
+        logTag,
+        string.format(
+          'ratio=%.2f |'
+            .. ' TWgt=%.1f  Te_des=%.1f  Te_act=%.1f  TW_act=%.1f |'
+            .. ' err=%.2f  dErr=%.2f  I=%.2f  ff=%.2f',
+          totalRatio,
+          desiredWheelT,
+          desiredEngineT,
+          actualEngineT,
+          wheelAct,
+          errorN,
+          dErrorN,
+          cs.torqueErrorIntegral,
+          ff
         )
       )
     end
@@ -389,18 +429,19 @@ end
 
 function M.reset()
   controllerState = {
-    steeringError = 0,
-    steeringErrorIntegral = 0,
-    steeringErrorPrev = 0,
+    torqueErrorIntegral = 0,
+    torqueErrorPrev = 0,
     brakeError = 0,
     brakeErrorIntegral = 0,
     brakeErrorPrev = 0,
     lastAppliedThrottle = 0,
     lastAppliedBrake = 0,
     lastAppliedSteering = 0,
-    prevTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
-    nextTarget = { engine_torque = 0, road_wheel_angle = 0, brake_torque = 0, time = 0 },
+
+    prevTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
+    nextTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
   }
+
   updateAccum = 0
   messageCounter = 0
   common.lastGtReadingTime = 0

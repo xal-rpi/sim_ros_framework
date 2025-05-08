@@ -56,23 +56,63 @@ local common = {
   cachedGtReading = nil,
   lastGtReadingTime = 0,
 
+  -- RPM lookup
+  torqueLookup = nil,
+
   -- vehicle cache
   vehicleState = {
-    wheelspeed = 0,
-    rpm = 0,
-    engineTorque = 0,
     maxTorque = 0,
     maxRPM = 0,
-    currentStWheelAngle = 0,
-    -- maxSteeringAngle = 40, -- road wheel angle
     wheelRadius = 0.3,
-    gearRatio = 1,
     mass = 1200,
     torqueCurve = {},
   },
+
+  constants = { rpmToAV = 0.104719755, avToRPM = 9.549296596425384 },
 }
 
 local activeController = nil
+
+local function makeTorqueLookup(curve, vsMaxTorque)
+  -- collect & sort RPM keys
+  local rpms = {}
+  for k, _ in pairs(curve) do
+    if type(k) == 'number' then rpms[#rpms + 1] = k end
+  end
+  table.sort(rpms)
+
+  -- closure captures curve, rpms, vsMaxTorque
+  local function getMaxTorqueAtRPM(rpm)
+    if type(rpm) ~= 'number' or #rpms == 0 then return vsMaxTorque end
+    -- below range?
+    if rpm <= rpms[1] then return curve[rpms[1]] end
+    -- above range?
+    if rpm >= rpms[#rpms] then return curve[rpms[#rpms]] end
+    -- find bracket
+    local lo, hi
+    for i = 1, #rpms - 1 do
+      if rpm >= rpms[i] and rpm <= rpms[i + 1] then
+        lo, hi = rpms[i], rpms[i + 1]
+        break
+      end
+    end
+    -- interpolate
+    local Tlo, Thi = curve[lo], curve[hi]
+    local w = (rpm - lo) / (hi - lo)
+    return Tlo * (1 - w) + Thi * w
+  end
+
+  local function calculateThrottleFromTorque(reqT, rpm)
+    local maxT = getMaxTorqueAtRPM(rpm)
+    local r = reqT / (maxT + 1e-6)
+    return math.min(1, math.max(0, r))
+  end
+
+  return {
+    getMaxTorqueAtRPM = getMaxTorqueAtRPM,
+    calculateThrottleFromTorque = calculateThrottleFromTorque,
+  }
+end
 
 -- Cache vehicle state via gtState or fallback
 local function updateVehicleAndCacheState()
@@ -88,35 +128,6 @@ local function updateVehicleAndCacheState()
       common.lastGtReadingTime = now
       if not common.cachedGtReading then log('W', logTag, 'No reading from gtState sensor') end
     end
-  end
-
-  local vs = common.vehicleState
-  if common.cachedGtReading then
-    local r = common.cachedGtReading
-    -- engine
-    vs.rpm = r.RPM or electrics.values.rpm or 0
-    vs.engineTorque = r.engineTorque or 0
-    -- speed
-    vs.wheelspeed = (
-      r.vel and math.sqrt((r.vel[1] or 0) ^ 2 + (r.vel[2] or 0) ^ 2 + (r.vel[3] or 0) ^ 2)
-    )
-      or electrics.values.wheelspeed
-      or 0
-    -- steering
-    vs.currentStWheelAngle = r.steering or electrics.values.steering or 0
-    -- gear
-    if r.gearRatio then vs.gearRatio = r.gearRatio end
-  else
-    -- fallback to electrics / powertrain
-    local e = powertrain.getDevice('mainEngine')
-    if e then
-      vs.rpm = electrics.values.rpm or 0
-      vs.engineTorque = e.outputTorque or 0
-    end
-    vs.wheelspeed = electrics.values.wheelspeed or 0
-    vs.currentStWheelAngle = electrics.values.steering or 0
-    local gb = powertrain.getDevice('gearbox')
-    if gb then vs.gearRatio = gb.gearRatio or 1 end
   end
 
   return common.cachedGtReading
@@ -222,6 +233,10 @@ local function commonInit(data)
     log('W', logTag, 'gtState extension not found')
   end
   common.updateGtReading = updateVehicleAndCacheState
+
+  -- Torque RPM lookup
+  common.torqueLookup =
+    makeTorqueLookup(common.vehicleState.torqueCurve, common.vehicleState.maxTorque)
 
   -- Create & bind UDP sockets
   common.socketIn = socket.udp()
