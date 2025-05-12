@@ -168,20 +168,16 @@ local function createStateMessage()
       FR = {
         steering_angle = (vr.wheelFR and vr.wheelFR.angle) or 0,
         angular_velocity = (vr.wheelFR and vr.wheelFR.angVel) or 0,
-        slip_ratio = (vr.wheelFR and vr.wheelFR.slip) or 0,
       },
       FL = {
         steering_angle = (vr.wheelFL and vr.wheelFL.angle) or 0,
         angular_velocity = (vr.wheelFL and vr.wheelFL.angVel) or 0,
-        slip_ratio = (vr.wheelFL and vr.wheelFL.slip) or 0,
       },
       RR = {
         angular_velocity = (vr.wheelRR and vr.wheelRR.angVel) or 0,
-        slip_ratio = (vr.wheelRR and vr.wheelRR.slip) or 0,
       },
       RL = {
         angular_velocity = (vr.wheelRL and vr.wheelRL.angVel) or 0,
-        slip_ratio = (vr.wheelRL and vr.wheelRL.slip) or 0,
       },
     },
 
