@@ -247,6 +247,37 @@ class SimulationShell(cmd.Cmd, Node):
         else:
             print("Failed to send control command")
 
+    def do_stop_safety_features(self, arg):
+        """
+        Disable safety features on the current vehicle.
+
+        Usage: stop_safety_features
+        """
+        response = self.execute_request("stop_safety_features")
+        if response and response.get("success", False):
+            print("Safety features stopped successfully")
+        else:
+            print(f"Failed to stop safety features: {response}")
+
+    def do_set_4wd_mode(self, arg):
+        """
+        Set 4WD mode (defaults to 2WD/high).
+
+        Usage: set_4wd_mode [mode=<2WD|4WD>] [range_mode=<high|low>]
+
+        Example: set_4wd_mode
+                 set_4wd_mode mode=4WD range_mode=low
+        """
+        args = self.parse_args(arg)
+        # default to 2WD/high if no args passed
+        if not args:
+            args = {"mode": "2WD", "range_mode": "high"}
+        response = self.execute_request("set_4WD_mode", **args)
+        if response and response.get("success", False):
+            print("4WD mode set successfully")
+        else:
+            print(f"Failed to set 4WD mode: {response}")
+
     def do_logger(self, arg):
         """
         Start or stop the logger.

@@ -21,7 +21,7 @@ setup(
     install_requires=[
         "setuptools",
         "beamngpy",  # Explicit dependency
-        # 'PyYAML',    # For config parsing
+        "PyYAML",  # For config parsing
         "numpy",  # Commonly needed for sensor data
         "tqdm",  # Progress bar for logging
     ],
@@ -37,6 +37,7 @@ setup(
         "console_scripts": [
             "sim_manager_node = bng_simulator.sim_manager_node:main",
             "sim_shell = bng_simulator.scripts.sim_shell:main",
+            "start_logs = bng_simulator.scripts.start_logs:main",
         ],
     },
 )
