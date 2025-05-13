@@ -9,11 +9,7 @@ from rclpy.node import Node
 from multiprocessing import Queue
 
 from bng_simulator.core.simulation_manager import SimulationManager
-from bng_simulator.utils.io_dict_utils import (
-    load_yaml,
-    convert_dict_to_str,
-    convert_str_to_dict,
-)
+from bng_simulator.utils.io_dict_utils import convert_dict_to_str, convert_str_to_dict
 
 # Services imports
 from bng_msgs.srv import ExecuteRequest, StartLogger, StopLogger
@@ -48,6 +44,21 @@ class SimulationManagerNode(Node):
         }
         log_level = log_level_map.get(log_level_str, rclpy.logging.LoggingSeverity.INFO)
         rclpy.logging.set_logger_level(self.logger.name, log_level)
+
+        # Catch all debug from external modules
+        if log_level_str == "FULL":
+            import logging
+            from sys import stderr
+
+            for h in logging.root.handlers[:]:
+                logging.root.removeHandler(h)
+
+            fmt = "[%(levelname)s] [%(name)s]: %(message)s"
+            logging.basicConfig(
+                level=logging.DEBUG,
+                stream=stderr,
+                format=fmt,
+            )
 
         # Create simulation manager
         self.sim_manager = SimulationManager.from_file(
