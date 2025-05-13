@@ -7,9 +7,9 @@ local logTag = 'controller_default'
 local _ = nil
 
 -- Module-local state
-local updateAccum = 0
 local messageCounter = 0
-local nowSim = 0
+local nowSim = 0.0
+local nextUpdateTime = 0.0
 
 -- for logging real update rate
 local nowClock = 0
@@ -197,7 +197,7 @@ local function createStateMessage()
   end
   return js
 end
-
+local csvHeaders, csvData, loggerTimer, csv_logging = nil, nil, 0.0, true
 -- apply computed controls by interpolating between prevTarget→nextTarget
 local function applyTargets(dt)
   local vs = common.vehicleState
@@ -242,16 +242,22 @@ local function applyTargets(dt)
   local ff = 0
   local totalRatio = 0
   if desiredWheelT > 0 then
-    local maxT = vs.maxTorque
-
     local pt = powertrain.getDevice
     local gearbox = pt('gearbox')
-
-    -- pick the cumulative ratio:
     totalRatio = gearbox.children[1].cumulativeGearRatio * vr.gearRatio
-    desiredEngineT = desiredWheelT / (totalRatio + 1e-6)
 
+    -- raw engine torque demand
+    desiredEngineT = desiredWheelT / (totalRatio + 1e-6)
     actualEngineT = vr.flywheelTorque
+
+    -- --–––  STATIC GAIN + OFFSET CORRECTION  ––––--
+    -- Computed from a linear regression between actual wheel torque and
+    -- theorical wheel torque (engine torque * totalRatio)
+    local K_stat = 1.10789884832988
+    local B_fric = 398.247968291034
+
+    local wheelTCorr = K_stat * desiredWheelT + B_fric * (desiredWheelT > 0 and 1 or -1)
+    desiredEngineT = wheelTCorr / (totalRatio + 1e-6)
 
     -- 1) feed-forward
     ff = common.torqueLookup.calculateThrottleFromTorque(desiredEngineT, vr.RPM)
@@ -304,11 +310,33 @@ local function applyTargets(dt)
     pm.avgLatency = pm.latency:average()
     pm.maxLatency = pm.latency.max
   end
-
+  if csv_logging then
+    loggerTimer = loggerTimer + dt
+    table.insert(csvData, {
+      string.format('%.3f', nowSim),
+      string.format('%.2f', desiredEngineT),
+      string.format('%.2f', vr.flywheelTorque or 0),
+      string.format('%.2f', desiredWheelT),
+      string.format('%.2f', vr.wheelRL.propTorque + vr.wheelRR.propTorque),
+      string.format('%.2f', totalRatio),
+      string.format('%.4f', errorN),
+      string.format('%.2f', vr.flywheelTorque * totalRatio),
+    })
+    -- Log once after 30 seconds
+    if nowSim > 30 then
+      local data = ''
+      for _, row in ipairs(csvData) do
+        data = data .. table.concat(row, ',') .. '\r\n'
+      end
+      writeFile('torque_log.csv', data)
+      log('D', logTag, 'Wrote csv file')
+      csv_logging = false
+    end
+  end
   -- occasional logging
   do
     if nowClock == realLastClock then
-      local simTimeApplied = common.getSimTime() or 0
+      local simTimeApplied = nowSim or 0
       log(
         'I',
         logTag,
@@ -349,20 +377,29 @@ end
 function M.init(c)
   common = c
   log('I', logTag, 'Default controller initialized')
+  csvHeaders = {
+    'time',
+    'Te_des',
+    'Te_act',
+    'Tw_des',
+    'Tw_act',
+    'ratio',
+    'err',
+    'Tw_th',
+  }
+  csvData = { csvHeaders }
+  loggerTimer = 0
+  nextUpdateTime = common.getSimTime()
 end
 
 function M.update(dt)
   if not common.isRunning then return end
 
   -- limit rate
-  updateAccum = updateAccum + dt
-  if updateAccum >= common.controllerRate then
-    updateAccum = updateAccum - common.controllerRate
-  else
-    return
-  end
-
   nowSim = common.getSimTime()
+  if nowSim < nextUpdateTime then return end
+  nextUpdateTime = nextUpdateTime + common.controllerRate
+
   -- track true update rate
   realUpdateCount = realUpdateCount + 1
   nowClock = os.clock()
