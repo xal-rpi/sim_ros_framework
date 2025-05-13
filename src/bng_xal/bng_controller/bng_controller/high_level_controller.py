@@ -10,6 +10,7 @@ from collections import deque
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Float32MultiArray, MultiArrayDimension
 from geometry_msgs.msg import Twist
 
 from bng_controller.core import controller_core
@@ -104,6 +105,7 @@ class HighLevelController(Node):
         self.latency_pub = self.create_publisher(Float32, "controller_latency", 1)
         self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 1)
         self.create_subscription(Twist, "cmd_vel", self._cmd_vel_callback, 1)
+        self.target_pub = self.create_publisher(Float32MultiArray, 'current_target', 1)
 
         # UDP sockets
         self._init_udp()
@@ -217,6 +219,24 @@ class HighLevelController(Node):
                 throttle_duration_sec=2,
             )
             self.last_command_time = time.time()
+
+            # --- publish dynamic targets to /current_target ---
+            keys = sorted(targets.keys())  # keep ordering stable
+            ros_msg = Float32MultiArray()
+
+            # (optional) bake the field‐names into layout.dim so a subscriber
+            # can discover them at runtime
+            ros_msg.layout.dim = [
+                MultiArrayDimension(label=k, size=1, stride=i)
+                for i, k in enumerate(keys)
+            ]
+            ros_msg.layout.data_offset = 0
+
+            # the actual payload
+            ros_msg.data = [float(targets[k]) for k in keys]
+
+            self.target_pub.publish(ros_msg)
+
         except Exception as e:
             self.get_logger().error(f"Send error: {e}")
 
