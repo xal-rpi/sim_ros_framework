@@ -44,7 +44,7 @@ The system consists of these key components:
 1. **Clone the repository:**
    ```bash
    cd ~/ros2_ws/src
-   git clone https://github.com/your-organization/bng_xal.git
+   git clone https://github.com/xal-rpi/sim_ros_framework
    ```
 
 2. **Install dependencies:**
