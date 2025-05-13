@@ -28,18 +28,24 @@ The system consists of these key components:
 
 ## Prerequisites
 
+Without Nix:
 - ROS2 (Humble or newer)
 - BeamNG.tech simulator
 - Python 3.8+
 - Operating System:
   - Windows with WSL2, or
-  - Native Linux (in beta for BeamNG.tech)
+  - Ubuntu 24.04 LTS (beta support for BeamNG.tech)
+
+With Nix:
+- Working Nix installation
+- Flakes enabled
 
 ## Installation
 
 > [!NOTE]
 > Step 2 assumes you have a working ROS2 environment.
 > The provided flake.nix will install ROS2 and dependencies, allowing you to skip step 2.
+> Simply run `nix develop` to install the ROS2 environment and all dependencies.
 
 1. **Clone the repository:**
    ```bash
