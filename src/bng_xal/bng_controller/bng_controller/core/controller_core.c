@@ -14,7 +14,7 @@ static PyObject *compute_control_pid(PyObject *self, PyObject *args) {
   /* extract simtime */
   PyObject *simtime_obj = PyDict_GetItemString(sensor_data, "simtime");
   if (!simtime_obj) {
-    PyErr_SetString(PyExc_KeyError, "\"simtime\" not found in sensor_data");
+    PyErr_SetString(PyExc_KeyError, "\"simtime\" not found");
     return NULL;
   }
   double simtime = PyFloat_AsDouble(simtime_obj);
@@ -24,30 +24,47 @@ static PyObject *compute_control_pid(PyObject *self, PyObject *args) {
   /* extract velocity.x */
   PyObject *vel_dict = PyDict_GetItemString(sensor_data, "velocity");
   if (!vel_dict || !PyDict_Check(vel_dict)) {
-    PyErr_SetString(PyExc_KeyError,
-                    "\"velocity\" not found or not a dict in sensor_data");
+    PyErr_SetString(PyExc_KeyError, "\"velocity\" missing or not a dict");
     return NULL;
   }
   PyObject *velx_obj = PyDict_GetItemString(vel_dict, "x");
   if (!velx_obj) {
-    PyErr_SetString(PyExc_KeyError,
-                    "\"x\" not found in sensor_data[\"velocity\"]");
+    PyErr_SetString(PyExc_KeyError, "\"x\" not found in velocity dict");
     return NULL;
   }
   double velx = PyFloat_AsDouble(velx_obj);
   if (PyErr_Occurred())
     return NULL;
 
-  /* --- square wave wheel torque setup --- */
-  const double frequency = 0.05;          /* Hz */
-  const double period = 1.0 / frequency; /* T */
-  double t_mod = fmod(simtime, period);
-  double brake_torque, wheel_torque;
-  wheel_torque =
-      (t_mod < period * 0.8) ? (t_mod < period * 0.4) ? 500 : 1500 : 0;
-  brake_torque = (t_mod > period * 0.8) ? 500 : 0;
+  /* --- generate a sine‐wave wheel torque whose amplitude
+        falls to zero at max_speed --- */
+  const double PI = 3.141592653589793;
+  const double freq = 0.05;        /* Hz of sine wave */
+  const double base_maxT = 2000.0; /* max wheel torque at 0 m/s  */
+  const double max_speed = 30.0;   /* torque→0 by 30 m/s */
+  const double dc_off = 0.5;       /* +0.5 shifts up 50% of availT */
 
-  /* you can still compute road_wheel_angle, brake_torque, etc. */
+  /* 1) linearly fade max torque with speed */
+  double frac = 1.0 - (velx / max_speed);
+  if (frac < 0.0)
+    frac = 0.0;
+  double availT = base_maxT * frac;
+
+  /* 2) raw shifted sine */
+  double S = sin(2.0 * PI * freq * simtime);
+  double rawT = availT * (S + dc_off);
+
+  /* 3) clamp into ±availT */
+  if (rawT > availT)
+    rawT = availT;
+  if (rawT < -availT)
+    rawT = -availT;
+
+  /* 4) split into drive vs. brake */
+  double wheel_torque = rawT > 0.0 ? rawT : 0.0;
+  double brake_torque = rawT < 0.0 ? -rawT : 0.0;
+
+  /* you can still compute road_wheel_angle, etc. */
   double road_wheel_angle = 0.0;
 
   /* build result dict */

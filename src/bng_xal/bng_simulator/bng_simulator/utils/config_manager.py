@@ -35,7 +35,7 @@ class ConfigManager:
             here = os.path.dirname(os.path.abspath(__file__))
             base = os.path.normpath(os.path.join(here, "../config"))
 
-        cls._CONFIG_DIR = os.path.join(base, "")
+        cls._CONFIG_DIR = os.path.join(base, "config")
         cls._SCENARIO_DIR = os.path.join(base, "scenarios")
         cls._VEHICLES_DIR = os.path.join(base, "vehicles")
 

@@ -94,11 +94,13 @@
 
             pythonWithBeamNGpy
 
+            python3
             pyright
             python3Packages.setuptools
             python3Packages.wheel
             python3Packages.pip
             python3Packages.cython
+            python3Packages.tqdm
 
             rosEnv
 
@@ -111,8 +113,6 @@
 
           shellHook = ''
             echo "Entering ROS2 + BeamNG Nix shell..."
-            unset PYTHONHOME
-            unset PYTHONPATH
 
             # export AMENT_PREFIX_PATH="${rosEnv}:$AMENT_PREFIX_PATH"
             export CMAKE_PREFIX_PATH="${rosEnv}:$CMAKE_PREFIX_PATH"
