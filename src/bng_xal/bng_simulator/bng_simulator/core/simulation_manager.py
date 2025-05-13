@@ -435,17 +435,34 @@ class SimulationManager:
         """Helper: poll sensor and publish based on publish_type"""
         try:
             sensor.poll()
+            all_data = sensor.get_all_data()
+
+            if getattr(node, "logger_queue", None) is not None and all_data:
+                try:
+                    node.logger_queue.put(
+                        {
+                            "vehicle_name": vehicle_name,
+                            "sensor_name": sensor_name,
+                            "data": all_data,
+                        }
+                    )
+                except Exception as e:
+                    node.get_logger().error(
+                        f"Failed to enqueue logger data for {sensor_name}: {e}"
+                    )
+
             if publisher:
                 if publish_type > 1:
-                    all_data = sensor.get_all_data()
-                    for data in all_data:
-                        msg = sensor.to_ros_msg(data)
+                    # publish each record separately
+                    for record in all_data:
+                        msg = sensor.to_ros_msg(record)
                         if msg:
                             publisher.publish(msg)
                 else:
                     msg = sensor.to_ros_msg()
                     if msg:
                         publisher.publish(msg)
+
         except Exception as e:
             node.get_logger().error(f"Error polling/publishing {sensor_name}: {e}")
 
