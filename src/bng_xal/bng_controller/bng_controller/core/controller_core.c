@@ -3,15 +3,14 @@
 #include <Python.h>
 #include <math.h>
 
-static PyObject *compute_control_pid(PyObject *self, PyObject *args) {
+static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
   PyObject *sensor_data;
   double control_rate, max_latency;
-
-  /* parse args */
-  if (!PyArg_ParseTuple(args, "Odd", &sensor_data, &control_rate, &max_latency))
+  if (!PyArg_ParseTuple(args, "Odd", &sensor_data, &control_rate,
+                        &max_latency))
     return NULL;
 
-  /* extract simtime */
+  /* --- extract simtime and vel.x exactly as before --- */
   PyObject *simtime_obj = PyDict_GetItemString(sensor_data, "simtime");
   if (!simtime_obj) {
     PyErr_SetString(PyExc_KeyError, "\"simtime\" not found");
@@ -21,10 +20,10 @@ static PyObject *compute_control_pid(PyObject *self, PyObject *args) {
   if (PyErr_Occurred())
     return NULL;
 
-  /* extract velocity.x */
   PyObject *vel_dict = PyDict_GetItemString(sensor_data, "velocity");
   if (!vel_dict || !PyDict_Check(vel_dict)) {
-    PyErr_SetString(PyExc_KeyError, "\"velocity\" missing or not a dict");
+    PyErr_SetString(PyExc_KeyError,
+                    "\"velocity\" missing or not a dict");
     return NULL;
   }
   PyObject *velx_obj = PyDict_GetItemString(vel_dict, "x");
@@ -36,83 +35,71 @@ static PyObject *compute_control_pid(PyObject *self, PyObject *args) {
   if (PyErr_Occurred())
     return NULL;
 
-  /* --- generate a sine‐wave wheel torque whose amplitude
-        falls to zero at max_speed --- */
+  /* --- fade max torque with speed --- */
   const double PI = 3.141592653589793;
-  const double freq = 0.05;        /* Hz of sine wave */
-  const double base_maxT = 2000.0; /* max wheel torque at 0 m/s  */
-  const double max_speed = 30.0;   /* torque→0 by 30 m/s */
-  const double dc_off = 0.5;       /* +0.5 shifts up 50% of availT */
-
-  /* 1) linearly fade max torque with speed */
+  const double base_maxT = 2000.0;
+  const double max_speed = 30.0;
   double frac = 1.0 - (velx / max_speed);
-  if (frac < 0.0)
-    frac = 0.0;
+  if (frac < 0.0) frac = 0.0;
   double availT = base_maxT * frac;
 
-  /* 2) raw shifted sine */
-  double S = sin(2.0 * PI * freq * simtime);
-  double rawT = availT * (S + dc_off);
+  /* --- build a 60s repeating test waveform --- */
+  double cycle = fmod(simtime, 60.0);
+  double rawT;
 
-  /* 3) clamp into ±availT */
-  if (rawT > availT)
-    rawT = availT;
-  if (rawT < -availT)
-    rawT = -availT;
+  if (cycle < 15.0) {
+    /* Step to 70% of available torque */
+    rawT = 0.7 * availT;
+  } else if (cycle < 30.0) {
+    /* Linear ramp from 0 → +100% over 15s */
+    double t = (cycle - 15.0) / 15.0;
+    rawT =  t * availT;
+  } else if (cycle < 45.0) {
+    /* Low‐frequency sine (0.2 Hz) */
+    rawT = availT *
+           sin(2.0 * PI * 0.2 * (cycle - 30.0));
+  } else {
+    /* Chirp: 0.1→1.0 Hz sweep over 15s */
+    double tc = cycle - 45.0;
+    const double Tdur = 15.0;
+    const double f0 = 0.1, f1 = 1.0;
+    double k = (f1 - f0) / Tdur;
+    double phase = 2.0 * PI * (f0 * tc + 0.5 * k * tc * tc);
+    rawT = availT * sin(phase);
+  }
 
-  /* 4) split into drive vs. brake */
+  /* Clamp into ±availT */
+  if (rawT >  availT) rawT =  availT;
+  if (rawT < -availT) rawT = -availT;
+
+  /* Split into drive vs. brake */
   double wheel_torque = rawT > 0.0 ? rawT : 0.0;
   double brake_torque = rawT < 0.0 ? -rawT : 0.0;
 
-  /* you can still compute road_wheel_angle, etc. */
-  double road_wheel_angle = 0.0;
-
-  /* build result dict */
+  /* Build result dict */
   PyObject *result = PyDict_New();
   if (!result)
     return NULL;
 
   PyDict_SetItemString(result, "wheel_torque",
                        PyFloat_FromDouble(wheel_torque));
-  PyDict_SetItemString(result, "road_wheel_angle",
-                       PyFloat_FromDouble(road_wheel_angle));
   PyDict_SetItemString(result, "brake_torque",
                        PyFloat_FromDouble(brake_torque));
+  PyDict_SetItemString(result, "road_wheel_angle",
+                       PyFloat_FromDouble(0.0));
 
-  /* compute and clamp latency */
+  /* Compute & clamp latency just as before */
   double latency = max_latency + 0.005;
-  if (latency > 0.1)
-    latency = 0.1;
+  if (latency > 0.1) latency = 0.1;
   double time_val = simtime + control_rate + latency;
-  PyDict_SetItemString(result, "time", PyFloat_FromDouble(time_val));
+  PyDict_SetItemString(result, "time",
+                       PyFloat_FromDouble(time_val));
 
   return result;
 }
+
 
 // MPC controller
-static PyObject *compute_control_mpc(PyObject *self, PyObject *args) {
-  PyObject *sensor_data;
-  if (!PyArg_ParseTuple(args, "O", &sensor_data))
-    return NULL;
-
-  // … mpc logic …
-
-  double wheel_torque = 100.0;
-  double road_wheel_angle = 2.0;
-  double brake_torque = 0.0;
-
-  PyObject *result = PyDict_New();
-  if (!result)
-    return NULL;
-  PyDict_SetItemString(result, "wheel_torque",
-                       PyFloat_FromDouble(wheel_torque));
-  PyDict_SetItemString(result, "road_wheel_angle",
-                       PyFloat_FromDouble(road_wheel_angle));
-  PyDict_SetItemString(result, "brake_torque",
-                       PyFloat_FromDouble(brake_torque));
-  return result;
-}
-
 // Empty testing controller
 static PyObject *compute_control_empty(PyObject *self, PyObject *args) {
   PyObject *sensor_data;
@@ -148,10 +135,8 @@ static PyObject *compute_control_empty(PyObject *self, PyObject *args) {
 }
 
 static PyMethodDef ControllerCoreMethods[] = {
-    {"compute_control_pid", compute_control_pid, METH_VARARGS,
+    {"compute_control_multi_test", compute_control_multi_test, METH_VARARGS,
      "PID‐based control"},
-    {"compute_control_mpc", compute_control_mpc, METH_VARARGS,
-     "MPC‐based control"},
     {"compute_control_empty", compute_control_empty, METH_VARARGS,
      "Empty testing control"},
     {NULL, NULL, 0, NULL}};
