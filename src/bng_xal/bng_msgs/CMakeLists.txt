@@ -16,6 +16,7 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BasicStateMsg.msg"
   "msg/GtStateMsg.msg"
+  "msg/HLCMsg.msg"
   "srv/ExecuteRequest.srv"
   "srv/StartLogger.srv"
   "srv/StopLogger.srv"

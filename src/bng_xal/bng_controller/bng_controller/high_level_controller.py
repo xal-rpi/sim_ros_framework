@@ -10,11 +10,12 @@ from collections import deque
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32
-from std_msgs.msg import Float32MultiArray, MultiArrayDimension
 from geometry_msgs.msg import Twist
 
 from bng_controller.core import controller_core
 from bng_simulator.utils.config_manager import ConfigManager
+from bng_simulator.utils.services_utils import convert_time_to_header
+from bng_msgs.msg import HLCMsg
 
 
 class PerformanceMetrics:
@@ -101,11 +102,9 @@ class HighLevelController(Node):
         self.message_counter = 0
 
         # pubs & subs
-        self.status_pub = self.create_publisher(Bool, "controller_status", 1)
-        self.latency_pub = self.create_publisher(Float32, "controller_latency", 1)
         self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 1)
         self.create_subscription(Twist, "cmd_vel", self._cmd_vel_callback, 1)
-        self.target_pub = self.create_publisher(Float32MultiArray, 'current_target', 1)
+        self.target_pub = self.create_publisher(HLCMsg, "hlc_msg", 1)
 
         # UDP sockets
         self._init_udp()
@@ -136,10 +135,6 @@ class HighLevelController(Node):
     def _delayed_start(self):
         if self.running:
             return
-        # publish status = True
-        st = Bool()
-        st.data = True
-        self.status_pub.publish(st)
 
         # start receive thread
         self.receive_thread = threading.Thread(
@@ -162,18 +157,12 @@ class HighLevelController(Node):
                 consecutive_timeouts = 0
                 sensor = json.loads(data.decode())
                 self.message_counter += 1
-                # stash both simtime and the low‐level realtime
                 self.latest_sensor_data = sensor
 
                 # wall clock latency
                 if self.last_command_time:
                     lat = recv_time - self.last_command_time
                     self.metrics.add(lat)
-                    # publish every 10 messages
-                    if self.message_counter % 10 == 0:
-                        m = Float32()
-                        m.data = float(self.metrics.average)
-                        self.latency_pub.publish(m)
 
             except socket.timeout:
                 consecutive_timeouts += 1
@@ -221,20 +210,18 @@ class HighLevelController(Node):
             self.last_command_time = time.time()
 
             # --- publish dynamic targets to /current_target ---
-            keys = sorted(targets.keys())  # keep ordering stable
-            ros_msg = Float32MultiArray()
+            keys = sorted(targets.keys())
+            ros_msg = HLCMsg()
+            ros_msg.header = convert_time_to_header(
+                targets["time"] if targets["time"] else self.last_command_time
+            )
 
-            # (optional) bake the field‐names into layout.dim so a subscriber
-            # can discover them at runtime
-            ros_msg.layout.dim = [
-                MultiArrayDimension(label=k, size=1, stride=i)
-                for i, k in enumerate(keys)
-            ]
-            ros_msg.layout.data_offset = 0
+            # Target
+            ros_msg.target = [float(targets[k]) for k in keys]
+            ros_msg.target_labels = keys
 
-            # the actual payload
-            ros_msg.data = [float(targets[k]) for k in keys]
-
+            # Utils
+            ros_msg.controller_latency = float(self.metrics.average)
             self.target_pub.publish(ros_msg)
 
         except Exception as e:
