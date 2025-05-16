@@ -462,7 +462,8 @@ class SimulationManager:
                     msg = sensor.to_ros_msg()
                     if msg:
                         publisher.publish(msg)
-
+        except KeyboardInterrupt:
+            node.get_logger().warn("User interrupt.")
         except Exception as e:
             node.get_logger().error(f"Error polling/publishing {sensor_name}: {e}")
 

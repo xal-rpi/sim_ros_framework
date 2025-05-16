@@ -291,9 +291,7 @@ local function update(dtSim)
   -- helper: planar angle (deg) between two nodes, with sign
   local function planarAngleRad(nodeA, nodeB, signSteer)
     local cosAng = obj:nodeVecPlanarCosRightForward(nodeA, nodeB)
-    -- guard against tiny numerical drift
-    cosAng = math.max(-1, math.min(1, cosAng))
-    return acos(cosAng) * signSteer
+    return acos(cosAng) * -signSteer
   end
 
   -- front right
