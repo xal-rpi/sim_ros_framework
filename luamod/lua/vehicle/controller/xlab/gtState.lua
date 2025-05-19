@@ -17,6 +17,40 @@ local logTag = 'GtState'
 -- Reference to the global state manager extension
 local gtStateManager = nil
 
+-- EMA alphas
+local emaAlpha = {
+  vectors = {
+    accel = { x = 0.13, y = 0.18, z = 0.16 },
+    angAccel = { x = 0.15, y = 0.23, z = 0.15 },
+    angVel = { x = 0.16, y = 0.18, z = 0.12 },
+    vel = { x = 0.28, y = 0.29, z = 0.23 },
+  },
+  scalars = {
+    flywheelTorque = 0.27,
+    gearboxTorque = 0.17,
+  },
+  wheels = {
+    wheelFL = { angVel = 0.12, speed = 0.12 },
+    wheelFR = { angVel = 0.12, speed = 0.12 },
+    wheelRL = {
+      angle = 0.23,
+      angVel = 0.46,
+      angVelB = 0.31,
+      speed = 0.21,
+    },
+    wheelRR = {
+      angle = 0.23,
+      angVel = 0.46,
+      angVelB = 0.31,
+      speed = 0.21,
+    },
+  },
+}
+local idxOf = { x = 1, y = 2, z = 3 }
+
+-- holds previous EMA values
+local emaState = {}
+
 --[[
 Sensor Core Properties
 ----------------------
@@ -357,6 +391,51 @@ local function update(dtSim)
     gearIndex = elecVals.gearIndex,
   }
 
+  -- Apply EMA filter
+  -- 1) vectors
+  for vecName, comps in pairs(emaAlpha.vectors) do
+    local vec = latestReading[vecName]
+    if vec then
+      for compName, alpha in pairs(comps) do
+        local i = idxOf[compName]
+        local raw = vec[i]
+        local key = vecName .. '_' .. compName
+        local prev = emaState[key]
+        local filt = prev and (alpha * raw + (1 - alpha) * prev) or raw
+        emaState[key] = filt
+        vec[i] = filt
+      end
+    end
+  end
+
+  -- 2) scalars
+  for name, alpha in pairs(emaAlpha.scalars) do
+    local raw = latestReading[name]
+    if raw ~= nil then
+      local prev = emaState[name]
+      local filt = prev and (alpha * raw + (1 - alpha) * prev) or raw
+      emaState[name] = filt
+      latestReading[name] = filt
+    end
+  end
+
+  -- 3) wheels
+  for wheelName, comps in pairs(emaAlpha.wheels) do
+    local wh = latestReading[wheelName]
+    if wh then
+      for compName, alpha in pairs(comps) do
+        local raw = wh[compName]
+        if raw ~= nil then
+          local key = wheelName .. '_' .. compName
+          local prev = emaState[key]
+          local filt = prev and (alpha * raw + (1 - alpha) * prev) or raw
+          emaState[key] = filt
+          wh[compName] = filt
+        end
+      end
+    end
+  end
+
   -- Store the latest readings for this State sensor in the extension. This is used for sending back on the physics step.
   gtStateManager.cacheLatestReading(sensorId, latestReading)
 
@@ -486,6 +565,8 @@ local function reset()
   readingIndex = 1
   -- Ensure GFXUpdateTime is positive and adjust the polling timer accordingly
   timeSinceLastPoll = timeSinceLastPoll % max(GFXUpdateTime, 1e-30)
+
+  emaState = {}
 end
 
 --[[
