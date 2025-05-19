@@ -51,9 +51,37 @@ def print_jitter_metrics(metrics, top_n, threshold):
     for i, (col, J, sr, sx) in enumerate(metrics[:top_n]):
         flag = "⚠️" if J >= threshold else ""
         print(
-            f"  {i+1:2d}. {col:20s}  J={J:.3f}  "
-            f"σ_res={sr:.3f}  σ_x={sx:.3f} {flag}"
+            f"  {i+1:2d}. {col:20s}  J={J:.3f}  " f"σ_res={sr:.3f}  σ_x={sx:.3f} {flag}"
         )
+
+
+def preview_saved_ema(df, saved_map, do_plot=True):
+    """
+    For each (field→α) in saved_map, compute EMA and plot orig vs EMA.
+    """
+    for fld, α in saved_map.items():
+        if fld not in df.columns:
+            print(f"!! field {fld!r} not in data, skipping")
+            continue
+
+        print(f"\n--- Replay EMA for {fld!r} with α={α:.2f} ---")
+        sub = df[["time", fld]] if "time" in df.columns else df[[fld]]
+        sub = sub.dropna()
+        x = sub["time"].values if "time" in sub.columns else np.arange(len(sub))
+        y = sub[fld].values
+
+        ema = pd.Series(y).ewm(alpha=α).mean().values
+        print(f" head orig = {y[:5].tolist()}\n head ema  = {ema[:5].tolist()}")
+
+        if do_plot:
+            plt.figure(figsize=(6, 3))
+            plt.title(f"{fld!r} (α={α:.2f})")
+            plt.plot(x, y, label="orig", lw=1)
+            plt.plot(x, ema, label="EMA", lw=2)
+            plt.xlabel("time" if "time" in df.columns else "index")
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
 
 
 def preview_ema(df, fields, alphas, do_plot):
@@ -102,7 +130,7 @@ def interactive_plot_field(df, field, init_alpha, out_csv):
     ax.plot(x, y, label="orig", lw=1)
 
     ema_vals = pd.Series(y).ewm(alpha=init_alpha).mean().values
-    ema_line, = ax.plot(x, ema_vals, label=f"EMA α={init_alpha:.2f}", lw=2)
+    (ema_line,) = ax.plot(x, ema_vals, label=f"EMA α={init_alpha:.2f}", lw=2)
     ax.legend()
 
     # Slider for α
@@ -163,11 +191,25 @@ def process_file(path, args):
 
         df = pd.DataFrame(fld_dict)
 
-        # static EMA preview
+        # EMA preview / interactive tuning for --fields
         if args.fields:
-            preview_ema(df, args.fields, args.alphas, do_plot=not args.no_plot)
+            if args.interactive:
+                # for each requested field, pop up the slider/save UI
+                for fld in args.fields:
+                    if fld not in df.columns:
+                        print(f"!! field {fld!r} not found, skipping")
+                        continue
+                    # pick an initial α (here the first of --alphas)
+                    init_alpha = args.alphas[0]
+                    print(
+                        f"\nInteractive tuning for field {fld!r} (init α={init_alpha})"
+                    )
+                    interactive_plot_field(df, fld, init_alpha, args.output_csv)
+            else:
+                # static preview only
+                preview_ema(df, args.fields, args.alphas, do_plot=not args.no_plot)
 
-        # jitter detect / interactive
+        # jitter detect / interactive tuning for jittery fields
         if args.detect_jitter:
             metrics = compute_jitter_metrics(df, args.jitter_alpha)
             if args.interactive:
@@ -204,7 +246,10 @@ def main():
     )
     p.add_argument("--top-n", type=int, default=5, help="top‐N jittery fields to show")
     p.add_argument(
-        "--jitter-threshold", type=float, default=0.1, help="flag fields with J ≥ thresh"
+        "--jitter-threshold",
+        type=float,
+        default=0.1,
+        help="flag fields with J ≥ thresh",
     )
     p.add_argument(
         "--interactive",
@@ -213,6 +258,11 @@ def main():
     )
     p.add_argument(
         "--no-plot", action="store_true", help="suppress static matplotlib plots"
+    )
+    p.add_argument(
+        "--use-csv",
+        default=None,
+        help="plot original vs EMA using saved α from --output-csv",
     )
     p.add_argument(
         "-o",
@@ -227,10 +277,45 @@ def main():
         paths = [args.file]
     elif args.dir:
         paths = sorted(
-            os.path.join(args.dir, fn) for fn in os.listdir(args.dir) if fn.endswith(".pkl")
+            os.path.join(args.dir, fn)
+            for fn in os.listdir(args.dir)
+            if fn.endswith(".pkl")
         )
     if not paths:
         print("No pickle files found. Use --file or --dir.")
+        return
+    # If user just wants to replay saved αs against data
+    if args.use_csv:
+        if pd is None or plt is None:
+            print("ERROR: pandas+matplotlib required for --use-csv")
+            return
+
+        saved = {}
+        try:
+            with open(args.use_csv, newline="") as cf:
+                r = csv.DictReader(cf)
+                for row in r:
+                    saved[row["field"]] = float(row["alpha"])
+        except FileNotFoundError:
+            print(f"ERROR: cannot open {args.output_csv!r}")
+            return
+
+        # for each pickle, plot each saved field
+        for pth in (
+            [args.file]
+            if args.file
+            else sorted(
+                os.path.join(args.dir, fn)
+                for fn in os.listdir(args.dir)
+                if fn.endswith(".pkl")
+            )
+        ):
+            print(f"\n→ Loading {pth!r}")
+            data = load_pickle(pth)
+            for (veh, sensor), fld_dict in data.items():
+                print(f"\n=== Vehicle:{veh!r} Sensor:{sensor!r} ===")
+                df = pd.DataFrame(fld_dict)
+                preview_saved_ema(df, saved, do_plot=not args.no_plot)
         return
 
     if args.interactive and plt is None:
@@ -246,4 +331,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
