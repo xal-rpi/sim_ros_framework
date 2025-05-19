@@ -114,9 +114,14 @@ vehicles:
         send_port: 64258
         gt_state_name: gtstate
         calibration:
+          maxSteeringAngle : 40 # has to be obtained manually
           steeringP: 1.2
           throttleP: 1.0
           brakeP: 1.0
+
+high_level_controller:
+  control_fn: compute_control_multi_test # The C function used
+  control_rate: 0.01
 ```
 
 ## Usage
