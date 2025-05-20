@@ -26,6 +26,15 @@ if [ ${#FILES[@]} -eq 0 ]; then
   exit 1
 fi
 
+# Compile nn util
+NN_DIR="./lua/common/extensions/xlab"
+cc -O3 -fPIC -shared -o ${NN_DIR}/libnn.so ${NN_DIR}/nn.c -lm
+FILES+=( "${NN_DIR}/libnn.so" )
+
+# Add models
+MODELS_DIR="./lua/vehicle/controller/xlab/models"
+FILES+=( "${MODELS_DIR}/test.json" )
+
 # zip them preserving paths
 printf '%s\n' "${FILES[@]}" | zip -q "$MOD_ZIP" -@
 

@@ -91,6 +91,7 @@
             gcc
             gdb
             binutils
+            bump2version
 
             pythonWithBeamNGpy
 

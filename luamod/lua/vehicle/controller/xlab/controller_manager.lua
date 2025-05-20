@@ -246,7 +246,7 @@ local function commonInit(data)
     return false
   end
   common.socketIn:settimeout(0)
-  log('D', logTag, 'Bound UDP receive socket on' .. common.listenIp .. ':' .. common.listenPort)
+  log('D', logTag, 'Bound UDP receive socket on ' .. common.listenIp .. ':' .. common.listenPort)
 
   common.socketOut = socket.udp()
   common.socketOut:settimeout(0)

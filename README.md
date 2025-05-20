@@ -114,9 +114,14 @@ vehicles:
         send_port: 64258
         gt_state_name: gtstate
         calibration:
+          maxSteeringAngle : 40 # has to be obtained manually
           steeringP: 1.2
           throttleP: 1.0
           brakeP: 1.0
+
+high_level_controller:
+  control_fn: compute_control_multi_test # The C function used
+  control_rate: 0.01
 ```
 
 ## Usage
@@ -139,34 +144,76 @@ Available options :
 
 ### Launch File Parameters
 
-#### Simulator Launch Parameters
+Simulator Launch Parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `config_path` | `[pkg_share]/config/basic_scenario.yaml` | Path to the simulation configuration file |
 | `log_level` | `INFO` | Logging level (FULL, DEBUG, INFO, WARNING, ERROR, FATAl). FULL also shows the debug info of external libraries such as rclpy and beamngpy|
 
-#### Controller Launch Parameters
+Controller Launch Parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `config_path` | `[pkg_share]/config/basic_scenario.yaml` | Path to the simulation configuration file |
 | `log_level` | `INFO` | Logging level (FULL, DEBUG, INFO, WARNING, ERROR, FATAl). FULL also shows the debug info of external libraries such as rclpy and beamngpy|
 
-### Interactive Shell
+### Available utility scripts
 
-Access the interactive simulation shell for direct control:
+#### sim_manager_node
+
+```bash
+ros2 run bng_simulator sim_manager_node \
+  --ros-args \
+    -p config_path:="/path/to/config.yaml" \
+    -p log_level:="INFO"
+```
+
+| Parameter     | Type    | Default                                                  | Description                                                       |
+|---------------|---------|----------------------------------------------------------|-------------------------------------------------------------------|
+| `config_path` | string  | `[pkg_share]/config/basic_scenario.yaml`                 | Path to the YAML scenario/vehicle configuration file.            |
+| `log_level`   | enum    | `INFO`                                                   | Logging verbosity. One of `{FULL, DEBUG, INFO, WARNING, ERROR, FATAL}`.  |
+
+#### sim_shell
+
+This interactive shell has no extra flags. Just:
 
 ```bash
 ros2 run bng_simulator sim_shell
 ```
 
-**Available commands:**
-- `vehicles` - List available vehicles
-- `teleport vehicle_name=ego pos=[0,0,0] yaw_angle=90` - Teleport a vehicle
-- `control vehicle_name=ego steering=0.5 throttle=0.7 brake=0` - Send control inputs
-- `logger start /path/to/logs` - Start data logging
-- `exec get_vehicle_properties vehicle_name=ego` - Execute custom commands
+Once inside, type `help` to see all available commands.
+
+#### start_logs
+
+```bash
+ros2 run bng_simulator start_logs [--max_queue_size N] [--flush_interval T]
+```
+
+| Flag                    | Type   | Default | Description                                       |
+|-------------------------|--------|---------|---------------------------------------------------|
+| `--max_queue_size N`    | int    | `50`    | Maximum number of messages buffered in the logger queue. |
+| `--flush_interval T`    | float  | `5.0`   | Interval (in seconds) at which the logger flushes to disk. |
+
+#### find_ema
+
+```bash
+ros2 run bng_simulator find_ema [OPTIONS]
+```
+
+| Flag                                   | Type               | Default                   | Description                                                                                       |
+|----------------------------------------|--------------------|---------------------------|---------------------------------------------------------------------------------------------------|
+| `-d, --dir DIR`                        | path               | _N/A_                     | Directory containing `data_*.pkl` files.                                                          |
+| `-f, --file FILE`                      | path               | _N/A_                     | Specific pickle file to load.                                                                     |
+| `-F, --fields F1 F2 …`                 | list of strings    | `[]`                      | Fields for which to show static EMA previews.                                                     |
+| `-a, --alphas α1 α2 …`                 | list of floats     | `[0.1, 0.3, 0.6]`         | EMA smoothing factors \( \alpha \) to preview.                                                    |
+| `--detect-jitter`                      | flag               | `false`                   | Compute & rank jitter metrics \(J = \sigma_{\mathrm{res}} / \sigma_x\).                           |
+| `--jitter-alpha α`                     | float              | `0.2`                     | EMA \( \alpha \) for residual (jitter) computation.                                               |
+| `--top-n N`                            | int                | `5`                       | Show the top-\(N\) fields by jitter metric.                                                       |
+| `--jitter-threshold T`                 | float              | `0.1`                     | Flag fields with \( J \ge T \).                                                                   |
+| `--interactive`                        | flag               | `false`                   | Launch interactive matplotlib slider to tune \( \alpha \) per field.                              |
+| `--no-plot`                            | flag               | `false`                   | Suppress static matplotlib plots during preview.                                                  |
+| `-o, --output-csv FILE`                | path               | `ema_alphas.csv`          | CSV file where tuned \( \alpha \) values are saved.                                               |
 
 ### ROS2 Services
 

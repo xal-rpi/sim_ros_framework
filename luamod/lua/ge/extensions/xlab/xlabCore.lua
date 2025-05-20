@@ -98,6 +98,13 @@ M.handleOpenController = function(request)
     handled = true,
   }
   local data = { controllerId = name }
+  if name == 'nn' then
+    assert(
+      not Engine.Sandbox.Lua.isEnabled(),
+      'This controller can only run when the Lua security sandbox is disabled. '
+        .. "You will have to restart BeamNG with the '-disable-sandbox' argument."
+    )
+  end
   for k, v in pairs(request) do
     if not skipKeys[k] then
       local vt = type(v)
@@ -193,6 +200,7 @@ end
 
 local function onInit()
   log('I', logTag, 'Extension loaded.')
+  log('D', logTag, 'Lua version: ' .. _VERSION)
   setExtensionUnloadMode(M, 'manual') -- this is needed for the extension to survive through level loads
 end
 

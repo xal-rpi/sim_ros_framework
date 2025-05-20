@@ -17,6 +17,40 @@ local logTag = 'GtState'
 -- Reference to the global state manager extension
 local gtStateManager = nil
 
+-- EMA alphas
+local emaAlpha = {
+  vectors = {
+    accel = { x = 0.13, y = 0.18, z = 0.16 },
+    angAccel = { x = 0.15, y = 0.23, z = 0.15 },
+    angVel = { x = 0.16, y = 0.18, z = 0.12 },
+    vel = { x = 0.28, y = 0.29, z = 0.23 },
+  },
+  scalars = {
+    flywheelTorque = 0.27,
+    gearboxTorque = 0.17,
+  },
+  wheels = {
+    wheelFL = { angVel = 0.12, speed = 0.12 },
+    wheelFR = { angVel = 0.12, speed = 0.12 },
+    wheelRL = {
+      angle = 0.23,
+      angVel = 0.46,
+      angVelB = 0.31,
+      speed = 0.21,
+    },
+    wheelRR = {
+      angle = 0.23,
+      angVel = 0.46,
+      angVelB = 0.31,
+      speed = 0.21,
+    },
+  },
+}
+local idxOf = { x = 1, y = 2, z = 3 }
+
+-- holds previous EMA values
+local emaState = {}
+
 --[[
 Sensor Core Properties
 ----------------------
@@ -289,29 +323,26 @@ local function update(dtSim)
   local signSteering = sign(electrics.values.steering_input)
 
   -- helper: planar angle (deg) between two nodes, with sign
-  local function planarAngleDeg(nodeA, nodeB, signSteer)
+  local function planarAngleRad(nodeA, nodeB, signSteer)
     local cosAng = obj:nodeVecPlanarCosRightForward(nodeA, nodeB)
-    -- guard against tiny numerical drift
-    cosAng = math.max(-1, math.min(1, cosAng))
-    local angRad = acos(cosAng) * signSteer
-    return math.deg(angRad)
+    return acos(cosAng) * -signSteer
   end
 
   -- front right
   local wheel_fr_info = getWheelInfos(wheel_fr)
-  wheel_fr_info.angle = planarAngleDeg(wheel_fr.node1, wheel_fr.node2, signSteering)
+  wheel_fr_info.angle = planarAngleRad(wheel_fr.node1, wheel_fr.node2, signSteering)
 
   -- front left (note swapped order if needed)
   local wheel_fl_info = getWheelInfos(wheel_fl)
-  wheel_fl_info.angle = planarAngleDeg(wheel_fl.node2, wheel_fl.node1, signSteering)
+  wheel_fl_info.angle = planarAngleRad(wheel_fl.node2, wheel_fl.node1, signSteering)
 
   -- rear right
   local wheel_rr_info = getWheelInfos(wheel_rr)
-  wheel_rr_info.angle = planarAngleDeg(wheel_rr.node1, wheel_rr.node2, signSteering)
+  wheel_rr_info.angle = planarAngleRad(wheel_rr.node1, wheel_rr.node2, signSteering)
 
   -- rear left
   local wheel_rl_info = getWheelInfos(wheel_rl)
-  wheel_rl_info.angle = planarAngleDeg(wheel_rl.node2, wheel_rl.node1, signSteering)
+  wheel_rl_info.angle = planarAngleRad(wheel_rl.node2, wheel_rl.node1, signSteering)
   --  -------------------------------------------------------
 
   -- These inputs are updated at a lower frequency than the physics steps.
@@ -359,6 +390,51 @@ local function update(dtSim)
     gearRatio = gearbox and gearbox.gearRatio or 0,
     gearIndex = elecVals.gearIndex,
   }
+
+  -- Apply EMA filter
+  -- 1) vectors
+  for vecName, comps in pairs(emaAlpha.vectors) do
+    local vec = latestReading[vecName]
+    if vec then
+      for compName, alpha in pairs(comps) do
+        local i = idxOf[compName]
+        local raw = vec[i]
+        local key = vecName .. '_' .. compName
+        local prev = emaState[key]
+        local filt = prev and (alpha * raw + (1 - alpha) * prev) or raw
+        emaState[key] = filt
+        vec[i] = filt
+      end
+    end
+  end
+
+  -- 2) scalars
+  for name, alpha in pairs(emaAlpha.scalars) do
+    local raw = latestReading[name]
+    if raw ~= nil then
+      local prev = emaState[name]
+      local filt = prev and (alpha * raw + (1 - alpha) * prev) or raw
+      emaState[name] = filt
+      latestReading[name] = filt
+    end
+  end
+
+  -- 3) wheels
+  for wheelName, comps in pairs(emaAlpha.wheels) do
+    local wh = latestReading[wheelName]
+    if wh then
+      for compName, alpha in pairs(comps) do
+        local raw = wh[compName]
+        if raw ~= nil then
+          local key = wheelName .. '_' .. compName
+          local prev = emaState[key]
+          local filt = prev and (alpha * raw + (1 - alpha) * prev) or raw
+          emaState[key] = filt
+          wh[compName] = filt
+        end
+      end
+    end
+  end
 
   -- Store the latest readings for this State sensor in the extension. This is used for sending back on the physics step.
   gtStateManager.cacheLatestReading(sensorId, latestReading)
@@ -489,6 +565,8 @@ local function reset()
   readingIndex = 1
   -- Ensure GFXUpdateTime is positive and adjust the polling timer accordingly
   timeSinceLastPoll = timeSinceLastPoll % max(GFXUpdateTime, 1e-30)
+
+  emaState = {}
 end
 
 --[[

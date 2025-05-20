@@ -6,7 +6,7 @@ package_name = "bng_simulator"
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.2.0",
     packages=find_packages(),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -38,6 +38,7 @@ setup(
             "sim_manager_node = bng_simulator.sim_manager_node:main",
             "sim_shell = bng_simulator.scripts.sim_shell:main",
             "start_logs = bng_simulator.scripts.start_logs:main",
+            "find_ema = bng_simulator.scripts.find_test_ema_gtstate:main",
         ],
     },
 )

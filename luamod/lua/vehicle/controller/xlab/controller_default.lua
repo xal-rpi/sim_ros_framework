@@ -197,7 +197,6 @@ local function createStateMessage()
   end
   return js
 end
-local csvHeaders, csvData, loggerTimer, csv_logging = nil, nil, 0.0, true
 -- apply computed controls by interpolating between prevTarget→nextTarget
 local function applyTargets(dt)
   local vs = common.vehicleState
@@ -309,29 +308,6 @@ local function applyTargets(dt)
     pm.latency:add(lat)
     pm.avgLatency = pm.latency:average()
     pm.maxLatency = pm.latency.max
-  end
-  if csv_logging then
-    loggerTimer = loggerTimer + dt
-    table.insert(csvData, {
-      string.format('%.3f', nowSim),
-      string.format('%.2f', desiredEngineT),
-      string.format('%.2f', vr.flywheelTorque or 0),
-      string.format('%.2f', desiredWheelT),
-      string.format('%.2f', vr.wheelRL.propTorque + vr.wheelRR.propTorque),
-      string.format('%.2f', totalRatio),
-      string.format('%.4f', errorN),
-      string.format('%.2f', vr.flywheelTorque * totalRatio),
-    })
-    -- Log once after 30 seconds
-    if nowSim > 30 then
-      local data = ''
-      for _, row in ipairs(csvData) do
-        data = data .. table.concat(row, ',') .. '\r\n'
-      end
-      writeFile('torque_log.csv', data)
-      log('D', logTag, 'Wrote csv file')
-      csv_logging = false
-    end
   end
   -- occasional logging
   do
@@ -475,7 +451,6 @@ function M.reset()
     nextTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
   }
 
-  updateAccum = 0
   messageCounter = 0
   common.lastGtReadingTime = 0
   common.cachedGtReading = nil
