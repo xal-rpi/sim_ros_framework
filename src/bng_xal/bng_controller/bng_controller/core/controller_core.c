@@ -136,7 +136,7 @@ static PyObject *compute_control_empty(PyObject *self, PyObject *args) {
 
 static PyMethodDef ControllerCoreMethods[] = {
     {"compute_control_multi_test", compute_control_multi_test, METH_VARARGS,
-     "PID‐based control"},
+     "Generates a multi-test waveform based on input parameters."},
     {"compute_control_empty", compute_control_empty, METH_VARARGS,
      "Empty testing control"},
     {NULL, NULL, 0, NULL}};
