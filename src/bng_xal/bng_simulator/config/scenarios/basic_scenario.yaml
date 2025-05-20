@@ -84,14 +84,14 @@ vehicles:
         sendPort: 64258
         gtStateName: gtstate
         calibration:
-          maxSteeringAngle : 40 # has to be obtained manually
-          throttleP : 0.1
+          maxSteeringAngle : 0.69 # has to be obtained manually, rad
+          throttleP : 0.2
           throttleI : 0.000
           throttleD : 0.000
 
 
 high_level_controller:
-  control_fn: compute_control_pid # The C function used
+  control_fn: C_compute_control_pid # The controller implementation
   control_rate: 0.01
 
 # ROS configuration
