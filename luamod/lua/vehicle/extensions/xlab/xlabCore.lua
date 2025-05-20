@@ -8,7 +8,6 @@
 local M = {}
 local logTag = 'XalVE'
 
-local abs = math.abs
 -- local min = math.min
 -- local acos = math.acos
 -- local sqrt = math.sqrt
