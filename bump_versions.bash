@@ -58,7 +58,7 @@ run_bump(){
     exit 1
   fi
   (
-  cd "$ROOT/src/bng_xal/$p/"
+  cd "$ROOT/src/bng_xal/$pkg/"
   bump2version "$part" \
     --config-file "$cfg" \
     --no-commit --no-tag --allow-dirty
