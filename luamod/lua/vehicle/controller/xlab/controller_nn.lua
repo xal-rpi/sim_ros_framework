@@ -228,7 +228,7 @@ function M.reset()
     prevTarget = { time = 0 },
     nextTarget = { time = 0 },
   }
-  updateTimer = 0
+  updateAccum = 0
   messageCounter = 0
   common.lastGtReadingTime = 0
   common.cachedGtReading = nil
