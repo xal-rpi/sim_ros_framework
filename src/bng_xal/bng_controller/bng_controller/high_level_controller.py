@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import socket
+import select
 import json
 import threading
 import time
@@ -147,12 +148,37 @@ class HighLevelController(Node):
         self.timer.reset()
         self.get_logger().info("HLC started")
 
+    def _recv_last(self, sock, timeout=None, bufsize=8192):
+        """
+        Block up to `timeout` seconds for *one* packet, then
+        drain everything else in the queue, returning only
+        the last datagram seen (or None on timeout).
+        """
+        # wait for at least one packet
+        ready, _, _ = select.select([sock], [], [], timeout)
+        if not ready:
+            return None
+
+        data, _ = sock.recvfrom(bufsize)
+
+        sock.setblocking(False)
+        try:
+            while True:
+                data, _ = sock.recvfrom(bufsize)
+        except BlockingIOError:
+            # no more packets available right now
+            pass
+        finally:
+            sock.setblocking(True)
+
+        return data
+
     def _receive_sensor_data(self):
         self.get_logger().info("Receive thread running")
         consecutive_timeouts = 0
         while self.running and not self.exit_event.is_set():
             try:
-                data, _ = self.listen_socket.recvfrom(8192)
+                data = self._recv_last(self.listen_socket)
                 recv_time = time.time()
                 consecutive_timeouts = 0
                 sensor = json.loads(data.decode())
