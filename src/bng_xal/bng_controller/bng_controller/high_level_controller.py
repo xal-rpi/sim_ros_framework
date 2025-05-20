@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from os import path
 import socket
 import select
 import json
@@ -13,7 +14,6 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, Float32
 from geometry_msgs.msg import Twist
 
-from bng_controller.core import controller_core
 from bng_simulator.utils.config_manager import ConfigManager
 from bng_simulator.utils.services_utils import convert_time_to_header
 from bng_msgs.msg import HLCMsg
@@ -84,12 +84,21 @@ class HighLevelController(Node):
         self.control_fn_name = hlc_cfg["control_fn"]
         self.control_rate = hlc_cfg["control_rate"]
 
-        try:
-            self.compute_control = getattr(controller_core, self.control_fn_name)
-        except AttributeError:
-            raise RuntimeError(
-                f"No function '{self.control_fn_name}' in controller_core"
-            )
+        if self.control_fn_name.startswith("PY_"):
+            import bng_controller.path_follower as path_follower
+            self.control_fn_name = self.control_fn_name[3:]
+
+            self.compute_control = getattr(path_follower, self.control_fn_name)
+        elif self.control_fn_name.startswith("C_"):
+            try:
+                from bng_controller.core import controller_core
+                self.control_fn_name = self.control_fn_name[3:]
+
+                self.compute_control = getattr(controller_core, self.control_fn_name)
+            except AttributeError:
+                raise RuntimeError(
+                    f"No function '{self.control_fn_name}' in controller_core or python controllers"
+                )
 
         self.sim_start_delay = 1  # second
 
