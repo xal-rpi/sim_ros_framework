@@ -37,6 +37,7 @@ setup(
             "high_level_controller = bng_controller.high_level_controller:main",
             "path_viz = bng_controller.path_viz:main",
             "generate_circle_path = bng_controller.scripts.generate_circle_path:main",
+            "generate_path = bng_controller.scripts.generate_path:main",
         ],
     },
 )
