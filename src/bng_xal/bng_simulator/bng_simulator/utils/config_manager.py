@@ -88,4 +88,3 @@ class ConfigManager:
         raise FileNotFoundError(
             f"Config file '{filename_or_path}' not found in: {candidates}"
         )
-

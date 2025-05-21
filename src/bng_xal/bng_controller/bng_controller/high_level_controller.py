@@ -11,7 +11,7 @@ from collections import deque
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 
 from bng_simulator.utils.config_manager import ConfigManager
@@ -86,12 +86,14 @@ class HighLevelController(Node):
 
         if self.control_fn_name.startswith("PY_"):
             import bng_controller.path_follower as path_follower
+
             self.control_fn_name = self.control_fn_name[3:]
 
             self.compute_control = getattr(path_follower, self.control_fn_name)
         elif self.control_fn_name.startswith("C_"):
             try:
                 from bng_controller.core import controller_core
+
                 self.control_fn_name = self.control_fn_name[3:]
 
                 self.compute_control = getattr(controller_core, self.control_fn_name)

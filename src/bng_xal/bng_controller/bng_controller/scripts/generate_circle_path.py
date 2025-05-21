@@ -2,6 +2,7 @@
 import argparse
 import math
 
+
 def generate_circle(radius: float, num_pts: int, closed: bool):
     """
     Generate points on a circle of radius `radius`.
@@ -18,11 +19,13 @@ def generate_circle(radius: float, num_pts: int, closed: bool):
         pts.append(pts[0])
     return pts
 
+
 def write_csv(points, filename: str):
     """Write list of (x,y) pairs to `filename` as CSV with two decimals."""
     with open(filename, "w") as f:
         for x, y in points:
             f.write(f"{x:.2f},{y:.2f}\n")
+
 
 def main():
     p = argparse.ArgumentParser(
@@ -60,6 +63,7 @@ def main():
     pts = generate_circle(args.radius, args.num_points, args.closed)
     write_csv(pts, args.output)
     print(f"Wrote {len(pts)} points to {args.output}")
+
 
 if __name__ == "__main__":
     main()

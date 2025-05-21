@@ -74,6 +74,7 @@
             python-cmake-module
             plotjuggler
             plotjuggler-ros
+            rviz2
           ];
         };
 

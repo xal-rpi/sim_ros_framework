@@ -5,15 +5,13 @@ import rclpy
 from rclpy.node import Node
 import numpy as np
 from std_msgs.msg import Float32, Float32MultiArray
-from geometry_msgs.msg import (
-    PoseStamped, Pose, Point, Quaternion,
-    TransformStamped
-)
+from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, TransformStamped
 from nav_msgs.msg import Path
 from bng_msgs.msg import GtStateMsg
 import tf2_ros
 from bng_simulator.utils.resource_manager import ResourceManager
 from bng_simulator.utils.config_manager import ConfigManager
+
 
 class PathVisAdapter(Node):
     def __init__(self):
@@ -37,7 +35,9 @@ class PathVisAdapter(Node):
         self._tf_broadcaster.sendTransform(static_tf)
 
         # Load centerline CSV
-        pf = ResourceManager.get_path("bng_controller", "paths/" + self.get_parameter("path_file").value)
+        pf = ResourceManager.get_path(
+            "bng_controller", "paths/" + self.get_parameter("path_file").value
+        )
         wps = np.loadtxt(pf, delimiter=",")
 
         # PlotJuggler topics
@@ -89,6 +89,7 @@ class PathVisAdapter(Node):
         self.pub_vx.publish(vx)
         self.pub_vy.publish(vy)
 
+
 def main():
     rclpy.init()
     node = PathVisAdapter()
@@ -105,6 +106,7 @@ def main():
             node.destroy_node()
         rclpy.shutdown()
     exit(exit_code)
+
 
 if __name__ == "__main__":
     main()
