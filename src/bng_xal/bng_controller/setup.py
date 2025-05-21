@@ -5,9 +5,9 @@ from glob import glob
 package_name = "bng_controller"
 
 # Define the C extension module
-controller_core_module = Extension(
-    "bng_controller.core.controller_core",
-    sources=["bng_controller/core/controller_core.c"],
+controller_core_c_module = Extension(
+    "bng_controller.core.controller_core_c",
+    sources=["bng_controller/core/controller_core_c.c"],
     extra_compile_args=["-O3"],  # Optimization flag
 )
 
@@ -19,6 +19,7 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
+        (os.path.join("share", package_name, "paths"), glob("resource/paths/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=False,
@@ -26,14 +27,17 @@ setup(
     maintainer_email="44554692+comejv@users.noreply.github.com",
     description="High-level controller for BeamNG simulation",
     license="TODO: License declaration",
-    ext_modules=[controller_core_module],
+    ext_modules=[controller_core_c_module],
     extras_require={
         "test": ["pytest"],
     },
     entry_points={
         "console_scripts": [
             "run_controller = bng_controller.controller_interface:main",
-            "high_level_controller = bng_controller.high_level_controller:main",  # Will be started by run_controller
+            "high_level_controller = bng_controller.high_level_controller:main",
+            "path_viz = bng_controller.path_viz:main",
+            "generate_circle_path = bng_controller.scripts.generate_circle_path:main",
+            "generate_path = bng_controller.scripts.generate_path:main",
         ],
     },
 )

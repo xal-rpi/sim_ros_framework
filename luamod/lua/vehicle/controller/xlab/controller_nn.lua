@@ -7,7 +7,7 @@ local logTag = 'controller_nn'
 local _ = nil
 
 -- module‐local handle for the network
-local nn = require('xlab/nn')
+local nn = nil
 local nn_model = nil
 
 -- Module-local state
@@ -134,6 +134,8 @@ end
 
 function M.init(c)
   common = c
+  nn = require('lua/vehicle/controller/xlab/lib/nn')
+  nn.init()
   nn_model = nn.loadModel('lua/vehicle/controller/xlab/models/test.json')
   log('I', logTag, 'NN controller initialized')
 end

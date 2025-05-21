@@ -23,8 +23,7 @@ ffi.cdef([[
   void    nn_free_buffer(float* buf);
 ]])
 
--- adjust the name/path to your .so/.dylib
-local libnn = ffi.load('libnn')
+local libnn = nil
 
 local ACT = {
   NONE = ffi.C.ACT_NONE,
@@ -104,6 +103,18 @@ end
 
 function M.freeModel(model)
   if model then libnn.nn_free_model(model) end
+end
+
+function M.init()
+  if libnn == nil then
+    local libnnPath = ''
+    while libnnPath == '' do
+      libnnPath = obj:getLastMailbox('libnnPath')
+    end
+    libnn = ffi.load(libnnPath)
+    os.remove(libnnPath)
+    log('I', logTag, 'Loaded libnn.so')
+  end
 end
 
 -- optional hook

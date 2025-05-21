@@ -1,4 +1,4 @@
-// controller_core.c
+// controller_core_c.c
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <math.h>
@@ -134,17 +134,17 @@ static PyObject *compute_control_empty(PyObject *self, PyObject *args) {
   return result;
 }
 
-static PyMethodDef ControllerCoreMethods[] = {
+static PyMethodDef ControllerCoreCMethods[] = {
     {"compute_control_multi_test", compute_control_multi_test, METH_VARARGS,
      "Generates a multi-test waveform based on input parameters."},
     {"compute_control_empty", compute_control_empty, METH_VARARGS,
      "Empty testing control"},
     {NULL, NULL, 0, NULL}};
 
-static struct PyModuleDef controller_core_module = {
-    PyModuleDef_HEAD_INIT, "bng_controller.core.controller_core",
-    "High‐level controllers in C", -1, ControllerCoreMethods};
+static struct PyModuleDef controller_core_c_module = {
+    PyModuleDef_HEAD_INIT, "bng_controller.core.controller_core_c",
+    "High‐level controllers in C", -1, ControllerCoreCMethods};
 
-PyMODINIT_FUNC PyInit_controller_core(void) {
-  return PyModule_Create(&controller_core_module);
+PyMODINIT_FUNC PyInit_controller_core_c(void) {
+  return PyModule_Create(&controller_core_c_module);
 }

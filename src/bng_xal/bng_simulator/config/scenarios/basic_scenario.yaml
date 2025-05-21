@@ -75,8 +75,8 @@ vehicles:
         # dir: [0, -1, 0] # First axis
         # up: [1, 0, 0] # Second axis in right hand rule
     controllers:
-      LowLevelController: # The python class used
-        controllerType: default # The lua controller used
+      LowLevelController: # The python setup class used
+        controllerType: default # The lua controller used (controller_{type}.lua)
         controllerRate: 0.005
         listenIp: 127.0.0.1
         listenPort: 64257
@@ -84,14 +84,14 @@ vehicles:
         sendPort: 64258
         gtStateName: gtstate
         calibration:
-          maxSteeringAngle : 40 # has to be obtained manually
-          throttleP : 0.1
+          maxSteeringAngle : 0.69 # has to be obtained manually, rad
+          throttleP : 0.2
           throttleI : 0.000
           throttleD : 0.000
 
 
 high_level_controller:
-  control_fn: compute_control_pid # The C function used
+  control_fn: C_compute_control_multi_test # The controller implementation
   control_rate: 0.01
 
 # ROS configuration

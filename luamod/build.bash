@@ -27,7 +27,7 @@ if [ ${#FILES[@]} -eq 0 ]; then
 fi
 
 # Compile nn util
-NN_DIR="./lua/common/extensions/xlab"
+NN_DIR="./lua/vehicle/controller/xlab/lib"
 cc -O3 -fPIC -shared -o ${NN_DIR}/libnn.so ${NN_DIR}/nn.c -lm
 FILES+=( "${NN_DIR}/libnn.so" )
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+from os import path
 import socket
+import select
 import json
 import threading
 import time
@@ -9,10 +11,9 @@ from collections import deque
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 
-from bng_controller.core import controller_core
 from bng_simulator.utils.config_manager import ConfigManager
 from bng_simulator.utils.services_utils import convert_time_to_header
 from bng_msgs.msg import HLCMsg
@@ -83,12 +84,23 @@ class HighLevelController(Node):
         self.control_fn_name = hlc_cfg["control_fn"]
         self.control_rate = hlc_cfg["control_rate"]
 
-        try:
-            self.compute_control = getattr(controller_core, self.control_fn_name)
-        except AttributeError:
-            raise RuntimeError(
-                f"No function '{self.control_fn_name}' in controller_core"
-            )
+        if self.control_fn_name.startswith("PY_"):
+            from bng_controller.core import controller_core_py
+
+            self.control_fn_name = self.control_fn_name[3:]
+
+            self.compute_control = getattr(controller_core_py, self.control_fn_name)
+        elif self.control_fn_name.startswith("C_"):
+            try:
+                from bng_controller.core import controller_core_c
+
+                self.control_fn_name = self.control_fn_name[2:]
+
+                self.compute_control = getattr(controller_core_c, self.control_fn_name)
+            except AttributeError:
+                raise RuntimeError(
+                    f"No function '{self.control_fn_name}' in controller_core or python controllers"
+                )
 
         self.sim_start_delay = 1  # second
 
@@ -147,12 +159,37 @@ class HighLevelController(Node):
         self.timer.reset()
         self.get_logger().info("HLC started")
 
+    def _recv_last(self, sock, timeout=None, bufsize=8192):
+        """
+        Block up to `timeout` seconds for *one* packet, then
+        drain everything else in the queue, returning only
+        the last datagram seen (or None on timeout).
+        """
+        # wait for at least one packet
+        ready, _, _ = select.select([sock], [], [], timeout)
+        if not ready:
+            return None
+
+        data, _ = sock.recvfrom(bufsize)
+
+        sock.setblocking(False)
+        try:
+            while True:
+                data, _ = sock.recvfrom(bufsize)
+        except BlockingIOError:
+            # no more packets available right now
+            pass
+        finally:
+            sock.setblocking(True)
+
+        return data
+
     def _receive_sensor_data(self):
         self.get_logger().info("Receive thread running")
         consecutive_timeouts = 0
         while self.running and not self.exit_event.is_set():
             try:
-                data, _ = self.listen_socket.recvfrom(8192)
+                data = self._recv_last(self.listen_socket)
                 recv_time = time.time()
                 consecutive_timeouts = 0
                 sensor = json.loads(data.decode())

@@ -76,7 +76,7 @@ end
 
 M.handleOpenController = function(request)
   local name = request.name
-  log('I', logTag, 'Opening LowLevelController: ' .. (name or 'unnamed'))
+  log('I', logTag, 'Opening LowLevelController...')
 
   -- lookup the real vehicle ID
   local rawVid = request.vid
@@ -98,18 +98,25 @@ M.handleOpenController = function(request)
     handled = true,
   }
   local data = { controllerId = name }
-  if name == 'nn' then
-    assert(
-      not Engine.Sandbox.Lua.isEnabled(),
-      'This controller can only run when the Lua security sandbox is disabled. '
-        .. "You will have to restart BeamNG with the '-disable-sandbox' argument."
-    )
-  end
   for k, v in pairs(request) do
     if not skipKeys[k] then
       local vt = type(v)
       if vt == 'string' or vt == 'number' or vt == 'boolean' or vt == 'table' then data[k] = v end
     end
+  end
+
+  if data.controllerType == 'nn' then
+    assert(
+      not Engine.Sandbox.Lua.isEnabled(),
+      'This controller can only run when the Lua security sandbox is disabled. '
+        .. "You will have to restart BeamNG with the '-disable-sandbox' argument."
+    )
+    local mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.so'
+    local fs_libpath = 'tmp/libnn.so'
+    copyfile(mod_libpath, fs_libpath)
+
+    be:sendToMailbox('libnnPath', FS:virtual2Native(fs_libpath))
+    log('I', logTag, 'Using ' .. fs_libpath)
   end
 
   -- handle gtStateName → gtStateSensorId

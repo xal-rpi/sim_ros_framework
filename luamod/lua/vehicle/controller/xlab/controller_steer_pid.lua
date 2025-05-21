@@ -47,7 +47,7 @@ local calibration = {
   brakeD = 0.0,
   brakeMinRamp = 1.0,
   brakeMaxRamp = 5.0,
-  maxSteeringAngle = 40,
+  maxSteeringAngle = 0.69,
 }
 
 -- Parse incoming JSON control message

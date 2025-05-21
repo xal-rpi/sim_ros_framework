@@ -1,4 +1,4 @@
--- ./vehicle/controller/xlab/controller_framework.lua
+-- ./vehicle/controller/xlab/controller_steer_basic.lua
 local M = {}
 local common
 local logTag = 'controller_framework'
@@ -17,11 +17,14 @@ local realLastClock = os.clock()
 local realUpdateCount = 0
 
 local controllerState = {
-  prevTarget = { time = 0 },
-  nextTarget = { time = 0 },
+  prevTarget = { time = 0, roadWheelAngle = 0 },
+  nextTarget = { time = 0, roadWheelAngle = 0 },
 }
 
-local calibration = {}
+local calibration = { maxSteeringAngle = 0.69 }
+
+-- For steering input
+local desiredSteer = 0
 
 -- Parse incoming JSON control message
 local function parseMessage(msg)
@@ -43,6 +46,7 @@ local function parseMessage(msg)
   controllerState.prevTarget = controllerState.nextTarget
   controllerState.nextTarget = {
     time = reachTime,
+    roadWheelAngle = data.road_wheel_angle,
   }
 
   -- special immediate‐apply case: zero out interpolation
@@ -66,8 +70,31 @@ local function createStateMessage()
   local pm = common.performanceMetrics
   pm.lastResponseTimestamp = nowSim
 
+  local vr = common.cachedGtReading
   local state = {
     simtime = nowSim,
+    realtime = os.clock(),
+    avg_latency = pm.avgLatency,
+    max_latency = pm.maxLatency,
+
+    -- Vehicle position and orientation
+    position = {
+      x = (vr.pos and vr.pos[1]) or 0,
+      y = (vr.pos and vr.pos[2]) or 0,
+      z = (vr.pos and vr.pos[3]) or 0,
+    },
+
+    direction = {
+      x = (vr.dirX and vr.dirX[1]) or 0,
+      y = (vr.dirX and vr.dirX[2]) or 0,
+      z = (vr.dirX and vr.dirX[3]) or 0,
+    },
+    -- Vehicle velocity
+    velocity = {
+      x = (vr.vel and vr.vel[1]) or 0,
+      y = (vr.vel and vr.vel[2]) or 0,
+      z = (vr.vel and vr.vel[3]) or 0,
+    },
   }
   local ok, js = pcall(jsonEncode, state)
   if not ok then
@@ -93,11 +120,15 @@ local function applyTargets(dt)
     end
   end
 
+  local cs = controllerState
+
   -- lerp each channel
-  -- local desiredTorque = p.engine_torque + (n.engine_torque - p.engine_torque) * f
+  local desiredSteerAng = p.roadWheelAngle + (n.roadWheelAngle - p.roadWheelAngle) * f
+  desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
+  cs.lastAppliedSteering = desiredSteer
 
   -- send into BeamNG
-  -- input.event('throttle', thr, FILTER_AI)
+  input.event('steering', desiredSteer, FILTER_AI)
 
   -- latency metrics (ring-buffer of size N=100)
   do
@@ -116,10 +147,11 @@ local function applyTargets(dt)
         'I',
         logTag,
         string.format(
-          'Target received with time=%.4f, applied at SimTime=%.4f\navgLat=%.1fms\n',
+          'Target received with time=%.4f, applied at SimTime=%.4f\navgLat=%.1fms\n' .. 'steer=%.2f',
           n.time,
           simTimeApplied,
-          common.performanceMetrics.avgLatency * 1000
+          common.performanceMetrics.avgLatency * 1000,
+          cs.lastAppliedSteering
         )
       )
     end
@@ -130,6 +162,11 @@ end
 
 function M.init(c)
   common = c
+  if hydros then
+    hydros.enableVirtualWheel(true, function() return desiredSteer end, obj.sendForceFeedback)
+  else
+    log('E', logTag, 'Hydros not found')
+  end
   log('I', logTag, 'Framework controller initialized')
 end
 
@@ -207,8 +244,9 @@ end
 
 function M.reset()
   controllerState = {
-    prevTarget = { time = 0 },
-    nextTarget = { time = 0 },
+    prevTarget = { time = 0, roadWheelAngle = 0 },
+    nextTarget = { time = 0, roadWheelAngle = 0 },
+    lastAppliedSteering = 0,
   }
   updateAccum = 0
   messageCounter = 0

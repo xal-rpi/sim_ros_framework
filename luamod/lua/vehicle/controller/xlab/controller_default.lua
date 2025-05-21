@@ -40,7 +40,7 @@ local calibration = {
   brakeD = 0.0,
   brakeMinRamp = 0.0,
   brakeMaxRamp = 50.0,
-  maxSteeringAngle = 40,
+  maxSteeringAngle = 0.69,
 }
 
 -- Parse incoming JSON control message
@@ -353,18 +353,6 @@ end
 function M.init(c)
   common = c
   log('I', logTag, 'Default controller initialized')
-  csvHeaders = {
-    'time',
-    'Te_des',
-    'Te_act',
-    'Tw_des',
-    'Tw_act',
-    'ratio',
-    'err',
-    'Tw_th',
-  }
-  csvData = { csvHeaders }
-  loggerTimer = 0
   nextUpdateTime = common.getSimTime()
 end
 

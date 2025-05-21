@@ -4,6 +4,7 @@ Implements the custom ground truth state sensor.
 
 from logging import getLogger
 from sys import stderr
+from typing import Optional
 
 import numpy as np
 
@@ -264,7 +265,7 @@ class GtState(SensorBase):
         """
         return GtStateMsg
 
-    def to_ros_msg(self, data: dict = None, frame_id="map"):
+    def to_ros_msg(self, data: Optional[dict] = None, frame_id="map"):
         """
         Convert the basic sensor state to a ROS message.
 
