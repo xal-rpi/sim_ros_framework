@@ -91,7 +91,7 @@ vehicles:
 
 
 high_level_controller:
-  control_fn: C_compute_control_pid # The controller implementation
+  control_fn: C_compute_control_multi_test # The controller implementation
   control_rate: 0.01
 
 # ROS configuration

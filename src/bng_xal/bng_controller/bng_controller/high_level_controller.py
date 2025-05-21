@@ -85,18 +85,18 @@ class HighLevelController(Node):
         self.control_rate = hlc_cfg["control_rate"]
 
         if self.control_fn_name.startswith("PY_"):
-            import bng_controller.path_follower as path_follower
+            from bng_controller.core import controller_core_py
 
             self.control_fn_name = self.control_fn_name[3:]
 
-            self.compute_control = getattr(path_follower, self.control_fn_name)
+            self.compute_control = getattr(controller_core_py, self.control_fn_name)
         elif self.control_fn_name.startswith("C_"):
             try:
-                from bng_controller.core import controller_core
+                from bng_controller.core import controller_core_c
 
-                self.control_fn_name = self.control_fn_name[3:]
+                self.control_fn_name = self.control_fn_name[2:]
 
-                self.compute_control = getattr(controller_core, self.control_fn_name)
+                self.compute_control = getattr(controller_core_c, self.control_fn_name)
             except AttributeError:
                 raise RuntimeError(
                     f"No function '{self.control_fn_name}' in controller_core or python controllers"

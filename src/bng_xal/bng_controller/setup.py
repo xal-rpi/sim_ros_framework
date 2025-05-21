@@ -5,9 +5,9 @@ from glob import glob
 package_name = "bng_controller"
 
 # Define the C extension module
-controller_core_module = Extension(
-    "bng_controller.core.controller_core",
-    sources=["bng_controller/core/controller_core.c"],
+controller_core_c_module = Extension(
+    "bng_controller.core.controller_core_c",
+    sources=["bng_controller/core/controller_core_c.c"],
     extra_compile_args=["-O3"],  # Optimization flag
 )
 
@@ -27,7 +27,7 @@ setup(
     maintainer_email="44554692+comejv@users.noreply.github.com",
     description="High-level controller for BeamNG simulation",
     license="TODO: License declaration",
-    ext_modules=[controller_core_module],
+    ext_modules=[controller_core_c_module],
     extras_require={
         "test": ["pytest"],
     },
