@@ -23,6 +23,9 @@ local controllerState = {
 
 local calibration = { maxSteeringAngle = 0.69 }
 
+-- For steering input
+local desiredSteer = 0
+
 -- Parse incoming JSON control message
 local function parseMessage(msg)
   if not msg or msg == '' then return false end
@@ -121,7 +124,7 @@ local function applyTargets(dt)
 
   -- lerp each channel
   local desiredSteerAng = p.roadWheelAngle + (n.roadWheelAngle - p.roadWheelAngle) * f
-  local desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
+  desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
   cs.lastAppliedSteering = desiredSteer
 
   -- send into BeamNG
@@ -159,6 +162,11 @@ end
 
 function M.init(c)
   common = c
+  if hydros then
+    hydros.enableVirtualWheel(true, function() return desiredSteer end, obj.sendForceFeedback)
+  else
+    log('E', logTag, 'Hydros not found')
+  end
   log('I', logTag, 'Framework controller initialized')
 end
 
