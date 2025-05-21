@@ -25,6 +25,7 @@ wheelbase = hlc.get("wheelbase", 2.5)
 max_steer = hlc.get("max_steer_rad", 1.0)
 
 def compute_control_follow(latest, control_rate, max_latency):
+    print("WPS:", _wps[0], flush=True)
     x = latest["position"]["x"]
     y = latest["position"]["y"]
     vx = latest["velocity"]["x"]
@@ -64,9 +65,9 @@ def compute_control_follow(latest, control_rate, max_latency):
     # arc‐length position along path
     s_proj = cum_lens[i_seg] + t_seg * seg_lens[i_seg]
 
-    print(f"[1] pos=({x:.2f},{y:.2f})  "
-          f"near_seg={i_seg} near_pt=({wp_px:.2f},{wp_py:.2f})  "
-          f"s_proj={s_proj:.2f}")
+    # print(f"[1] pos=({x:.2f},{y:.2f})  "
+    #       f"near_seg={i_seg} near_pt=({wp_px:.2f},{wp_py:.2f})  "
+    #       f"s_proj={s_proj:.2f}")
 
     # 2) tangent at that segment
     tx, ty = seg_vecs[i_seg]
@@ -79,9 +80,9 @@ def compute_control_follow(latest, control_rate, max_latency):
     theta_v = np.arctan2(vy, vx)
     ang_diff = (theta_h - theta_t + np.pi) % (2*np.pi) - np.pi
 
-    print(f"[2] h=({fx:.2f},{fy:.2f}) θ_h={np.degrees(theta_h):+.1f}°  "
-          f"v=({vx:.2f},{vy:.2f}) θ_v={np.degrees(theta_v):+.1f}°  "
-          f"t=({tx:.2f},{ty:.2f}) Δθ={np.degrees(ang_diff):+.1f}°")
+    # print(f"[2] h=({fx:.2f},{fy:.2f}) θ_h={np.degrees(theta_h):+.1f}°  "
+    #       f"v=({vx:.2f},{vy:.2f}) θ_v={np.degrees(theta_v):+.1f}°  "
+    #       f"t=({tx:.2f},{ty:.2f}) Δθ={np.degrees(ang_diff):+.1f}°")
 
     # 3) pick lookahead‐arc s* = s_proj + L_la
     s_star = s_proj + L_la
@@ -96,8 +97,8 @@ def compute_control_follow(latest, control_rate, max_latency):
     lx, ly = _wps[j] + seg_vecs[j] * t_star
 
     arc_len = s_star - s_proj
-    print(f"[3] i_seg={i_seg} → lookahead_seg={j} "
-          f"arc_len={arc_len:.2f}")
+    # print(f"[3] i_seg={i_seg} → lookahead_seg={j} "
+    #       f"arc_len={arc_len:.2f}")
 
     # 4) world→body
     dx, dy = lx - x, ly - y
@@ -105,16 +106,16 @@ def compute_control_follow(latest, control_rate, max_latency):
     x_l = dx*fx + dy*fy
     y_l = dx*(-fy) + dy*fx
 
-    print(f"[4] target_ws=({lx:.2f},{ly:.2f})  "
-          f"w2b=({x_l:.2f},{y_l:.2f})")
+    # print(f"[4] target_ws=({lx:.2f},{ly:.2f})  "
+    #       f"w2b=({x_l:.2f},{y_l:.2f})")
 
     # 5) pure pursuit steering
     alpha = np.arctan2(y_l, x_l)
     delta = np.arctan2(2*wheelbase*np.sin(alpha), L_la)
     delta = np.clip(delta, -max_steer, max_steer)
 
-    print(f"[5] α={np.degrees(alpha):+.1f}°  "
-          f"δ={np.degrees(delta):+.1f}°\n", flush=True)
+    # print(f"[5] α={np.degrees(alpha):+.1f}°  "
+    #       f"δ={np.degrees(delta):+.1f}°\n", flush=True)
 
     # build command
     simt = latest.get("simtime", 0.0)
