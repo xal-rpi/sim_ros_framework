@@ -134,15 +134,19 @@ high_level_controller:
 
 ### Launch Commands
 
-1. **Start only the simulator with sensors:**
+1. Start BeamNG: `./BinLinux/BeamNG.tech.x64 -tcom -colorStdOutLog -disable-sandbox`
+2. **Start the relevant ROS nodes**:
+   - Only the sensors:
    ```bash
    ros2 launch bng_simulator simulator.launch.py
    ```
-
-2. **Launch with controller:**
+   - Sensors and controllers:
    ```bash
    ros2 launch bng_controller controller.launch.py
    ```
+
+> [!NOTE]
+> We disable the sandbox because with some controllers (starting with `nn`) we call C code from lua with `ffi.load()`.
 
 ### Launch Parameters
 

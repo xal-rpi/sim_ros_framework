@@ -107,8 +107,13 @@ end
 
 function M.init()
   if libnn == nil then
-    assert(FS:fileExists('lua/vehicle/controller/xlab/lib/libnn.so'))
-    libnn = ffi.load(FS:virtual2Native('lua/common/extensions/xlab/libnn.so'))
+    local libnnPath = ''
+    while libnnPath == '' do
+      libnnPath = obj:getLastMailbox('libnnPath')
+    end
+    libnn = ffi.load(libnnPath)
+    os.remove(libnnPath)
+    log('I', logTag, 'Loaded libnn.so')
   end
 end
 
