@@ -1,132 +1,126 @@
 from bng_simulator.utils.config_manager import ConfigManager
 from bng_simulator.utils.resource_manager import ResourceManager
-
-
-# Simple pure-pursuit path follower
 import numpy as np
-from math import atan2
 
-class PurePursuit:
-    def __init__(
-        self,
-        waypoints: np.ndarray,
-        lookahead: float,
-        max_steer: float,
-    ):
-        """
-        waypoints: (N,2) array of [x,y].
-        lookahead: lookahead distance ℓₑ.
-        closed: whether to treat the path as a loop.
-        """
-        self.wps = waypoints
-        self.ld = lookahead
-        self.closed = np.allclose(self.wps[0], self.wps[-1])
-        self.max_steer = max_steer
-        self._compute_path_info()
-
-    def _compute_path_info(self):
-        # build segments (A->B), their lengths, and cumulative s
-        w = self.wps
-        if self.closed:
-            A = w
-            B = np.vstack((w[1:], w[0:1]))
-        else:
-            A = w[:-1]
-            B = w[1:]
-        V = B - A
-        L = np.hypot(V[:, 0], V[:, 1])
-        # cumulative distance at each waypoint (len = len(L)+1)
-        s = np.zeros(len(L) + 1)
-        s[1:] = np.cumsum(L)
-        self.seg_A = A
-        self.seg_V = V
-        self.seg_L = L
-        self.cum_s = s
-        self.path_length = s[-1]
-
-    def _find_lookahead_point(self, x: float, y: float):
-        P = np.array([x, y])
-        A = self.seg_A
-        V = self.seg_V
-        L2 = self.seg_L ** 2
-        # compute projection param t on each segment
-        AP = P - A  # shape (M,2)
-        t = np.einsum("ij,ij->i", AP, V) / np.where(L2 > 0, L2, 1e-9)
-        t_clamped = np.clip(t, 0.0, 1.0)
-        # projection points Q = A + t_clamped * V
-        Q = A + (V.T * t_clamped).T
-        # distances from P to each Q
-        d = np.hypot(*(Q - P).T)
-        # choose the segment with minimal distance
-        k = int(np.argmin(d))
-        s_proj = self.cum_s[k] + t_clamped[k] * self.seg_L[k]
-
-        # target along-track distance
-        s_target = s_proj + self.ld
-        if self.closed:
-            s_target = s_target % self.path_length
-        else:
-            s_target = min(s_target, self.path_length)
-
-        # find which segment contains s_target
-        # cum_s is sorted, so searchsorted works
-        j = np.searchsorted(self.cum_s, s_target) - 1
-        j = np.clip(j, 0, len(self.seg_L) - 1)
-        ds = s_target - self.cum_s[j]
-        # param along segment j
-        tj = ds / max(float(self.seg_L[j]), 1e-9)
-        goal = self.seg_A[j] + tj * self.seg_V[j]
-        return goal
-
-    def steering(self, x: float, y: float, yaw: float, v: float):
-        """
-        Returns the steering angle δ (radians) via
-        δ = arctan(2 * y_ld / (v * ℓₑ)), with wheelbase L = 1.
-        """
-        goal = self._find_lookahead_point(x, y)
-        dx = goal[0] - x
-        dy = goal[1] - y
-        # transform into vehicle frame
-        local_x = dx * np.cos(-yaw) - dy * np.sin(-yaw)
-        local_y = dx * np.sin(-yaw) + dy * np.cos(-yaw)
-        # pure pursuit law
-        delta = atan2(2.0 * local_y, max(v, 1e-3) * self.ld)
-
-        return max(-self.max_steer, min(self.max_steer, delta))
-
-
-# load configuration & path at import time
+# -- load config & raw waypoints --------------------------------------------
 _cfg = ConfigManager.get_config(None)
 if _cfg is None:
-    raise RuntimeError("Trying to import path_follower before config is intialized")
+    raise RuntimeError("Config must be initialized before path_follower")
+
 hlc = _cfg["high_level_controller"]
-# expect a CSV file of [x,y] rows
 _wps = np.loadtxt(
-    ResourceManager.get_path("bng_controller", "paths/"+hlc["path_file"]), delimiter=","
-)
-_pp = PurePursuit(
-    _wps,
-    lookahead=hlc.get("lookahead", 5.0),
-    max_steer=hlc.get("max_steer_rad", 0.69),
-)
+    ResourceManager.get_path("bng_controller",
+                             "paths/" + hlc["path_file"]),
+    delimiter=","
+)  # shape (N,2)
 
+# Precompute segment vectors and cumulative arc‐lengths
+seg_vecs = _wps[1:] - _wps[:-1]                              # (N-1,2)
+seg_lens = np.hypot(seg_vecs[:,0], seg_vecs[:,1])            # (N-1,)
+cum_lens = np.concatenate(([0.0], np.cumsum(seg_lens)))     # (N,)
 
-def compute_control_pure(sensor_data: dict, control_rate: float, max_latency: float):
-    # extract pose & heading
-    pos = sensor_data["position"]
-    dir = sensor_data["direction"]
-    x, y = pos["x"], pos["y"]
-    yaw = atan2(dir["y"], dir["x"])
-    v = sensor_data.get("velocity", {}).get("x", 0.0)
+# Pure Pursuit parameters
+L_la = hlc.get("lookahead_distance", 5.0)
+wheelbase = hlc.get("wheelbase", 2.5)
+max_steer = hlc.get("max_steer_rad", 1.0)
 
-    # steering command
-    steer = _pp.steering(x, y, yaw, v)
-    # time stamping
-    simt = sensor_data.get("simtime", 0.0)
-    lat = min(max_latency + 0.005, 0.1)
+def compute_control_follow(latest, control_rate, max_latency):
+    x = latest["position"]["x"]
+    y = latest["position"]["y"]
+    vx = latest["velocity"]["x"]
+    vy = latest["velocity"]["y"]
+    speed = np.hypot(vx, vy)
+    if speed > 1e-2:
+        fx, fy = vx/speed, vy/speed
+    else:
+        # fallback to heading vector if nearly stopped
+        fx = latest["direction"]["x"]
+        fy = latest["direction"]["y"]
+        # renormalize
+        norm = np.hypot(fx, fy) + 1e-12
+        fx, fy = fx/norm, fy/norm
+
+    P = np.array([x, y])
+
+    # 1) project onto every segment, find closest point -------------------
+    p0 = _wps[:-1]                # segment start points (N-1,2)
+    v  = seg_vecs                 # segment vectors    (N-1,2)
+    L2 = seg_lens**2 + 1e-12
+    w  = P - p0                   # (N-1,2)
+
+    # parameter t along each segment
+    t = (w * v).sum(axis=1) / L2
+    t = np.clip(t, 0.0, 1.0)      # clamp to segment
+
+    # actual projection points
+    projs = p0 + (v.T * t).T      # (N-1,2)
+    d2    = np.hypot(projs[:,0] - x,
+                    projs[:,1] - y)
+    i_seg = int(np.argmin(d2))    # index of closest segment
+    t_seg = t[i_seg]
+
+    # nearest‐point world coords
+    wp_px, wp_py = projs[i_seg]
+    # arc‐length position along path
+    s_proj = cum_lens[i_seg] + t_seg * seg_lens[i_seg]
+
+    print(f"[1] pos=({x:.2f},{y:.2f})  "
+          f"near_seg={i_seg} near_pt=({wp_px:.2f},{wp_py:.2f})  "
+          f"s_proj={s_proj:.2f}")
+
+    # 2) tangent at that segment
+    tx, ty = seg_vecs[i_seg]
+    Lseg = seg_lens[i_seg]
+    tx, ty = tx/(Lseg+1e-12), ty/(Lseg+1e-12)
+
+    # headings
+    theta_h = np.arctan2(fy, fx)
+    theta_t = np.arctan2(ty, tx)
+    theta_v = np.arctan2(vy, vx)
+    ang_diff = (theta_h - theta_t + np.pi) % (2*np.pi) - np.pi
+
+    print(f"[2] h=({fx:.2f},{fy:.2f}) θ_h={np.degrees(theta_h):+.1f}°  "
+          f"v=({vx:.2f},{vy:.2f}) θ_v={np.degrees(theta_v):+.1f}°  "
+          f"t=({tx:.2f},{ty:.2f}) Δθ={np.degrees(ang_diff):+.1f}°")
+
+    # 3) pick lookahead‐arc s* = s_proj + L_la
+    s_star = s_proj + L_la
+    # clamp to path end
+    s_star = min(s_star, cum_lens[-1])
+
+    # find segment j so cum_lens[j] ≤ s_star ≤ cum_lens[j+1]
+    j = int(np.searchsorted(cum_lens, s_star) - 1)
+    j = max(min(j, len(seg_lens)-1), 0)
+    # local interpolation on segment j
+    t_star = (s_star - cum_lens[j]) / (seg_lens[j] + 1e-12)
+    lx, ly = _wps[j] + seg_vecs[j] * t_star
+
+    arc_len = s_star - s_proj
+    print(f"[3] i_seg={i_seg} → lookahead_seg={j} "
+          f"arc_len={arc_len:.2f}")
+
+    # 4) world→body
+    dx, dy = lx - x, ly - y
+    # forward = (fx,fy), left = (-fy,fx)
+    x_l = dx*fx + dy*fy
+    y_l = dx*(-fy) + dy*fx
+
+    print(f"[4] target_ws=({lx:.2f},{ly:.2f})  "
+          f"w2b=({x_l:.2f},{y_l:.2f})")
+
+    # 5) pure pursuit steering
+    alpha = np.arctan2(y_l, x_l)
+    delta = np.arctan2(2*wheelbase*np.sin(alpha), L_la)
+    delta = np.clip(delta, -max_steer, max_steer)
+
+    print(f"[5] α={np.degrees(alpha):+.1f}°  "
+          f"δ={np.degrees(delta):+.1f}°\n", flush=True)
+
+    # build command
+    simt = latest.get("simtime", 0.0)
+    lat  = min(max_latency + 0.005, 0.1)
     tcmd = simt + control_rate + lat
-
     return {
-        "road_wheel_angle": steer,
+        "road_wheel_angle": float(delta),
         "time": tcmd,
     }
