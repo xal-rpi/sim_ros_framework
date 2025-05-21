@@ -75,8 +75,8 @@ vehicles:
         # dir: [0, -1, 0] # First axis
         # up: [1, 0, 0] # Second axis in right hand rule
     controllers:
-      LowLevelController: # The python class used
-        controllerType: default # The lua controller used
+      LowLevelController: # The python setup class used
+        controllerType: default # The lua controller used (controller_{type}.lua)
         controllerRate: 0.005
         listenIp: 127.0.0.1
         listenPort: 64257
