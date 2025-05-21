@@ -10,7 +10,6 @@ from nav_msgs.msg import Path
 from bng_msgs.msg import GtStateMsg
 import tf2_ros
 from bng_simulator.utils.resource_manager import ResourceManager
-from bng_simulator.utils.config_manager import ConfigManager
 
 
 class PathVisAdapter(Node):
