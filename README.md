@@ -130,6 +130,17 @@ high_level_controller:
   max_steer_rad: 0.6                        # maximum steering angle (rad)
 ```
 
+### YAML -> Code Mapping
+
+| YAML path                                    | Component                          |
+|----------------------------------------------|------------------------------------|
+| `beamng.host/port`                           | `SimulationManager.connect()`      |
+| `scenario.*`                                 | `SimulationManager.create_scenario()` |
+| `vehicles.<name>.sensors.*`                  | Lua sensor init via `SensorRegistry` |
+| `vehicles.<name>.controllers.*`              | `ControllerRegistry` + Lua `controllerManager` |
+| `high_level_controller.control_fn`            | Python `HighLevelController`        |
+| `high_level_controller.control_rate`          | Python `create_timer()`             |
+
 ## Usage
 
 ### Launch Commands
