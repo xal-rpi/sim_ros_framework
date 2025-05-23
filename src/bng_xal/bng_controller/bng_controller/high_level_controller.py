@@ -17,6 +17,9 @@ from geometry_msgs.msg import Twist
 from bng_simulator.utils.config_manager import ConfigManager
 from bng_simulator.utils.services_utils import convert_time_to_header
 from bng_msgs.msg import HLCMsg
+from bng_controller.srv import OverrideTargets
+from rclpy.time import Time
+from rclpy.duration import Duration
 
 
 class PerformanceMetrics:
@@ -113,10 +116,20 @@ class HighLevelController(Node):
         self.last_command_time = 0.0
         self.message_counter = 0
 
+        self.override_targets = None
+        self.override_expiry_time = None  # Will store an rclpy.time.Time object
+
         # pubs & subs
         self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 1)
         self.create_subscription(Twist, "cmd_vel", self._cmd_vel_callback, 1)
         self.target_pub = self.create_publisher(HLCMsg, "hlc_msg", 1)
+
+        self.override_service = self.create_service(
+            OverrideTargets,
+            "~/override_targets",  # Node-private service
+            self._override_targets_callback,
+        )
+        self.get_logger().info("Created override_targets service.")
 
         # UDP sockets
         self._init_udp()
@@ -222,6 +235,38 @@ class HighLevelController(Node):
     def _cmd_vel_callback(self, msg: Twist):
         self.get_logger().debug(f"Got cmd_vel: lin={msg.linear.x}, ang={msg.angular.z}")
 
+    def _override_targets_callback(self, request, response):
+        self.get_logger().info(
+            f"Received override request: {request.target_labels}, "
+            f"values: {request.target_values}, lifetime: {request.lifetime_sec}s"
+        )
+
+        if len(request.target_labels) != len(request.target_values):
+            response.success = False
+            response.message = (
+                "Mismatch between target_labels and target_values length."
+            )
+            self.get_logger().error(response.message)
+            return response
+
+        self.override_targets = dict(zip(request.target_labels, request.target_values))
+
+        if request.lifetime_sec > 0:
+            self.override_expiry_time = self.get_clock().now() + Duration(
+                seconds=request.lifetime_sec
+            )
+        else:  # A lifetime of 0 or less means apply indefinitely or until cleared
+            self.override_expiry_time = (
+                None  # Or a very far future time if Time object is always expected
+            )
+
+        response.success = True
+        response.message = "Targets overridden successfully."
+        self.get_logger().info(
+            f"Targets overridden. Expiry set to: {self.override_expiry_time}"
+        )
+        return response
+
     def _control_callback(self):
         if self.exit_event.is_set():
             self.stop()
@@ -229,13 +274,36 @@ class HighLevelController(Node):
         if not self.running or self.latest_sensor_data == {}:
             return
 
-        self.get_logger().debug(
-            f"Calling {self.control_fn_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
-            throttle_duration_sec=10,
-        )
-        targets = self.compute_control(
-            self.latest_sensor_data, self.control_rate, self.metrics.max_latency
-        )
+        active_override = False
+        if self.override_targets is not None:  # Override targets
+            if self.override_expiry_time is None:  # Indefinite
+                active_override = True
+            elif self.get_clock().now() < self.override_expiry_time:
+                active_override = True
+            else:
+                self.get_logger().info("Override targets expired.")
+                self.override_targets = None  # Clear expired override
+                self.override_expiry_time = None
+
+        if active_override:
+            targets = self.override_targets
+            # Ensure 'time' key is present if not already in override_targets,
+            # as the original logic adds it.
+            if "time" not in targets:
+                targets["time"] = (
+                    self.get_clock().now().nanoseconds / 1e9
+                )  # current time in seconds
+            self.get_logger().debug(
+                f"Using overridden targets: {targets}", throttle_duration_sec=2
+            )
+        else:
+            self.get_logger().debug(
+                f"Calling {self.control_fn_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
+                throttle_duration_sec=10,
+            )
+            targets = self.compute_control(
+                self.latest_sensor_data, self.control_rate, self.metrics.max_latency
+            )
 
         try:
             pkt = json.dumps(targets).encode("utf-8")
