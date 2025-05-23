@@ -20,11 +20,24 @@ The system consists of these key components:
 
 | Component | Description |
 |-----------|-------------|
-| **SimulationManager** | Core component managing BeamNG instances, scenarios, and vehicles |
-| **VehicleManager** | Handles individual vehicles and their configurations |
-| **Sensors** | Various sensor types for vehicle state and environment perception |
-| **Controllers** | Both low-level actuator control and high-level decision making |
-| **ROS2 Interface** | Bridge between simulation and ROS2 ecosystem |
+| **SimulationManager** | Core component managing BeamNG instances, scenarios, and vehicles. Part of `bng_simulator`. |
+| **VehicleManager** | Handles individual vehicles and their configurations. Part of `bng_simulator`. |
+| **Sensors** | Various sensor types for vehicle state and environment perception. Configured in `bng_simulator`, data often published via `bng_msgs`. |
+| **Controllers** | Both low-level actuator control (via `luamod`) and high-level decision making (e.g., `bng_controller`). |
+| **ROS2 Interface** | Bridge between simulation and ROS2 ecosystem, primarily managed by `bng_simulator` using `bng_msgs`. |
+
+## Package Overview
+
+This framework is organized into several key modules:
+
+*   **`luamod/`**: Contains low-level Lua modifications for the BeamNG.tech simulator. These mods are essential for enabling custom interactions, sensor data extraction, and advanced vehicle control capabilities directly within the simulation environment.
+    *   [Details in `luamod/README.md`](luamod/README.md)
+*   **`bng_simulator`**: The core ROS 2 package responsible for launching, managing, and interacting with BeamNG.tech simulation instances. It handles scenario definitions, vehicle spawning, and the primary bridge to ROS 2.
+    *   [Details in `src/bng_xal/bng_simulator/README.md`](src/bng_xal/bng_simulator/README.md)
+*   **`bng_msgs`**: This ROS 2 package defines the custom messages and services necessary for communication between various ROS 2 nodes and the BeamNG.tech simulation. It provides the data structures for exchanging information like vehicle state, sensor readings, and control commands.
+    *   [Details in `src/bng_xal/bng_msgs/README.md`](src/bng_xal/bng_msgs/README.md)
+*   **`bng_controller`**: A ROS 2 package that provides high-level control algorithms for vehicles within the BeamNG.tech simulation. It typically subscribes to vehicle state and sensor information (via `bng_msgs`) and publishes control commands.
+    *   [Details in `src/bng_xal/bng_controller/README.md`](src/bng_xal/bng_controller/README.md)
 
 ## Prerequisites
 
@@ -86,60 +99,36 @@ With Nix:
 
 ### YAML Configuration Structure
 
-Simulation scenarios and vehicles are configured via YAML files located in the `src/bng_xal/bng_simulator/config/` directory:
+Simulation scenarios, vehicle properties, sensor details, and controller parameters are primarily configured via YAML files. The main configuration files are typically processed by the `bng_simulator` and `bng_controller` packages.
 
+For a detailed explanation of the YAML structure for scenarios, vehicles, and sensors, please refer to the [bng_simulator README](src/bng_xal/bng_simulator/README.md#configuration-config-directory).
+For details on configuring the high-level controller, see the [bng_controller README](src/bng_xal/bng_controller/README.md).
+
+A brief example of a configuration snippet:
 ```yaml
-# Example configuration snippet
+# Example: Part of a scenario configuration (typically in bng_simulator/config/scenarios/)
 beamng:
-  host: 172.26.32.1
+  host: 127.0.0.1 # Default for local Linux, adjust for WSL2 if needed
   port: 64256
 
 scenario:
-  level: smallgrid
-  name: basic
+  level: smallgrid # BeamNG level to load
+  name: basic_example
 
 vehicles:
-  ego:
-    model: utv
+  ego: # Vehicle name
+    model: utv # BeamNG vehicle model
     sensors:
-      gtstate:
-        type: GtState
-        gfx_update_time: 0.15
-        physics_update_time: 0.005
-        num_physics_steps_for_gfx_save: 1
+      gtstate: { type: GtState, gfx_update_time: 0.1, physics_update_time: 0.01 }
     controllers:
-      LowLevelController:                   # The python setup class used
-        type: default                       # The lua controller used (controller_{type}.lua)
-        control_rate: 0.1
-        listen_ip: 127.0.0.1
-        listen_port: 64257
-        send_ip: 127.0.0.1
-        send_port: 64258
-        gt_state_name: gtstate
-        calibration:                        # Unique to each controller
-          maxSteeringAngle : 40             # has to be obtained manually
-          steeringP: 1.2
-          throttleP: 1.0
-          brakeP: 1.0
+      LowLevelController: { type: default, control_rate: 0.1 } # Refers to luamod controller
 
+# Example: Part of a high-level controller configuration (used by bng_controller)
 high_level_controller:
-  control_fn: PY_compute_control_follow     # prefix `PY_` ⇒ Python, `C_` ⇒ C
-  control_rate: 0.01
-  path_file: loop.csv                       # CSV path to follow
-  lookahead: 5.0                            # lookahead distance (m)
-  max_steer_rad: 0.6                        # maximum steering angle (rad)
+  control_fn: PY_compute_control_follow
+  path_file: loop.csv
 ```
-
-### YAML -> Code Mapping
-
-| YAML path                                    | Component                          |
-|----------------------------------------------|------------------------------------|
-| `beamng.host/port`                           | `SimulationManager.connect()`      |
-| `scenario.*`                                 | `SimulationManager.create_scenario()` |
-| `vehicles.<name>.sensors.*`                  | Lua sensor init via `SensorRegistry` |
-| `vehicles.<name>.controllers.*`              | `ControllerRegistry` + Lua `controllerManager` |
-| `high_level_controller.control_fn`            | Python `HighLevelController`        |
-| `high_level_controller.control_rate`          | Python `create_timer()`             |
+The mapping from YAML configurations to specific code components (like `SimulationManager` or Lua controllers) is detailed within the respective package READMEs, particularly `bng_simulator`.
 
 ## Usage
 
@@ -157,102 +146,58 @@ high_level_controller:
    ```
 
 > [!NOTE]
-> We disable the sandbox because with some controllers (starting with `nn`) we call C code from lua with `ffi.load()`.
+> We disable the sandbox (`-disable-sandbox` flag for BeamNG.tech) because some controllers (e.g., those starting with `nn` in `luamod`) may call C code from Lua using `ffi.load()`.
 
-### Launch Parameters
-
-Simulator Launch Parameters:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `config_path` | `[pkg_share]/config/basic_scenario.yaml` | Path to the simulation configuration file |
-| `log_level` | `INFO` | Logging level (FULL, DEBUG, INFO, WARNING, ERROR, FATAL). FULL also shows the debug info of external libraries such as rclpy and beamngpy|
-
-Controller Launch Parameters:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `config_path` | `[pkg_share]/config/basic_scenario.yaml` | Path to the simulation configuration file |
-| `log_level` | `INFO` | Logging level (FULL, DEBUG, INFO, WARNING, ERROR, FATAL). FULL also shows the debug info of external libraries such as rclpy and beamngpy |
-| `enable_path_viz` | `false` | Publish path data and vehicle position to be used with Rviz2 ; launch rviz2 with `ros2 run rviz2 rviz2 [-d RVIZ_CONFIG]` |
-| `path_file_viz` | `circle.csv` | Which path to show in Rviz2 ; requires `enable_path_viz:=true` |
+For detailed launch parameters accepted by `simulator.launch.py` and `controller.launch.py`, please refer to the README files of the `bng_simulator` and `bng_controller` packages, respectively.
+*   [bng_simulator Launch Arguments](src/bng_xal/bng_simulator/README.md#launching-the-simulator)
+*   [bng_controller Launch Arguments](src/bng_xal/bng_controller/README.md#launching-the-controller)
 
 ### Available utility scripts
 
-#### sim_shell
+Several utility scripts are provided across the packages:
 
-This interactive shell has no extra flags:
+#### `sim_shell` (from `bng_simulator`)
 
+This interactive shell allows for real-time control and inspection of the simulation.
 ```bash
 ros2 run bng_simulator sim_shell
 ```
+Once inside, type `help` to see available commands. For more details, see the [bng_simulator README](src/bng_xal/bng_simulator/README.md#important-scripts-bng_simulatorscripts).
 
-Once inside, type `help` to see all available commands.
-
-#### start_logs
-
-Writes GtState sensor data to the disk as a pickle.
-
+#### `start_logs` (from `bng_simulator`)
+Writes GtState sensor data to disk as a pickle file.
 ```bash
 ros2 run bng_simulator start_logs [--max_queue_size N] [--flush_interval T]
 ```
+For details on arguments, see the [bng_simulator README](src/bng_xal/bng_simulator/README.md#important-scripts-bng_simulatorscripts).
 
-| Flag                    | Type   | Default | Description                                       |
-|-------------------------|--------|---------|---------------------------------------------------|
-| `--max_queue_size N`    | int    | `50`    | Maximum number of messages buffered in the logger queue. |
-| `--flush_interval T`    | float  | `5.0`   | Interval (in seconds) at which the logger flushes to disk. |
-
-#### find_ema
-
-Utility to help tune the EMA parameters used in `gtstate.lua`.
-
+#### `find_ema` (from `bng_simulator`)
+A utility to help tune Exponential Moving Average (EMA) parameters used in `gtstate.lua` (part of `luamod`).
 ```bash
 ros2 run bng_simulator find_ema [OPTIONS]
 ```
+For details on arguments, see the [bng_simulator README](src/bng_xal/bng_simulator/README.md#important-scripts-bng_simulatorscripts).
 
-| Flag                                   | Type               | Default                   | Description                                                                                       |
-|----------------------------------------|--------------------|---------------------------|---------------------------------------------------------------------------------------------------|
-| `-d, --dir DIR`                        | path               | _N/A_                     | Directory containing `data_*.pkl` files.                                                          |
-| `-f, --file FILE`                      | path               | _N/A_                     | Specific pickle file to load.                                                                     |
-| `-F, --fields F1 F2 …`                 | list of strings    | `[]`                      | Fields for which to show static EMA previews.                                                     |
-| `-a, --alphas α1 α2 …`                 | list of floats     | `[0.1, 0.3, 0.6]`         | EMA smoothing factors \( \alpha \) to preview.                                                    |
-| `--detect-jitter`                      | flag               | `false`                   | Compute & rank jitter metrics \(J = \sigma_{\mathrm{res}} / \sigma_x\).                           |
-| `--jitter-alpha α`                     | float              | `0.2`                     | EMA \( \alpha \) for residual (jitter) computation.                                               |
-| `--top-n N`                            | int                | `5`                       | Show the top-\(N\) fields by jitter metric.                                                       |
-| `--jitter-threshold T`                 | float              | `0.1`                     | Flag fields with \( J \ge T \).                                                                   |
-| `--interactive`                        | flag               | `false`                   | Launch interactive matplotlib slider to tune \( \alpha \) per field.                              |
-| `--no-plot`                            | flag               | `false`                   | Suppress static matplotlib plots during preview.                                                  |
-| `-o, --output-csv FILE`                | path               | `ema_alphas.csv`          | CSV file where tuned \( \alpha \) values are saved.                                               |
-
-#### generate_path
-
-Creates csv file describing random paths to be used with the high level controller (see `enable_path_viz`).
-
+#### `generate_path` (from `bng_controller`)
+Creates a CSV file describing random paths for the high-level controller.
 ```bash
 ros2 run bng_controller generate_path [OPTIONS]
 ```
-
-| Flag             | Type     | Default  | Description                               |
-|------------------|----------|----------|-------------------------------------------|
-| `-n, --num_points`  | int      | `500`    | Number of points in the loop              |
-| `-l, --length`      | float    | `200.0`  | Total length of path (m)                  |
-| `--noise_long`      | float    | `3.0`    | Long-scale radial noise σ (m)             |
-| `--smooth_long`     | float    | `40.0`   | Long-scale smoothing wavelength (m)       |
-| `--noise_short`     | float    | `1.0`    | Short-scale radial noise σ (m)            |
-| `--smooth_short`    | float    | `6.0`    | Short-scale smoothing wavelength (m)      |
-| `-o, --output`      | path     | `path.csv` | Output CSV filename                     |
+For details on arguments, see the [bng_controller README](src/bng_xal/bng_controller/README.md#path-generation-scripts).
 
 ### ROS2 Services
 
-Interact with the simulator using ROS2 services:
+Interact with the simulator and other components using ROS2 services. Service definitions are provided by the `bng_msgs` package.
 
+Example:
 ```bash
-# Execute a command
+# Request vehicle teleportation (handled by bng_simulator)
 ros2 service call /execute_request bng_msgs/srv/ExecuteRequest "{function_name: 'teleport_vehicle', arguments: 'vehicle_name: ego\npos: [0, 0, 0]\nyaw_angle: 90'}"
 
-# Start logging
+# Start data logging (handled by bng_simulator)
 ros2 service call /start_logger bng_msgs/srv/StartLogger "{save_location: '/tmp/logs', max_queue_size: 1000, flush_interval: 0.5}"
 ```
+For a list of available services and their definitions, refer to the [bng_msgs README](src/bng_xal/bng_msgs/README.md#services) and the READMEs of the packages that provide them (mainly `bng_simulator`).
 
 ## Troubleshooting
 
