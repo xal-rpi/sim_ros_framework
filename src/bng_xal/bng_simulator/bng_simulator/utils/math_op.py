@@ -8,7 +8,7 @@ import numpy as np
 
 
 def convert_euler_to_quaternion(
-    euler_angles: Tuple[float, float, float]
+    euler_angles: Tuple[float, float, float],
 ) -> Tuple[float, float, float, float]:
     """
     Convert Euler angles to quaternion.

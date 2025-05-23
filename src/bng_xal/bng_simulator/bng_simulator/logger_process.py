@@ -3,7 +3,7 @@ LoggerProcess implements a separate process that receives sensor data
 via a multiprocessing.Queue. It extracts the vehicle name, sensor name,
 and data (which is a list of dictionaries with a time field), and organizes
 them into structured time series for each sensor field. Every flush_interval seconds,
-it saves the structured data into a new pickle file inside the specified folder 
+it saves the structured data into a new pickle file inside the specified folder
 (save_location) with a unique filename.
 """
 

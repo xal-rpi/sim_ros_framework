@@ -21,6 +21,7 @@ from bng_controller.srv import OverrideTargets
 from rclpy.time import Time
 from rclpy.duration import Duration
 
+
 class PerformanceMetrics:
     def __init__(self, window_size: int = 100):
         self._latencies = deque(maxlen=window_size)
@@ -126,7 +127,7 @@ class HighLevelController(Node):
         self.override_service = self.create_service(
             OverrideTargets,
             "~/override_targets",  # Node-private service
-            self._override_targets_callback
+            self._override_targets_callback,
         )
         self.get_logger().info("Created override_targets service.")
 
@@ -242,22 +243,29 @@ class HighLevelController(Node):
 
         if len(request.target_labels) != len(request.target_values):
             response.success = False
-            response.message = "Mismatch between target_labels and target_values length."
+            response.message = (
+                "Mismatch between target_labels and target_values length."
+            )
             self.get_logger().error(response.message)
             return response
 
         self.override_targets = dict(zip(request.target_labels, request.target_values))
 
         if request.lifetime_sec > 0:
-            self.override_expiry_time = self.get_clock().now() + Duration(seconds=request.lifetime_sec)
-        else: # A lifetime of 0 or less means apply indefinitely or until cleared
-            self.override_expiry_time = None # Or a very far future time if Time object is always expected
+            self.override_expiry_time = self.get_clock().now() + Duration(
+                seconds=request.lifetime_sec
+            )
+        else:  # A lifetime of 0 or less means apply indefinitely or until cleared
+            self.override_expiry_time = (
+                None  # Or a very far future time if Time object is always expected
+            )
 
         response.success = True
         response.message = "Targets overridden successfully."
-        self.get_logger().info(f"Targets overridden. Expiry set to: {self.override_expiry_time}")
+        self.get_logger().info(
+            f"Targets overridden. Expiry set to: {self.override_expiry_time}"
+        )
         return response
-
 
     def _control_callback(self):
         if self.exit_event.is_set():
@@ -267,23 +275,27 @@ class HighLevelController(Node):
             return
 
         active_override = False
-        if self.override_targets is not None: # Override targets
-            if self.override_expiry_time is None: # Indefinite
+        if self.override_targets is not None:  # Override targets
+            if self.override_expiry_time is None:  # Indefinite
                 active_override = True
             elif self.get_clock().now() < self.override_expiry_time:
                 active_override = True
             else:
                 self.get_logger().info("Override targets expired.")
-                self.override_targets = None # Clear expired override
+                self.override_targets = None  # Clear expired override
                 self.override_expiry_time = None
 
         if active_override:
             targets = self.override_targets
-            # Ensure 'time' key is present if not already in override_targets, 
+            # Ensure 'time' key is present if not already in override_targets,
             # as the original logic adds it.
-            if 'time' not in targets:
-                 targets['time'] = self.get_clock().now().nanoseconds / 1e9 # current time in seconds
-            self.get_logger().debug(f"Using overridden targets: {targets}", throttle_duration_sec=2)
+            if "time" not in targets:
+                targets["time"] = (
+                    self.get_clock().now().nanoseconds / 1e9
+                )  # current time in seconds
+            self.get_logger().debug(
+                f"Using overridden targets: {targets}", throttle_duration_sec=2
+            )
         else:
             self.get_logger().debug(
                 f"Calling {self.control_fn_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
