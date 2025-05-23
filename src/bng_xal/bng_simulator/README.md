@@ -58,7 +58,7 @@ This launch file starts the `sim_manager_node`, which is the main node responsib
 
 *   **`config_path`**:
     *   Description: Path to the main simulation scenario configuration YAML file. This file defines the level to load, vehicles to spawn, and other simulation parameters.
-    *   Default: `$(find-pkg-share bng_simulator)/config/scenarios/basic_scenario.yaml`
+    *   Default: `$(ros2 pkg prefix bng_simulator)/share/bng_simulator/config/scenarios/basic_scenario.yaml`
     *   Example: `ros2 launch bng_simulator simulator.launch.py config_path:=/path/to/your/custom_scenario.yaml`
 *   **`log_level`**:
     *   Description: Sets the logging level for the `sim_manager_node` (e.g., `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL`).
