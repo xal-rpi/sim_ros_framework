@@ -73,7 +73,7 @@ An optional path visualization node (`path_viz`) can be launched to display a sp
 
 To launch the path visualization node along with the controllers:
 ```bash
-ros2 launch bng_controller controller.launch.py enable_path_viz:=true path_file_viz:="'$(ros2 pkg prefix bng_controller)'/share/bng_controller/resource/paths/your_chosen_path.csv"
+ros2 launch bng_controller controller.launch.py enable_path_viz:=true path_file_viz:=$(ros2 pkg prefix bng_controller)/share/bng_controller/resource/paths/your_chosen_path.csv
 ```
 Replace `your_chosen_path.csv` with one of the available pre-defined paths or a custom one.
 
