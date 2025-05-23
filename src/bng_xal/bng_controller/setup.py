@@ -20,6 +20,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
         (os.path.join("share", package_name, "paths"), glob("resource/paths/*")),
+        (os.path.join("share", package_name, "srv"), glob("srv/*.srv")),
     ],
     install_requires=["setuptools"],
     zip_safe=False,
@@ -38,6 +39,7 @@ setup(
             "path_viz = bng_controller.path_viz:main",
             "generate_circle_path = bng_controller.scripts.generate_circle_path:main",
             "generate_path = bng_controller.scripts.generate_path:main",
+            "send_override_target = bng_controller.scripts.send_override_target:main",
         ],
     },
 )

@@ -1,0 +1,8 @@
+# Request
+string[] target_labels  # e.g., ["road_wheel_angle", "engine_torque"]
+float64[] target_values # Corresponding values for the labels
+float64 lifetime_sec    # Duration for which the override is active, in seconds
+---
+# Response
+bool success
+string message
