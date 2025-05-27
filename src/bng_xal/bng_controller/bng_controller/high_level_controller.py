@@ -99,7 +99,7 @@ class HighLevelController(Node):
 
         if control_prefix == "file":
             if not os.path.isabs(control_module):
-                self.get_logger().warn(
+                self.get_logger().warning(
                     f"Path for file:// scheme is not absolute: {control_module}. Resolution might be unpredictable if not in sys.path."
                 )
 
