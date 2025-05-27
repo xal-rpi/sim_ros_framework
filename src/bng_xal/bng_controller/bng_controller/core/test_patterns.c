@@ -134,17 +134,17 @@ static PyObject *compute_control_empty(PyObject *self, PyObject *args) {
   return result;
 }
 
-static PyMethodDef ControllerCoreCMethods[] = {
+static PyMethodDef TestPatternsMethods[] = {
     {"compute_control_multi_test", compute_control_multi_test, METH_VARARGS,
      "Generates a multi-test waveform based on input parameters."},
     {"compute_control_empty", compute_control_empty, METH_VARARGS,
      "Empty testing control"},
     {NULL, NULL, 0, NULL}};
 
-static struct PyModuleDef controller_core_c_module = {
-    PyModuleDef_HEAD_INIT, "bng_controller.core.controller_core_c",
-    "High‐level controllers in C", -1, ControllerCoreCMethods};
+static struct PyModuleDef test_patterns_module = {
+    PyModuleDef_HEAD_INIT, "bng_controller.core.test_patterns",
+    "High‐level test controllers in C", -1, TestPatternsMethods};
 
-PyMODINIT_FUNC PyInit_controller_core_c(void) {
-  return PyModule_Create(&controller_core_c_module);
+PyMODINIT_FUNC PyInit_test_patterns(void) {
+  return PyModule_Create(&test_patterns_module);
 }

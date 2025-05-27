@@ -47,7 +47,7 @@ vehicles:
           maxSteeringAngle : 0.69 # has to be obtained manually
 
 high_level_controller:
-  control_fn: PY_compute_control_follow # The controller implementation
+  control_fn: core://path_follow:compute_control
   control_rate: 0.01
   path_file: loop_700_500_30_50_1-2_20.csv
   lookahead: 5.0   # meters

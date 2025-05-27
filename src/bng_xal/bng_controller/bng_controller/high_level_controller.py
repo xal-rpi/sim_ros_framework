@@ -5,6 +5,9 @@ import json
 import threading
 import time
 import logging
+import os
+import importlib
+import importlib.util
 from sys import exit, stderr
 from collections import deque
 
@@ -74,6 +77,8 @@ class HighLevelController(Node):
         # pull parameters from config
         cfg = self.get_parameter("config_path").value
         self.config = ConfigManager.get_config(cfg)
+        if self.config is None:
+            raise RuntimeError("Could not open config.")
 
         llc_cfg = self.config["vehicles"]["ego"]["controllers"]["LowLevelController"]
         self.listen_ip = llc_cfg.get("listenIp", "127.0.0.1")
@@ -82,28 +87,97 @@ class HighLevelController(Node):
         self.send_port = llc_cfg.get("sendPort", 0)
 
         hlc_cfg = self.config["high_level_controller"]
-        self.control_fn_name = hlc_cfg["control_fn"]
+        self.control_full_path = hlc_cfg["control_fn"]
         self.control_rate = hlc_cfg["control_rate"]
 
-        if self.control_fn_name.startswith("PY_"):
-            from bng_controller.core import controller_core_py
+        control_prefix, control_path = self.control_full_path.split("://", 1)
+        if not ":" in control_path:
+            raise ValueError(
+                "Missing ':' in control function path, format is (file|core)://module:function"
+            )
+        control_module, self.control_function_name = control_path.rsplit(":", 1)
 
-            self.control_fn_name = self.control_fn_name[3:]
-
-            self.compute_control = getattr(controller_core_py, self.control_fn_name)
-        elif self.control_fn_name.startswith("C_"):
-            try:
-                from bng_controller.core import controller_core_c
-
-                self.control_fn_name = self.control_fn_name[2:]
-
-                self.compute_control = getattr(controller_core_c, self.control_fn_name)
-            except AttributeError:
-                raise RuntimeError(
-                    f"No function '{self.control_fn_name}' in controller_core or python controllers"
+        if control_prefix == "file":
+            if not os.path.isabs(control_module):
+                self.get_logger().warn(
+                    f"Path for file:// scheme is not absolute: {control_module}. Resolution might be unpredictable if not in sys.path."
                 )
 
-        self.get_logger().info(f"Using compute control: {self.compute_control.__name__}")
+            try:
+                module_name = (
+                    "custom_control_module_"
+                    + os.path.splitext(os.path.basename(control_module))[0]
+                )
+
+                spec = importlib.util.spec_from_file_location(module_name, control_module)
+                if spec is None:
+                    raise ImportError(
+                        f"Could not create module spec for file: {control_module}"
+                    )
+
+                custom_module = importlib.util.module_from_spec(spec)
+                if custom_module is None:
+                    raise ImportError(
+                        f"Could not create module from spec for file: {control_module}"
+                    )
+
+                spec.loader.exec_module(custom_module)
+
+                self.compute_control = getattr(
+                    custom_module, self.control_function_name
+                )
+                self.get_logger().info(
+                    f"Successfully loaded control function '{self.control_function_name}' from file: {control_module}"
+                )
+
+            except FileNotFoundError:
+                self.get_logger().error(f"Control file not found: {control_module}")
+                raise
+            except AttributeError:
+                self.get_logger().error(
+                    f"Function '{self.control_function_name}' not found in file: {control_module}"
+                )
+                raise
+            except Exception as e:
+                self.get_logger().error(
+                    f"Error loading control function from file '{control_module}': {e}"
+                )
+                raise
+
+        elif control_prefix == "core":
+            try:
+                # control_module already holds the Python module path, e.g., "my_package.my_module"
+                self.get_logger().debug(f"module : {control_module}, function : {self.control_function_name}")
+                imported_module = importlib.import_module(
+                    "bng_controller.core." + control_module
+                )
+
+                self.compute_control = getattr(
+                    imported_module, self.control_function_name
+                )
+                self.get_logger().info(
+                    f"Successfully loaded control function '{self.control_function_name}' from module: {control_module}"
+                )
+
+            except ModuleNotFoundError:
+                self.get_logger().error(
+                    f"Control module not found: {control_module}"
+                )  # Scheme context is implicitly pymod
+                raise
+            except AttributeError:
+                self.get_logger().error(
+                    f"Function '{self.control_function_name}' not found in module: {control_module}"
+                )
+                raise
+            except Exception as e:
+                self.get_logger().error(
+                    f"Error loading control function from module '{control_module}': {e}"
+                )
+                raise
+        else:
+            raise ValueError(
+                f"Prefix '{control_prefix}' is unknown for high level controller"
+            )
 
         self.sim_start_delay = 1  # second
 
@@ -298,7 +372,7 @@ class HighLevelController(Node):
             )
         else:
             self.get_logger().debug(
-                f"Calling {self.control_fn_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
+                f"Calling {self.control_function_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
                 throttle_duration_sec=10,
             )
             targets = self.compute_control(

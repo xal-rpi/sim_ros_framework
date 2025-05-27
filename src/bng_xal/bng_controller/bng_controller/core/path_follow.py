@@ -24,7 +24,7 @@ wheelbase = hlc.get("wheelbase", 2.5)
 max_steer = hlc.get("max_steer_rad", 1.0)
 
 
-def compute_control_follow(latest, control_rate, max_latency):
+def compute_control(latest, control_rate, max_latency):
     # 1) current position
     x = latest["position"]["x"]
     y = latest["position"]["y"]

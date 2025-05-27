@@ -4,12 +4,24 @@ from glob import glob
 
 package_name = "bng_controller"
 
-# Define the C extension module
-controller_core_c_module = Extension(
-    "bng_controller.core.controller_core_c",
-    sources=["bng_controller/core/controller_core_c.c"],
-    extra_compile_args=["-O3"],  # Optimization flag
-)
+c_extensions = []
+# The glob pattern is relative to this setup.py file.
+# Given setup.py is at src/bng_xal/bng_controller/setup.py,
+# "bng_controller/core/*.c" will look for C files in
+# src/bng_xal/bng_controller/bng_controller/core/
+c_source_files = glob("bng_controller/core/*.c")
+
+for c_file in c_source_files:
+    module_path_no_ext = os.path.splitext(c_file)[0]
+    module_name = module_path_no_ext.replace(os.sep, ".")
+
+    c_extensions.append(
+        Extension(
+            module_name,
+            sources=[c_file],
+            extra_compile_args=["-O3"],
+        )
+    )
 
 setup(
     name=package_name,
@@ -24,10 +36,10 @@ setup(
     install_requires=["setuptools"],
     zip_safe=False,
     maintainer="comev",
-    maintainer_email="44554692+comejv@users.noreply.github.com",
+    maintainer_email="vincec4@rpi.edu",
     description="High-level controller for BeamNG simulation",
     license="TODO: License declaration",
-    ext_modules=[controller_core_c_module],
+    ext_modules=c_extensions,
     extras_require={
         "test": ["pytest"],
     },
