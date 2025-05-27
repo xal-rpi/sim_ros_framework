@@ -35,7 +35,7 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=False,
-    maintainer="comev",
+    maintainer="comejv",
     maintainer_email="vincec4@rpi.edu",
     description="High-level controller for BeamNG simulation",
     license="TODO: License declaration",
