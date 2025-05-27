@@ -77,7 +77,7 @@ With Nix:
    colcon build
    ```
 > [!NOTE]
-> Remember that building is needed after all file changes, even configuration files.
+> Remember that building is needed after all file changes, even configuration files, unless you specify `--symlink-install`.
 
 4. **Source the workspace:**
    ```bash
@@ -134,7 +134,10 @@ The mapping from YAML configurations to specific code components (like `Simulati
 
 ### Launch Commands
 
-1. Start BeamNG: `./BinLinux/BeamNG.tech.x64 -tcom -colorStdOutLog -disable-sandbox`
+1. Start BeamNG: `./BinLinux/BeamNG.tech.x64 -tcom -colorStdOutLog [-disable-sandbox] [-nosteam]`
+> [!NOTE]
+> Disable the sandbox when using a controller that calls `ffi.load()` (e.g., those starting with `nn` in `luamod`).
+> Adding `-nosteam` prevents some errors showing up in the lua console but is not required.
 2. **Start the relevant ROS nodes**:
    - Only the sensors:
    ```bash
@@ -144,9 +147,6 @@ The mapping from YAML configurations to specific code components (like `Simulati
    ```bash
    ros2 launch bng_controller controller.launch.py
    ```
-
-> [!NOTE]
-> We disable the sandbox (`-disable-sandbox` flag for BeamNG.tech) because some controllers (e.g., those starting with `nn` in `luamod`) may call C code from Lua using `ffi.load()`.
 
 For detailed launch parameters accepted by `simulator.launch.py` and `controller.launch.py`, please refer to the README files of the `bng_simulator` and `bng_controller` packages, respectively.
 *   [bng_simulator Launch Arguments](src/bng_xal/bng_simulator/README.md#launching-the-simulator)
