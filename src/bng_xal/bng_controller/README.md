@@ -100,6 +100,14 @@ Scripts to generate custom paths are located in the `bng_controller/scripts/` di
 
 These scripts can be run as standalone Python scripts to produce CSV path files that can then be used by the controller.
 
+### Target Override Script
+
+Override the targets sent by the compute_control function of the HLC.
+Example:
+```bash
+ros2 run bng_controller send_override_target --labels wheel_torque brake_torque road_wheel_angle --values 0 0 0 --lifetime 20
+```
+
 ## Nodes
 
 *   **`run_controller` (controller_interface):** Low-level interface to BeamNG.

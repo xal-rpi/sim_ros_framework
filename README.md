@@ -185,6 +185,13 @@ ros2 run bng_controller generate_path [OPTIONS]
 ```
 For details on arguments, see the [bng_controller README](src/bng_xal/bng_controller/README.md#path-generation-scripts).
 
+#### `send_override_target` (from `bng_controller`)
+Override the targets sent by the compute_control function of the HLC.
+```bash
+ros2 run bng_controller send_override_target [OPTIONS]
+```
+For details on arguments, see the [bng_controller README](src/bng_xal/bng_controller/README.md#target_override_script).
+
 ### ROS2 Services
 
 Interact with the simulator and other components using ROS2 services. Service definitions are provided by the `bng_msgs` package.
