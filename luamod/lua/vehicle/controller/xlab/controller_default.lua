@@ -16,6 +16,9 @@ local nowClock = 0
 local realLastClock = os.clock()
 local realUpdateCount = 0
 
+-- For steering input
+local desiredSteer = 0
+
 -- controller internal state, now with two target slots
 local controllerState = {
   torqueErrorIntegral = 0,
@@ -221,7 +224,7 @@ local function applyTargets(dt)
   local desiredWheelT = p.wheelTorque + (n.wheelTorque - p.wheelTorque) * f
 
   local desiredSteerAng = p.roadWheelAngle + (n.roadWheelAngle - p.roadWheelAngle) * f
-  local desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
+  desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
 
   local desiredBrakeT = p.brakeTorque + (n.brakeTorque - p.brakeTorque) * f
 
@@ -298,8 +301,9 @@ local function applyTargets(dt)
 
   -- send into BeamNG
   input.event('throttle', thr, FILTER_AI)
-  input.event('steering', desiredSteer, FILTER_AI)
+  electrics.values.throttle = thr
   input.event('brake', br, FILTER_AI)
+  electrics.values.brake = br
 
   -- latency metrics (ring-buffer of size N=100)
   do
@@ -352,6 +356,11 @@ end
 
 function M.init(c)
   common = c
+  if hydros then
+    hydros.enableVirtualWheel(true, function() return desiredSteer end, obj.sendForceFeedback)
+  else
+    log('E', logTag, 'Hydros not found')
+  end
   log('I', logTag, 'Default controller initialized')
   nextUpdateTime = common.getSimTime()
 end
