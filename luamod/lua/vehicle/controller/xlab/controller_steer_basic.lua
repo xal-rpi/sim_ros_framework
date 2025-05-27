@@ -127,9 +127,6 @@ local function applyTargets(dt)
   desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
   cs.lastAppliedSteering = desiredSteer
 
-  -- send into BeamNG
-  input.event('steering', desiredSteer, FILTER_AI)
-
   -- latency metrics (ring-buffer of size N=100)
   do
     local pm = common.performanceMetrics
@@ -167,7 +164,7 @@ function M.init(c)
   else
     log('E', logTag, 'Hydros not found')
   end
-  log('I', logTag, 'Framework controller initialized')
+  log('I', logTag, 'Steer basic controller initialized')
 end
 
 function M.update(dt)

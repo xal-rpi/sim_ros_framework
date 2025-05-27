@@ -24,7 +24,7 @@ wheelbase = hlc.get("wheelbase", 2.5)
 max_steer = hlc.get("max_steer_rad", 1.0)
 
 
-def compute_control_follow(latest, control_rate, max_latency):
+def compute_control(latest, control_rate, max_latency):
     # 1) current position
     x = latest["position"]["x"]
     y = latest["position"]["y"]
@@ -40,14 +40,14 @@ def compute_control_follow(latest, control_rate, max_latency):
     P = np.array([x, y])
 
     # 3) project onto each segment to find the closest point
-    p0 = _wps[:-1]                  # (N-1,2)
-    v_seg = seg_vecs                # (N-1,2)
+    p0 = _wps[:-1]  # (N-1,2)
+    v_seg = seg_vecs  # (N-1,2)
     L2 = seg_lens**2 + 1e-12
-    w = P - p0                      # (N-1,2)
+    w = P - p0  # (N-1,2)
     t = (w * v_seg).sum(axis=1) / L2
     t = np.clip(t, 0.0, 1.0)
-    projs = p0 + (v_seg.T * t).T    # (N-1,2)
-    d2 = np.hypot(projs[:,0] - x, projs[:,1] - y)
+    projs = p0 + (v_seg.T * t).T  # (N-1,2)
+    d2 = np.hypot(projs[:, 0] - x, projs[:, 1] - y)
     i_seg = int(np.argmin(d2))
     t_seg = t[i_seg]
     s_proj = cum_lens[i_seg] + t_seg * seg_lens[i_seg]
@@ -55,8 +55,8 @@ def compute_control_follow(latest, control_rate, max_latency):
     # 4) unit‐tangent of the path at the closest segment
     tx, ty = seg_vecs[i_seg]
     Lseg = seg_lens[i_seg]
-    tx /= (Lseg + 1e-12)
-    ty /= (Lseg + 1e-12)
+    tx /= Lseg + 1e-12
+    ty /= Lseg + 1e-12
 
     # 5) lookahead point at arc‐length s* = s_proj + L_la
     s_star = min(s_proj + L_la, cum_lens[-1])

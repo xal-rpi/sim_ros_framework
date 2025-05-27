@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-from os import path
 import socket
 import select
 import json
 import threading
 import time
 import logging
+import os
+import importlib
+import importlib.util
 from sys import exit, stderr
 from collections import deque
 
@@ -17,6 +19,8 @@ from geometry_msgs.msg import Twist
 from bng_simulator.utils.config_manager import ConfigManager
 from bng_simulator.utils.services_utils import convert_time_to_header
 from bng_msgs.msg import HLCMsg
+from bng_msgs.srv import OverrideTargets
+from rclpy.duration import Duration
 
 
 class PerformanceMetrics:
@@ -73,6 +77,8 @@ class HighLevelController(Node):
         # pull parameters from config
         cfg = self.get_parameter("config_path").value
         self.config = ConfigManager.get_config(cfg)
+        if self.config is None:
+            raise RuntimeError("Could not open config.")
 
         llc_cfg = self.config["vehicles"]["ego"]["controllers"]["LowLevelController"]
         self.listen_ip = llc_cfg.get("listenIp", "127.0.0.1")
@@ -81,26 +87,97 @@ class HighLevelController(Node):
         self.send_port = llc_cfg.get("sendPort", 0)
 
         hlc_cfg = self.config["high_level_controller"]
-        self.control_fn_name = hlc_cfg["control_fn"]
+        self.control_full_path = hlc_cfg["control_fn"]
         self.control_rate = hlc_cfg["control_rate"]
 
-        if self.control_fn_name.startswith("PY_"):
-            from bng_controller.core import controller_core_py
+        control_prefix, control_path = self.control_full_path.split("://", 1)
+        if not ":" in control_path:
+            raise ValueError(
+                "Missing ':' in control function path, format is (file|core)://module:function"
+            )
+        control_module, self.control_function_name = control_path.rsplit(":", 1)
 
-            self.control_fn_name = self.control_fn_name[3:]
-
-            self.compute_control = getattr(controller_core_py, self.control_fn_name)
-        elif self.control_fn_name.startswith("C_"):
-            try:
-                from bng_controller.core import controller_core_c
-
-                self.control_fn_name = self.control_fn_name[2:]
-
-                self.compute_control = getattr(controller_core_c, self.control_fn_name)
-            except AttributeError:
-                raise RuntimeError(
-                    f"No function '{self.control_fn_name}' in controller_core or python controllers"
+        if control_prefix == "file":
+            if not os.path.isabs(control_module):
+                self.get_logger().warning(
+                    f"Path for file:// scheme is not absolute: {control_module}. Resolution might be unpredictable if not in sys.path."
                 )
+
+            try:
+                module_name = (
+                    "custom_control_module_"
+                    + os.path.splitext(os.path.basename(control_module))[0]
+                )
+
+                spec = importlib.util.spec_from_file_location(module_name, control_module)
+                if spec is None:
+                    raise ImportError(
+                        f"Could not create module spec for file: {control_module}"
+                    )
+
+                custom_module = importlib.util.module_from_spec(spec)
+                if custom_module is None:
+                    raise ImportError(
+                        f"Could not create module from spec for file: {control_module}"
+                    )
+
+                spec.loader.exec_module(custom_module)
+
+                self.compute_control = getattr(
+                    custom_module, self.control_function_name
+                )
+                self.get_logger().info(
+                    f"Successfully loaded control function '{self.control_function_name}' from file: {control_module}"
+                )
+
+            except FileNotFoundError:
+                self.get_logger().error(f"Control file not found: {control_module}")
+                raise
+            except AttributeError:
+                self.get_logger().error(
+                    f"Function '{self.control_function_name}' not found in file: {control_module}"
+                )
+                raise
+            except Exception as e:
+                self.get_logger().error(
+                    f"Error loading control function from file '{control_module}': {e}"
+                )
+                raise
+
+        elif control_prefix == "core":
+            try:
+                # control_module already holds the Python module path, e.g., "my_package.my_module"
+                self.get_logger().debug(f"module : {control_module}, function : {self.control_function_name}")
+                imported_module = importlib.import_module(
+                    "bng_controller.core." + control_module
+                )
+
+                self.compute_control = getattr(
+                    imported_module, self.control_function_name
+                )
+                self.get_logger().info(
+                    f"Successfully loaded control function '{self.control_function_name}' from module: {control_module}"
+                )
+
+            except ModuleNotFoundError:
+                self.get_logger().error(
+                    f"Control module not found: {control_module}"
+                )  # Scheme context is implicitly pymod
+                raise
+            except AttributeError:
+                self.get_logger().error(
+                    f"Function '{self.control_function_name}' not found in module: {control_module}"
+                )
+                raise
+            except Exception as e:
+                self.get_logger().error(
+                    f"Error loading control function from module '{control_module}': {e}"
+                )
+                raise
+        else:
+            raise ValueError(
+                f"Prefix '{control_prefix}' is unknown for high level controller"
+            )
 
         self.sim_start_delay = 1  # second
 
@@ -113,10 +190,20 @@ class HighLevelController(Node):
         self.last_command_time = 0.0
         self.message_counter = 0
 
+        self.override_targets = None
+        self.override_expiry_time = None  # Will store an rclpy.time.Time object
+
         # pubs & subs
         self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 1)
         self.create_subscription(Twist, "cmd_vel", self._cmd_vel_callback, 1)
         self.target_pub = self.create_publisher(HLCMsg, "hlc_msg", 1)
+
+        self.override_service = self.create_service(
+            OverrideTargets,
+            "~/override_targets",  # Node-private service
+            self._override_targets_callback,
+        )
+        self.get_logger().info("Created override_targets service.")
 
         # UDP sockets
         self._init_udp()
@@ -222,6 +309,38 @@ class HighLevelController(Node):
     def _cmd_vel_callback(self, msg: Twist):
         self.get_logger().debug(f"Got cmd_vel: lin={msg.linear.x}, ang={msg.angular.z}")
 
+    def _override_targets_callback(self, request, response):
+        self.get_logger().info(
+            f"Received override request: {request.target_labels}, "
+            f"values: {request.target_values}, lifetime: {request.lifetime_sec}s"
+        )
+
+        if len(request.target_labels) != len(request.target_values):
+            response.success = False
+            response.message = (
+                "Mismatch between target_labels and target_values length."
+            )
+            self.get_logger().error(response.message)
+            return response
+
+        self.override_targets = dict(zip(request.target_labels, request.target_values))
+
+        if request.lifetime_sec > 0:
+            self.override_expiry_time = self.get_clock().now() + Duration(
+                seconds=request.lifetime_sec
+            )
+        else:  # A lifetime of 0 or less means apply indefinitely or until cleared
+            self.override_expiry_time = (
+                None  # Or a very far future time if Time object is always expected
+            )
+
+        response.success = True
+        response.message = "Targets overridden successfully."
+        self.get_logger().info(
+            f"Targets overridden. Expiry set to: {self.override_expiry_time}"
+        )
+        return response
+
     def _control_callback(self):
         if self.exit_event.is_set():
             self.stop()
@@ -229,13 +348,36 @@ class HighLevelController(Node):
         if not self.running or self.latest_sensor_data == {}:
             return
 
-        self.get_logger().debug(
-            f"Calling {self.control_fn_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
-            throttle_duration_sec=10,
-        )
-        targets = self.compute_control(
-            self.latest_sensor_data, self.control_rate, self.metrics.max_latency
-        )
+        active_override = False
+        if self.override_targets is not None:  # Override targets
+            if self.override_expiry_time is None:  # Indefinite
+                active_override = True
+            elif self.get_clock().now() < self.override_expiry_time:
+                active_override = True
+            else:
+                self.get_logger().info("Override targets expired.")
+                self.override_targets = None  # Clear expired override
+                self.override_expiry_time = None
+
+        if active_override:
+            targets = self.override_targets
+            # Ensure 'time' key is present if not already in override_targets,
+            # as the original logic adds it.
+            if "time" not in targets:
+                targets["time"] = (
+                    self.get_clock().now().nanoseconds / 1e9
+                )  # current time in seconds
+            self.get_logger().debug(
+                f"Using overridden targets: {targets}", throttle_duration_sec=2
+            )
+        else:
+            self.get_logger().debug(
+                f"Calling {self.control_function_name} with args : {self.latest_sensor_data, self.control_rate, self.metrics.max_latency}",
+                throttle_duration_sec=10,
+            )
+            targets = self.compute_control(
+                self.latest_sensor_data, self.control_rate, self.metrics.max_latency
+            )
 
         try:
             pkt = json.dumps(targets).encode("utf-8")

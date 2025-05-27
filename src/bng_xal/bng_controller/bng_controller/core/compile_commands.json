@@ -9,11 +9,11 @@
       "-c",
       "-O3",
       "-o",
-      "build/temp.linux-x86_64-cpython-312/controller_core.o",
-      "controller_core.c"
+      "build/temp.linux-x86_64-cpython-312/test_patterns.o",
+      "test_patterns.c"
     ],
     "directory": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core",
-    "file": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core/controller_core.c",
-    "output": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core/build/temp.linux-x86_64-cpython-312/controller_core.o"
+    "file": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core/test_patterns.c",
+    "output": "/home/vincec4/Documents/xal/src/bng_xal/bng_controller/bng_controller/core/build/temp.linux-x86_64-cpython-312/test_patterns.o"
   }
 ]

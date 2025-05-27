@@ -20,6 +20,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ExecuteRequest.srv"
   "srv/StartLogger.srv"
   "srv/StopLogger.srv"
+  "srv/OverrideTargets.srv"
   # "msg/VehicleStatus.msg"
   # "msg/ScenarioState.msg"
   # "srv/Spawn.srv"
