@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from os import path
 import socket
 import select
 import json
@@ -17,8 +16,7 @@ from geometry_msgs.msg import Twist
 from bng_simulator.utils.config_manager import ConfigManager
 from bng_simulator.utils.services_utils import convert_time_to_header
 from bng_msgs.msg import HLCMsg
-from bng_controller.srv import OverrideTargets
-from rclpy.time import Time
+from bng_msgs.srv import OverrideTargets
 from rclpy.duration import Duration
 
 
@@ -104,6 +102,8 @@ class HighLevelController(Node):
                 raise RuntimeError(
                     f"No function '{self.control_fn_name}' in controller_core or python controllers"
                 )
+
+        self.get_logger().info(f"Using compute control: {self.compute_control.__name__}")
 
         self.sim_start_delay = 1  # second
 

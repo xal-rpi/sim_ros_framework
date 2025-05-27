@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from bng_controller.srv import OverrideTargets  # Adjust if necessary
+from bng_msgs.srv import OverrideTargets  # Adjust if necessary
 import argparse
 import sys
 
