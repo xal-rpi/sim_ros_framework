@@ -285,7 +285,7 @@ class SimulationManager:
         """
         return list(self.vehicles.keys())
 
-    def get_vehicle_part_config(self, vehicle_name: str = None) -> str:
+    def get_vehicle_part_config(self, vehicle_name: Optional[str] = None) -> Dict[str, str]:
         """
         Get the vehicle part configuration name.
 
