@@ -234,6 +234,23 @@ local function commonInit(data)
   end
   common.updateGtReading = updateVehicleAndCacheState
 
+  -- Set up drivetrain transmission mode
+  if data.drivetrain then
+    local drtr = data.drivetrain
+    if drtr.mode then
+      -- shifterMode = 0 : realistic (manual)
+      -- shifterMode = 1 : realistic (manual autoclutch)
+      -- shifterMode = 2 : arcade
+      -- shifterMode = 3 : realistic (automatic)
+      drivetrain.setShifterMode(data.drivetrain.mode)
+      log('I', logTag, 'Set shifter mode to ' .. drtr.mode)
+    end
+    if drtr.startGear then
+      drivetrain.shiftToGear(drtr.startGear)
+      log('I', logTag, 'Set gear to ' .. drtr.startGear)
+    end
+  end
+
   -- Torque RPM lookup
   common.torqueLookup =
     makeTorqueLookup(common.vehicleState.torqueCurve, common.vehicleState.maxTorque)

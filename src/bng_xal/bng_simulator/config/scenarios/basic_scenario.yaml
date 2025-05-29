@@ -83,6 +83,9 @@ vehicles:
         sendIp: 127.0.0.1
         sendPort: 64258
         gtStateName: gtstate
+        drivetrain:
+          mode: 1 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
+          startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
         calibration:
           maxSteeringAngle : 0.69 # has to be obtained manually, rad
           throttleP : 0.2
