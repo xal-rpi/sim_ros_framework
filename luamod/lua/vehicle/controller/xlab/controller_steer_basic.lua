@@ -25,6 +25,13 @@ local calibration = { maxSteeringAngle = 0.69 }
 
 -- For steering input
 local desiredSteer = 0
+local _origInputEvent = input.event
+input.event = function(itype, ivalue, filter, angle, lockType, osClockHP, source)
+  if itype ~= 'steering' and itype ~= 'throttle' and itype ~= 'brakes' then
+    log('D', 'InputDebug', ('[%s]=%0.3f'):format(itype, ivalue))
+  end
+  return _origInputEvent(itype, ivalue, filter, angle, lockType, osClockHP, source)
+end
 
 -- Parse incoming JSON control message
 local function parseMessage(msg)
@@ -208,7 +215,7 @@ function M.update(dt)
   common.updateGtReading()
 
   -- 3) always apply controls (with interpolation) every frame
-  applyTargets(dt)
+  if not common.isBypassed then applyTargets(dt) end
 
   -- 4) send state message at fixed rate
   if common.socketOut then

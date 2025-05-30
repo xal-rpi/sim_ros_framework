@@ -29,6 +29,7 @@ end
 local common = {
   -- flags & sockets
   isRunning = false,
+  isBypassed = false,
   listenIp = nil,
   listenPort = nil,
   sendIp = nil,
@@ -303,6 +304,15 @@ end
 function M.update(dt)
   if common.isRunning and activeController and activeController.update then
     activeController.update(dt, common)
+  end
+end
+
+function M.toggleBypass(bypassActive)
+  if type(bypassActive) == 'boolean' then
+    common.isBypassed = bypassActive
+    log('I', logTag, 'Controller bypass toggled to: ' .. tostring(common.isBypassed))
+  else
+    log('W', logTag, 'toggleBypass called with non-boolean value: ' .. tostring(bypassActive))
   end
 end
 
