@@ -1,17 +1,10 @@
 import collections
-import logging
-
-# Configure logging - This might be handled by the ROS 2 launch system in high_level_controller.py
-# If run as part of ROS 2, the logger configured there will be used.
-# For potential standalone testing of this module, basicConfig is a fallback.
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+from rclpy.node import get_logger
 
 
 class ThrottleSweepLogic:
     def __init__(self, control_rate):
-        self.logger = logging.getLogger(__name__)  # Use module's logger
+        self.logger = get_logger(self.__class__.__name__)
         self.logger.info(
             f"ThrottleSweepLogic initializing with control_rate: {control_rate}"
         )
@@ -26,12 +19,12 @@ class ThrottleSweepLogic:
         # RPM limiter
         self.rpm_hit_required = 2
         self.rpm_limiter_min_speed = 30  # m/s
-        self.rpm_limiter_threshold = 7950.0  # nominal limiter RPM
-        self.rpm_limiter_hysteresis = 400.0  # small drop needed to re-arm
-        self.rpm_limiter_min_interval = 2  # s, minimum time between hits
-        self.rpm_limiter_last_hit_time = -1e9  # time of last counted hit
+        self.rpm_limiter_threshold = 7950.0
+        self.rpm_limiter_hysteresis = 400.0
+        self.rpm_limiter_min_interval = 2
+        self.rpm_limiter_last_hit_time = -1e9
         self.rpm_limiter_hit_count = 0
-        self.rpm_limiter_exceeded = False  # are we currently in the upper band?
+        self.rpm_limiter_exceeded = False
 
         # Calculate min_readings_for_plateau based on control_rate.
         # If control_rate is very small (high frequency), this could be large.
@@ -63,9 +56,7 @@ class ThrottleSweepLogic:
         self.phase = "idle"
         self.stop_readings_count = 0
         self.sim_time = 0.0  # Current simulation time from LLC
-        self.plateau_check_sim_time_start = (
-            0.0  # Sim time when we started having enough data for plateau check
-        )
+        self.plateau_check_sim_time_start = 0.0 # Sim time when we started having enough data for plateau check
         self.initial_run = True  # To trigger initial reset
 
         self.logger.info(
@@ -86,8 +77,6 @@ class ThrottleSweepLogic:
         self.stop_readings_count = 0
         self.plateau_check_sim_time_start = 0.0
         self.initial_run = False  # Reset complete
-        # self.sim_time can retain its last known value or be reset if needed,
-        # but it's updated at the start of each compute_control call.
 
     def compute_control(self, latest_sensor_data, control_rate_val, max_latency_val):
         # Update control_rate if it changed (though typically fixed)
@@ -128,17 +117,7 @@ class ThrottleSweepLogic:
                 "time": 0,
             }
 
-        # HLC timestamp for the command
-        # The LLC will use data.time if present, else data.timestamp, else its 'now'
-        # We use current HLC time as the 'timestamp' field for the LLC.
-        # The 'time' field in the command sent to LLC is for its interpolation target time.
-        # For direct application, this can be 0 or current sim_time.
-        # For future application, it's sim_time + control_rate + max_latency.
-        # The current controller_throttle_sweep.lua uses data.time for interpolation,
-        # with 0 meaning immediate. Let's use 0 for simplicity for now.
-        # If precise future timing for LLC interpolation is desired:
-        # command_reach_time = self.sim_time + control_rate_val + max_latency_val
-        command_reach_time = 0  # Apply immediately based on HLC decision timing.
+        command_reach_time = 0  # Apply immediately
 
         if self.initial_run:  # Should have been called by __init__ or external reset
             self.reset()
