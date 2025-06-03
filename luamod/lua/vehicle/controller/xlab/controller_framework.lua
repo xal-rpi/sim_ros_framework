@@ -174,7 +174,7 @@ function M.update(dt)
   common.updateGtReading()
 
   -- 3) always apply controls (with interpolation) every frame
-  applyTargets(dt)
+  if not common.isBypassed then applyTargets(dt) end
 
   -- 4) send state message at fixed rate
   if common.socketOut then

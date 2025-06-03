@@ -25,8 +25,7 @@ local controllerState = {
   nextTarget = { throttle_target = 0, brake_target = 0, time = 0 },
 }
 
-local calibration = {
-}
+local calibration = {}
 
 -- Parse incoming JSON control message
 local function parseMessage(msg)
@@ -44,11 +43,7 @@ local function parseMessage(msg)
 
   -- must have the three control channels
   if data.throttle_target == nil or data.brake_target == nil then
-    log(
-      'E',
-      logTag,
-      'Incomplete control message: throttle_target or brake_target missing'
-    )
+    log('E', logTag, 'Incomplete control message: throttle_target or brake_target missing')
     return false
   end
 
@@ -247,7 +242,7 @@ function M.update(dt)
   common.updateGtReading()
 
   -- 3) always apply controls (with interpolation) every frame
-  applyTargets(dt)
+  if not common.isBypassed then applyTargets(dt) end
 
   -- 4) send state message at fixed rate
   if common.socketOut then

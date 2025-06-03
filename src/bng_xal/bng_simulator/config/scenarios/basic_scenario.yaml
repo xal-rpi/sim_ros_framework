@@ -11,7 +11,10 @@ beamng:
       - xlab/xlabCore
   setup_funcs:
     beamng.settings.set_deterministic:
-      steps_per_second: 60
+      # -1: Run 1000/fpslimit ms of physics per frame
+      # 0: Simulate physics time based on wallclock delta to the last frame
+      # n: Simulate n * 50ms of physics per frame (for any positive n)
+      steps_per_second: 0
     beamng.ui.show_hud: {}
 
 # Scenario configuration

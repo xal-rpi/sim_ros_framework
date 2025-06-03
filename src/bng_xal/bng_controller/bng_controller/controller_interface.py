@@ -48,7 +48,7 @@ class ControllerInterface(Node):
 
         # create SimulationManager & register ROS polling
         self.sim_manager = SimulationManager.from_file(
-            config=cfg, logger=self.get_logger().get_child("sim_manager")
+            config=cfg, logger=self.get_logger().get_child("SimulationManager")
         )
         self.sim_manager.register_ros_polling(self)
 
