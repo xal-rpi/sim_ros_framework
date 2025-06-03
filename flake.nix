@@ -75,6 +75,10 @@
             plotjuggler
             plotjuggler-ros
             rviz2
+            rqt
+            rqt-graph
+            rqt-plot
+            rqt-reconfigure
           ];
         };
 
