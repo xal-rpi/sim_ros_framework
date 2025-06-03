@@ -248,7 +248,7 @@ def predict_throttle_for_target(
     state_scaler = joblib.load(state_scaler_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = InverseTorqueController(7).to(device)  # 7 state features
+    model = InverseTorqueController(len(current_state.keys())).to(device)  # Dynamically derive number of state features
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
