@@ -9,7 +9,7 @@ beamng:
       - xlab/xlabCore
   setup_funcs:
     beamng.settings.set_deterministic:
-      steps_per_second: 60
+      steps_per_second: 0
     beamng.ui.show_hud: {}
 
 # Scenario configuration
@@ -43,6 +43,9 @@ vehicles:
         sendIp: 127.0.0.1
         sendPort: 64258
         gtStateName: gtstate
+        drivetrain:
+          mode: 1 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
+          startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
         calibration:
           maxSteeringAngle : 40 # has to be obtained manually
           throttleP : 0.2
