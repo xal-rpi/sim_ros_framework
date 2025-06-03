@@ -14,16 +14,21 @@ import matplotlib.pyplot as plt
 class InverseTorqueDataset(Dataset):
     def __init__(self, target_torques, state_features, throttles, weights):
         # target_torques: (N,1), state_features: (N,n), throttles: (N,1), weights: (N,1)
-        self.target_torques = torch.from_numpy(target_torques)         # scaled
-        self.state_features = torch.from_numpy(state_features)         # scaled
-        self.throttles    = torch.from_numpy(throttles)
-        self.weights      = torch.from_numpy(weights)                  # float32
+        self.target_torques = torch.from_numpy(target_torques)  # scaled
+        self.state_features = torch.from_numpy(state_features)  # scaled
+        self.throttles = torch.from_numpy(throttles)
+        self.weights = torch.from_numpy(weights)  # float32
 
     def __len__(self):
         return len(self.target_torques)
 
     def __getitem__(self, idx):
-        return (self.target_torques[idx], self.state_features[idx], self.throttles[idx], self.weights[idx])
+        return (
+            self.target_torques[idx],
+            self.state_features[idx],
+            self.throttles[idx],
+            self.weights[idx],
+        )
 
 
 # 2. Inverse torque controller model
@@ -101,8 +106,7 @@ def prepare_inverse_training_data(df):
     # Remove extreme outliers
     torque_99 = df_clean["avg_rear_torque"].quantile(0.99)
     df_clean = df_clean[
-        (df_clean["avg_rear_torque"] >= 0)
-        & (df_clean["avg_rear_torque"] <= torque_99)
+        (df_clean["avg_rear_torque"] >= 0) & (df_clean["avg_rear_torque"] <= torque_99)
     ].copy()
 
     print(f"After filtering: {len(df_clean)} samples")
@@ -132,16 +136,26 @@ def main():
         # "/home/vincec4/Downloads/beamng_log_data/drive/run_003/data/data.pkl",  # Normal driving 5, testing
     ]
 
-    dataset_names = ["constant_throttle","normal_driving_1", "normal_driving_2", "normal_driving_3", "normal_driving_4",] # "normal_driving_5"]
+    dataset_names = [
+        "constant_throttle",
+        "normal_driving_1",
+        "normal_driving_2",
+        "normal_driving_3",
+        "normal_driving_4",
+    ]  # "normal_driving_5"]
 
     # Load and combine data
     combined_df = load_and_prepare_data(data_paths, dataset_names)
 
     # Prepare training data
-    target_torques, state_features, throttles, state_keys = prepare_inverse_training_data(combined_df)
+    target_torques, state_features, throttles, state_keys = (
+        prepare_inverse_training_data(combined_df)
+    )
     high_torque_thr = 800.0
     weights = np.ones_like(target_torques, dtype=np.float32)
-    weights[target_torques[:,0] > high_torque_thr] = 5.0   # up‐weight 5× when torque>800 Nm
+    weights[target_torques[:, 0] > high_torque_thr] = (
+        5.0  # up‐weight 5× when torque>800 Nm
+    )
 
     print(f"\nTraining data shapes:")
     print(f"Target torques: {target_torques.shape}")
@@ -153,10 +167,10 @@ def main():
     indices = np.arange(len(target_torques))
     train_idx, val_idx = train_test_split(indices, test_size=0.2, random_state=42)
 
-    target_train, target_val   = target_torques[train_idx], target_torques[val_idx]
-    state_train, state_val     = state_features[train_idx], state_features[val_idx]
+    target_train, target_val = target_torques[train_idx], target_torques[val_idx]
+    state_train, state_val = state_features[train_idx], state_features[val_idx]
     throttle_train, throttle_val = throttles[train_idx], throttles[val_idx]
-    weight_train, weight_val   = weights[train_idx], weights[val_idx]
+    weight_train, weight_val = weights[train_idx], weights[val_idx]
 
     # Scale features
     # Scale target torques
@@ -178,13 +192,13 @@ def main():
         target_train_scaled,
         state_train_scaled,
         throttle_train,
-        weight_train.astype(np.float32).reshape(-1,1)
+        weight_train.astype(np.float32).reshape(-1, 1),
     )
     val_ds = InverseTorqueDataset(
         target_val_scaled,
         state_val_scaled,
         throttle_val,
-        weight_val.astype(np.float32).reshape(-1,1)
+        weight_val.astype(np.float32).reshape(-1, 1),
     )
 
     train_loader = DataLoader(train_ds, batch_size=128, shuffle=True)
@@ -215,7 +229,7 @@ def main():
             target_batch = target_batch.to(device)
             state_batch = state_batch.to(device)
             throttle_batch = throttle_batch.to(device)
-            weight_batch  = weight_batch.to(device)
+            weight_batch = weight_batch.to(device)
 
             optimizer.zero_grad()
             pred_throttle = model(target_batch, state_batch)

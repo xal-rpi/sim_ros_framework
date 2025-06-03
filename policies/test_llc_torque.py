@@ -79,7 +79,9 @@ def test_inverse_controller(
     ) / 2
 
     # Filter data (same as training)
-    df_clean = df_test[(df_test["brakeInput"] < 0.1) & (df_test["avg_rear_torque"] > 0)].copy()
+    df_clean = df_test[
+        (df_test["brakeInput"] < 0.1) & (df_test["avg_rear_torque"] > 0)
+    ].copy()
 
     target_torques = df_clean[["avg_rear_torque"]].to_numpy(dtype=np.float32)
     state_features = df_clean[state_keys].to_numpy(dtype=np.float32)
@@ -210,7 +212,9 @@ def test_inverse_controller(
     plt.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig("tempres/inverse_controller_test_results.png", dpi=150, bbox_inches="tight")
+    plt.savefig(
+        "tempres/inverse_controller_test_results.png", dpi=150, bbox_inches="tight"
+    )
     plt.show()
 
     return {
@@ -283,7 +287,9 @@ def predict_throttle_for_target(
 # Example usage
 if __name__ == "__main__":
     # Test on one of your datasets
-    test_data_path = "/home/vincec4/Downloads/beamng_log_data/drive/run_003/data/data.pkl"
+    test_data_path = (
+        "/home/vincec4/Downloads/beamng_log_data/drive/run_003/data/data.pkl"
+    )
     # test_data_path = "/home/vincec4/beamng_log_data/run_001/data/data.pkl"
 
     results = test_inverse_controller(test_data_path)
