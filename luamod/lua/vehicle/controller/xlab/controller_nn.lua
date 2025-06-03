@@ -3,6 +3,8 @@ local M = {}
 local common
 local logTag = 'controller_nn'
 
+local tanh = math.tanh
+
 -- local throwaway to avoid global definition warning
 local _ = nil
 
@@ -21,8 +23,8 @@ local realLastClock = os.clock()
 local realUpdateCount = 0
 
 local controllerState = {
-  prevTarget = { time = 0 },
-  nextTarget = { time = 0 },
+  prevTarget = { time = 0, wheel_speed = 0 },
+  nextTarget = { time = 0, wheel_speed = 0 },
 }
 
 local calibration = {}
@@ -47,6 +49,7 @@ local function parseMessage(msg)
   controllerState.prevTarget = controllerState.nextTarget
   controllerState.nextTarget = {
     time = reachTime,
+    wheel_speed = data.wheel_speed,
   }
 
   -- special immediate‐apply case: zero out interpolation
@@ -70,8 +73,15 @@ local function createStateMessage()
   local pm = common.performanceMetrics
   pm.lastResponseTimestamp = nowSim
 
+  local vr = common.cachedGtReading
   local state = {
     simtime = nowSim,
+    -- Vehicle velocity
+    velocity = {
+      x = (vr.vel and vr.vel[1]) or 0,
+      y = (vr.vel and vr.vel[2]) or 0,
+      z = (vr.vel and vr.vel[3]) or 0,
+    },
   }
   local ok, js = pcall(jsonEncode, state)
   if not ok then
@@ -98,10 +108,33 @@ local function applyTargets(dt)
   end
 
   -- lerp each channel
-  -- local desiredTorque = p.engine_torque + (n.engine_torque - p.engine_torque) * f
-
+  local desiredWheelSpeed = p.wheel_speed + (n.wheel_speed - p.wheel_speed) * f
+  -- local desiredWheelSpeed = 40
+  local throttledot
+  local g = common.cachedGtReading
+  if nn_model and common.cachedGtReading then
+    local engine_speed_rad = g.RPM * common.constants.rpmToAV
+    local boost_pressure = g.turboBoost
+    local rear_wheel_speed_rad = (g.wheelRR.angVel + g.wheelRL.angVel) / 2
+    local throttle = g.throttle
+    local diff_rear_wheel_speed_rad = desiredWheelSpeed - rear_wheel_speed_rad
+    local out = nn.run(nn_model, {
+      engine_speed_rad / 400,
+      boost_pressure / 10,
+      rear_wheel_speed_rad / 30,
+      throttle,
+      diff_rear_wheel_speed_rad / 30,
+    })
+    local ff = out[1]
+    local kp = out[2]
+    throttledot = tanh(ff + kp * (diff_rear_wheel_speed_rad / 30))
+    throttledot = 22.5 * throttledot - 7.5
+    controllerState.nextTarget.engine_torque = out[1]
+    controllerState.nextTarget.brake = out[2]
+  end
   -- send into BeamNG
-  -- input.event('throttle', thr, FILTER_AI)
+  local throttle = g.throttle + (0.01 * throttledot)
+  input.event('throttle', throttle, FILTER_AI)
 
   -- latency metrics (ring-buffer of size N=100)
   do
@@ -136,7 +169,7 @@ function M.init(c)
   common = c
   nn = require('lua/vehicle/controller/xlab/lib/nn')
   nn.init()
-  nn_model = nn.loadModel('lua/vehicle/controller/xlab/models/test.json')
+  nn_model = nn.loadModel('lua/vehicle/controller/xlab/models/wheel_speed.json')
   log('I', logTag, 'NN controller initialized')
 end
 
@@ -179,16 +212,6 @@ function M.update(dt)
 
   -- 2) refresh gt-reading if due
   common.updateGtReading()
-
-  -- TEST --
-  if nn_model and common.cachedGtReading then
-    local g = common.cachedGtReading
-    local out = nn.run(nn_model, { 12, 5, 0.336 })
-    -- map your NN outputs to control targets
-    dump(out)
-    controllerState.nextTarget.engine_torque = out[1]
-    controllerState.nextTarget.brake = out[2]
-  end
 
   -- 3) always apply controls (with interpolation) every frame
   if not common.isBypassed then applyTargets(dt) end

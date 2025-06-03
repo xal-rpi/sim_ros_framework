@@ -38,6 +38,7 @@ FILES+=( "${MODELS_DIR}/bypass_controller.json" )
 # Add models
 MODELS_DIR="./lua/vehicle/controller/xlab/models"
 FILES+=( "${MODELS_DIR}/test.json" )
+FILES+=( "${MODELS_DIR}/wheel_speed.json" )
 
 # zip them preserving paths
 printf '%s\n' "${FILES[@]}" | zip -q "$MOD_ZIP" -@
