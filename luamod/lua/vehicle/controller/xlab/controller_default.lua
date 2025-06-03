@@ -153,7 +153,7 @@ local function createStateMessage()
     -- Engine data
     engine = {
       rpm = vr.RPM,
-      torque = vr.wheelTorque,
+      torque = vr.flywheelTorque,
       throttle = vr.throttle or 0,
       max_torque = vs.maxTorque,
       max_rpm = vs.maxRPM,
@@ -163,7 +163,7 @@ local function createStateMessage()
     gearbox = {
       gear = vr.gear or 0,
       gear_index = vr.gearIndex or 0,
-      gear_ratio = vr.gearRatio or 0,
+      gear_ratio = (powertrain.getDevice('gearbox').children[1].cumulativeGearRatio * vr.gearRatio) or 0,
     },
 
     -- Wheel data
@@ -171,16 +171,20 @@ local function createStateMessage()
       FR = {
         steering_angle = (vr.wheelFR and vr.wheelFR.angle) or 0,
         angular_velocity = (vr.wheelFR and vr.wheelFR.angVel) or 0,
+        torque = vr.wheelFR.propTorque or 0,
       },
       FL = {
         steering_angle = (vr.wheelFL and vr.wheelFL.angle) or 0,
         angular_velocity = (vr.wheelFL and vr.wheelFL.angVel) or 0,
+        torque = vr.wheelFL.propTorque or 0,
       },
       RR = {
         angular_velocity = (vr.wheelRR and vr.wheelRR.angVel) or 0,
+        torque = vr.wheelRR.propTorque or 0,
       },
       RL = {
         angular_velocity = (vr.wheelRL and vr.wheelRL.angVel) or 0,
+        torque = vr.wheelRL.propTorque or 0,
       },
     },
 
