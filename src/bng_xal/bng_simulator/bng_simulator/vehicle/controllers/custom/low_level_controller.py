@@ -5,7 +5,6 @@ Low-level controller implementation.
 from rclpy import logging
 
 from beamngpy.connection import CommBase
-from beamngpy.logging import LOGGER_ID
 from beamngpy.beamng import BeamNGpy
 from beamngpy.vehicle import Vehicle
 
@@ -21,7 +20,7 @@ class LowLevelControllerWrapper(CommBase):
 
     def __init__(self, name: str, vehicle: Vehicle, beamng: BeamNGpy, **config):
         super().__init__(beamng, vehicle)
-        self.logger = logging.get_logger(f"{LOGGER_ID}.LowLevelController")
+        self.logger = logging.get_logger("LowLevelController")
         self.name = name
         self.vehicle = vehicle
 

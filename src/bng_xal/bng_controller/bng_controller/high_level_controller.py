@@ -109,7 +109,9 @@ class HighLevelController(Node):
                     + os.path.splitext(os.path.basename(control_module))[0]
                 )
 
-                spec = importlib.util.spec_from_file_location(module_name, control_module)
+                spec = importlib.util.spec_from_file_location(
+                    module_name, control_module
+                )
                 if spec is None:
                     raise ImportError(
                         f"Could not create module spec for file: {control_module}"
@@ -147,7 +149,9 @@ class HighLevelController(Node):
         elif control_prefix == "core":
             try:
                 # control_module already holds the Python module path, e.g., "my_package.my_module"
-                self.get_logger().debug(f"module : {control_module}, function : {self.control_function_name}")
+                self.get_logger().debug(
+                    f"module : {control_module}, function : {self.control_function_name}"
+                )
                 imported_module = importlib.import_module(
                     "bng_controller.core." + control_module
                 )
