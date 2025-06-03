@@ -38,6 +38,10 @@ local M = {}
 function M.loadModel(path)
   -- read + parse
   local def = jsonReadFile(path)
+  if def == nil then
+    log('E', logTag, 'Could not load model json')
+    return
+  end
 
   -- create the C model
   local model = libnn.nn_create_model(def.num_layers)
