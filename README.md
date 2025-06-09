@@ -238,6 +238,10 @@ For a list of available services and their definitions, refer to the [bng_msgs R
    - **Problem:** When running BNG in headless mode the Xlab extension cannot be loaded
    - **Solution:** Copy `luamod/lua/ge/extensions/xlab/` to the root folder of the BeamNG installation and use these flags: `-headless -noui`
 
+7. **Checking out old commit doesn't work**
+   - **Problem:** Something suddenly stopped working and checking out an old commit did not resolve the issue
+   - **Solution:** Remember that you have to run `./luamod/build.bash` each time you change the code inside of it, including through git
+
 ## Acknowledgments
 
 - BeamNG.tech team for providing the simulation environment and help on the forums
