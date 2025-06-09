@@ -368,9 +368,7 @@ class HighLevelController(Node):
             # Ensure 'time' key is present if not already in override_targets,
             # as the original logic adds it.
             if "time" not in targets:
-                targets["time"] = (
-                    self.get_clock().now().nanoseconds / 1e9
-                )  # current time in seconds
+                targets["time"] = 0
             self.get_logger().debug(
                 f"Using overridden targets: {targets}", throttle_duration_sec=2
             )
