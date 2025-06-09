@@ -1,0 +1,14 @@
+{
+    "bypass_controller": {
+        "title": "Bypass Controller",
+        "desc": "Bypass the current active controller.",
+        "isBasic": true,
+        "cat": "vehicle",
+        "order": 1,
+        "isCentered": false,
+        "actionMap": "VehicleCommon",
+        "ctx": "vlua",
+        "onDown": "controller.getController('xlabControllerManager').toggleBypass(true)",
+        "onUp": "controller.getController('xlabControllerManager').toggleBypass(false)"
+    }
+}

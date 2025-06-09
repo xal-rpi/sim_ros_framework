@@ -9,13 +9,13 @@ beamng:
       - xlab/xlabCore
   setup_funcs:
     beamng.settings.set_deterministic:
-      steps_per_second: 60
+      steps_per_second: 0
     beamng.ui.show_hud: {}
 
 # Scenario configuration
 scenario:
   level: tech_ground
-  name: basic
+  name: path_follow
 
 post_scenario: {}
 

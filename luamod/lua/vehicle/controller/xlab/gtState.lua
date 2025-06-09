@@ -210,10 +210,10 @@ local function getWheelInfos(mWheel)
     speed = mWheel.wheelSpeed, -- Wheel speed with effective radius in m/s
     angVelB = mWheel.angularVelocityBrakeCouple * wheelDir, -- Angular velocity from brake torque in rad/s
     angVel = mWheel.angularVelocity * wheelDir, -- Current angular velocity in rad/s
-    -- TODO: Check if this is correct
     brakeTorque = abs(mWheel.coreData.brakeTorqueApplied) - frictionTorque, -- Net brake torque
     propTorque = mWheel.propulsionTorque * wheelDir, -- Propulsion torque applied
     angle = 0.0, -- Wheel angle initialized to zero
+    downForce = mWheel.downForce or 0,
   }
 end
 

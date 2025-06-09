@@ -304,6 +304,7 @@ class GtState(SensorBase):
         msg.wheel_fr_brake_torque = wheelFR["brakeTorque"]
         msg.wheel_fr_prop_torque = wheelFR["propTorque"]
         msg.wheel_fr_angle = wheelFR["angle"]
+        msg.wheel_fr_downforce = wheelFR["downForce"]
 
         msg.wheel_fl_speed = wheelFL["speed"]
         msg.wheel_fl_ang_vel_b = wheelFL["angVelB"]
@@ -311,6 +312,7 @@ class GtState(SensorBase):
         msg.wheel_fl_brake_torque = wheelFL["brakeTorque"]
         msg.wheel_fl_prop_torque = wheelFL["propTorque"]
         msg.wheel_fl_angle = wheelFL["angle"]
+        msg.wheel_fl_downforce = wheelFL["downForce"]
 
         msg.wheel_rr_speed = wheelRR["speed"]
         msg.wheel_rr_ang_vel_b = wheelRR["angVelB"]
@@ -318,6 +320,7 @@ class GtState(SensorBase):
         msg.wheel_rr_brake_torque = wheelRR["brakeTorque"]
         msg.wheel_rr_prop_torque = wheelRR["propTorque"]
         msg.wheel_rr_angle = wheelRR["angle"]
+        msg.wheel_rr_downforce = wheelRR["downForce"]
 
         msg.wheel_rl_speed = wheelRL["speed"]
         msg.wheel_rl_ang_vel_b = wheelRL["angVelB"]
@@ -325,6 +328,7 @@ class GtState(SensorBase):
         msg.wheel_rl_brake_torque = wheelRL["brakeTorque"]
         msg.wheel_rl_prop_torque = wheelRL["propTorque"]
         msg.wheel_rl_angle = wheelRL["angle"]
+        msg.wheel_rl_downforce = wheelRL["downForce"]
 
         msg.steering = data["steering"]
         msg.throttle = data["throttle"]

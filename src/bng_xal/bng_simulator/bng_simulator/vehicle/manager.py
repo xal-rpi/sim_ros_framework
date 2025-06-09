@@ -2,7 +2,6 @@
 Vehicle management class for BeamNG simulation with ROS integration.
 """
 
-import logging
 from typing import Dict, Any, Optional
 from copy import deepcopy
 
@@ -10,6 +9,8 @@ from beamngpy import Vehicle, BeamNGpy
 from bng_simulator.vehicle.sensors import SensorBase, SensorRegistry
 from bng_simulator.vehicle.controllers.base import ControllerRegistry
 from bng_simulator.utils.math_op import convert_euler_to_quaternion
+
+from rclpy.node import get_logger
 
 
 class VehicleManager:
@@ -25,14 +26,12 @@ class VehicleManager:
         config (dict): Vehicle configuration dictionary
     """
 
-    def __init__(
-        self, name: str, beamng: BeamNGpy, config: Dict[str, Any], logger=None
-    ):
+    def __init__(self, name: str, beamng: BeamNGpy, config: Dict[str, Any]):
         self._name = name
         self._beamng = beamng
         self._config = deepcopy(config)
         self._sensors: Dict[str, SensorBase] = {}
-        self._logger = logger or logging.getLogger(f"{__name__}.VehicleManager")
+        self._logger = get_logger(__name__)
         self._vehicle: Vehicle = self.create_vehicle_instance()
         self._controllers = {}  # Dictionary to store controllers
 

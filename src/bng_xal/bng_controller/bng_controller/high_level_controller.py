@@ -109,7 +109,9 @@ class HighLevelController(Node):
                     + os.path.splitext(os.path.basename(control_module))[0]
                 )
 
-                spec = importlib.util.spec_from_file_location(module_name, control_module)
+                spec = importlib.util.spec_from_file_location(
+                    module_name, control_module
+                )
                 if spec is None:
                     raise ImportError(
                         f"Could not create module spec for file: {control_module}"
@@ -147,7 +149,9 @@ class HighLevelController(Node):
         elif control_prefix == "core":
             try:
                 # control_module already holds the Python module path, e.g., "my_package.my_module"
-                self.get_logger().debug(f"module : {control_module}, function : {self.control_function_name}")
+                self.get_logger().debug(
+                    f"module : {control_module}, function : {self.control_function_name}"
+                )
                 imported_module = importlib.import_module(
                     "bng_controller.core." + control_module
                 )
@@ -364,9 +368,7 @@ class HighLevelController(Node):
             # Ensure 'time' key is present if not already in override_targets,
             # as the original logic adds it.
             if "time" not in targets:
-                targets["time"] = (
-                    self.get_clock().now().nanoseconds / 1e9
-                )  # current time in seconds
+                targets["time"] = 0
             self.get_logger().debug(
                 f"Using overridden targets: {targets}", throttle_duration_sec=2
             )

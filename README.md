@@ -234,9 +234,16 @@ For a list of available services and their definitions, refer to the [bng_msgs R
    - **Problem:** The reported torque is different from the target torque
    - **Solution:** Ensure units are metric in the GUI settings of BNG
 
+6. **Xlab extension not found with `-headless`:**
+   - **Problem:** When running BNG in headless mode the Xlab extension cannot be loaded
+   - **Solution:** Use these flags when running BeamNG: `-headless -noui -nosteam`
+
+7. **Checking out old commit doesn't work**
+   - **Problem:** Something suddenly stopped working and checking out an old commit did not resolve the issue
+   - **Solution:** Remember that you have to run `./luamod/build.bash` each time you change the code inside of it, including through git
+
 ## Acknowledgments
 
 - BeamNG.tech team for providing the simulation environment and help on the forums
 - ROS2 community for the robotics framework
-- @neverless for their help on the lua side
 - All contributors to this project

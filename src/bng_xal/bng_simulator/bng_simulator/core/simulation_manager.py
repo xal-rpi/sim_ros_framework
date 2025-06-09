@@ -7,6 +7,7 @@ import traceback
 from typing import Dict, List, Optional, Any
 from copy import deepcopy
 import rclpy
+from rclpy.impl.rcutils_logger import RcutilsLogger
 
 from beamngpy import BeamNGpy, Scenario
 from beamngpy.logging import BNGValueError
@@ -24,7 +25,7 @@ class SimulationManager:
     with multiple vehicles.
     """
 
-    def __init__(self, config: Dict[str, Any], logger=None):
+    def __init__(self, config: Dict[str, Any], logger: RcutilsLogger):
         """
         Initialize the simulation manager with a configuration.
 
@@ -34,8 +35,7 @@ class SimulationManager:
         """
         self._PI = 3.14159
 
-        # Use provided logger or create a standard one
-        self.logger = logger or rclpy.logging.get_logger(self.__class__.__name__)
+        self.logger = logger
         self.config = deepcopy(config)
 
         self.beamng: Optional[BeamNGpy] = None
@@ -56,20 +56,21 @@ class SimulationManager:
         self.post_scenario_configuration()
 
     @classmethod
-    def from_file(cls, config: str, logger=None):
+    def from_file(cls, config: str, logger):
         """
         Create a SimulationManager instance from a configuration file.
 
         Args:
             config (str): Path to the YAML configuration file
-            logger: ROS logger instance (optional)
 
         Returns:
             SimulationManager: Initialized simulation manager
         """
         cfg = ConfigManager.get_config(config)
+        if cfg is None:
+            raise RuntimeError("Config manager returned an empty config")
 
-        return cls(cfg, logger=logger)
+        return cls(cfg, logger)
 
     def connect(self):
         """Establish connection with BeamNG simulation."""
@@ -84,6 +85,8 @@ class SimulationManager:
 
         self.beamng = BeamNGpy(**beamng_info)
         self.beamng.open(**launch_info)
+        if self.beamng is None:
+            raise RuntimeError("Beamng instance didn't connect")
 
         # Apply simulator configuration functions
         for func_name, func_args in setup_funcs.items():
@@ -105,6 +108,7 @@ class SimulationManager:
             self.add_vehicle(vehicle_name, vehicle_config)
 
         # Make and load scenario
+        assert self.beamng is not None
         self.scenario.make(self.beamng)
         self.beamng.load_scenario(self.scenario)
         self.beamng.scenario.start()
@@ -130,16 +134,17 @@ class SimulationManager:
             vehicle_name,
             self.beamng,
             vehicle_config,
-            self.logger.get_child("vehicle_manager"),
         )
         self.vehicles[vehicle_name] = vehicle
         # Get scenario spawn parameters from vehicle config
         spawn_args = vehicle.get_scenario_args()
+        assert self.scenario is not None
         self.scenario.add_vehicle(vehicle.vehicle, **spawn_args)
 
     def close_existing_scenario_if_any(self):
         """Close any existing scenario if any."""
         try:
+            assert self.beamng is not None
             old_scenario = self.beamng.get_current_scenario()
             if old_scenario:
                 self.logger.info("Stopping the existing scenario...")
@@ -285,7 +290,9 @@ class SimulationManager:
         """
         return list(self.vehicles.keys())
 
-    def get_vehicle_part_config(self, vehicle_name: str = None) -> str:
+    def get_vehicle_part_config(
+        self, vehicle_name: Optional[str] = None
+    ) -> Dict[str, str]:
         """
         Get the vehicle part configuration name.
 

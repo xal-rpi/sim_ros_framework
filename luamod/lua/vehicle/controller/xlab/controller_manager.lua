@@ -29,6 +29,7 @@ end
 local common = {
   -- flags & sockets
   isRunning = false,
+  isBypassed = false,
   listenIp = nil,
   listenPort = nil,
   sendIp = nil,
@@ -234,6 +235,23 @@ local function commonInit(data)
   end
   common.updateGtReading = updateVehicleAndCacheState
 
+  -- Set up drivetrain transmission mode
+  if data.drivetrain then
+    local drtr = data.drivetrain
+    if drtr.mode then
+      -- shifterMode = 0 : realistic (manual)
+      -- shifterMode = 1 : realistic (manual autoclutch)
+      -- shifterMode = 2 : arcade
+      -- shifterMode = 3 : realistic (automatic)
+      drivetrain.setShifterMode(data.drivetrain.mode)
+      log('I', logTag, 'Set shifter mode to ' .. drtr.mode)
+    end
+    if drtr.startGear then
+      drivetrain.shiftToGear(drtr.startGear)
+      log('I', logTag, 'Set gear to ' .. drtr.startGear)
+    end
+  end
+
   -- Torque RPM lookup
   common.torqueLookup =
     makeTorqueLookup(common.vehicleState.torqueCurve, common.vehicleState.maxTorque)
@@ -286,6 +304,15 @@ end
 function M.update(dt)
   if common.isRunning and activeController and activeController.update then
     activeController.update(dt, common)
+  end
+end
+
+function M.toggleBypass(bypassActive)
+  if type(bypassActive) == 'boolean' then
+    common.isBypassed = bypassActive
+    log('I', logTag, 'Controller bypass toggled to: ' .. tostring(common.isBypassed))
+  else
+    log('W', logTag, 'toggleBypass called with non-boolean value: ' .. tostring(bypassActive))
   end
 end
 

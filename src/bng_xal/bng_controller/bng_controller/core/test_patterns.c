@@ -6,11 +6,10 @@
 static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
   PyObject *sensor_data;
   double control_rate, max_latency;
-  if (!PyArg_ParseTuple(args, "Odd", &sensor_data, &control_rate,
-                        &max_latency))
+  if (!PyArg_ParseTuple(args, "Odd", &sensor_data, &control_rate, &max_latency))
     return NULL;
 
-  /* --- extract simtime and vel.x exactly as before --- */
+  /* --- extract simtime and vel.x --- */
   PyObject *simtime_obj = PyDict_GetItemString(sensor_data, "simtime");
   if (!simtime_obj) {
     PyErr_SetString(PyExc_KeyError, "\"simtime\" not found");
@@ -22,8 +21,7 @@ static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
 
   PyObject *vel_dict = PyDict_GetItemString(sensor_data, "velocity");
   if (!vel_dict || !PyDict_Check(vel_dict)) {
-    PyErr_SetString(PyExc_KeyError,
-                    "\"velocity\" missing or not a dict");
+    PyErr_SetString(PyExc_KeyError, "\"velocity\" missing or not a dict");
     return NULL;
   }
   PyObject *velx_obj = PyDict_GetItemString(vel_dict, "x");
@@ -40,7 +38,8 @@ static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
   const double base_maxT = 2000.0;
   const double max_speed = 30.0;
   double frac = 1.0 - (velx / max_speed);
-  if (frac < 0.0) frac = 0.0;
+  if (frac < 0.0)
+    frac = 0.0;
   double availT = base_maxT * frac;
 
   /* --- build a 60s repeating test waveform --- */
@@ -53,11 +52,10 @@ static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
   } else if (cycle < 30.0) {
     /* Linear ramp from 0 → +100% over 15s */
     double t = (cycle - 15.0) / 15.0;
-    rawT =  t * availT;
+    rawT = t * availT;
   } else if (cycle < 45.0) {
     /* Low‐frequency sine (0.2 Hz) */
-    rawT = availT *
-           sin(2.0 * PI * 0.2 * (cycle - 30.0));
+    rawT = availT * sin(2.0 * PI * 0.2 * (cycle - 30.0));
   } else {
     /* Chirp: 0.1→1.0 Hz sweep over 15s */
     double tc = cycle - 45.0;
@@ -69,8 +67,10 @@ static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
   }
 
   /* Clamp into ±availT */
-  if (rawT >  availT) rawT =  availT;
-  if (rawT < -availT) rawT = -availT;
+  if (rawT > availT)
+    rawT = availT;
+  if (rawT < -availT)
+    rawT = -availT;
 
   /* Split into drive vs. brake */
   double wheel_torque = rawT > 0.0 ? rawT : 0.0;
@@ -85,19 +85,17 @@ static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
                        PyFloat_FromDouble(wheel_torque));
   PyDict_SetItemString(result, "brake_torque",
                        PyFloat_FromDouble(brake_torque));
-  PyDict_SetItemString(result, "road_wheel_angle",
-                       PyFloat_FromDouble(0.0));
+  PyDict_SetItemString(result, "road_wheel_angle", PyFloat_FromDouble(0.0));
 
-  /* Compute & clamp latency just as before */
+  /* Compute & clamp latency */
   double latency = max_latency + 0.005;
-  if (latency > 0.1) latency = 0.1;
+  if (latency > 0.1)
+    latency = 0.1;
   double time_val = simtime + control_rate + latency;
-  PyDict_SetItemString(result, "time",
-                       PyFloat_FromDouble(time_val));
+  PyDict_SetItemString(result, "time", PyFloat_FromDouble(time_val));
 
   return result;
 }
-
 
 // MPC controller
 // Empty testing controller
