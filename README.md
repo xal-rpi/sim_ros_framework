@@ -242,5 +242,4 @@ For a list of available services and their definitions, refer to the [bng_msgs R
 
 - BeamNG.tech team for providing the simulation environment and help on the forums
 - ROS2 community for the robotics framework
-- @neverless for their help on the lua side
 - All contributors to this project

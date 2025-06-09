@@ -31,6 +31,7 @@ float64 wheel_fr_ang_vel
 float64 wheel_fr_brake_torque
 float64 wheel_fr_prop_torque
 float64 wheel_fr_angle
+float64 wheel_fr_downforce
 
 float64 wheel_fl_speed
 float64 wheel_fl_ang_vel_b
@@ -38,6 +39,7 @@ float64 wheel_fl_ang_vel
 float64 wheel_fl_brake_torque
 float64 wheel_fl_prop_torque
 float64 wheel_fl_angle
+float64 wheel_fl_downforce
 
 float64 wheel_rr_speed
 float64 wheel_rr_ang_vel_b
@@ -45,6 +47,7 @@ float64 wheel_rr_ang_vel
 float64 wheel_rr_brake_torque
 float64 wheel_rr_prop_torque
 float64 wheel_rr_angle
+float64 wheel_rr_downforce
 
 float64 wheel_rl_speed
 float64 wheel_rl_ang_vel_b
@@ -52,6 +55,7 @@ float64 wheel_rl_ang_vel
 float64 wheel_rl_brake_torque
 float64 wheel_rl_prop_torque
 float64 wheel_rl_angle
+float64 wheel_rl_downforce
 
 # Control inputs (unitless)
 float64 steering

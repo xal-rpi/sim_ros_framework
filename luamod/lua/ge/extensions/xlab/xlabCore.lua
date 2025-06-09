@@ -21,6 +21,7 @@ M.handleGetGtStateId = function(request)
 end
 
 M.handleOpenGtState = function(request)
+  log('I', logTag, 'Opening GtState...')
   local args = {}
   args.GFXUpdateTime = request['GFXUpdateTime']
   args.physicsUpdateTime = request['physicsUpdateTime']
@@ -208,6 +209,10 @@ end
 local function onInit()
   log('I', logTag, 'Extension loaded.')
   log('D', logTag, 'Lua version: ' .. _VERSION)
+  if headless_mode then
+    log('I', logTag, 'headless_mode set')
+  end
+
   setExtensionUnloadMode(M, 'manual') -- this is needed for the extension to survive through level loads
 end
 
