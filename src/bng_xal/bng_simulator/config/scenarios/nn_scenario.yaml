@@ -14,8 +14,8 @@ beamng:
 
 # Scenario configuration
 scenario:
-  level: tech_ground
-  name: basic
+  level: smallgrid
+  name: nn
 
 post_scenario: {}
 

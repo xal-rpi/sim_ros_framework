@@ -17,7 +17,7 @@ beamng:
 # Scenario configuration
 scenario:
   level: tech_ground
-  name: basic
+  name: sensors_only
 
 # post_scenario: {}
 

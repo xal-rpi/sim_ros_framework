@@ -15,7 +15,7 @@ beamng:
 # Scenario configuration
 scenario:
   level: tech_ground
-  name: basic
+  name: path_follow
 
 post_scenario: {}
 

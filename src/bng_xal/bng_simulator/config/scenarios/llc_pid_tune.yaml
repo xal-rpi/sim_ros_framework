@@ -15,7 +15,7 @@ beamng:
 # Scenario configuration
 scenario:
   level: smallgrid
-  name: basic
+  name: llc_pid_tune
 
 post_scenario: {}
 
