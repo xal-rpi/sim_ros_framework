@@ -166,4 +166,3 @@ M.updateGtStateLastReadings = updateGtStateLastReadings
 -- M.onVehicleDestroyed                        = onVehicleDestroyed
 
 return M
-

@@ -382,6 +382,8 @@ class HighLevelController(Node):
             )
 
         try:
+            if targets is None:
+                raise RuntimeError("targets is None")
             pkt = json.dumps(targets).encode("utf-8")
             self.send_socket.sendto(pkt, (self.listen_ip, self.listen_port))
             self.get_logger().debug(
@@ -394,11 +396,11 @@ class HighLevelController(Node):
             keys = sorted(targets.keys())
             ros_msg = HLCMsg()
             ros_msg.header = convert_time_to_header(
-                targets["time"] if targets["time"] else self.last_command_time
+                targets.get("time", self.last_command_time)
             )
 
             # Target
-            ros_msg.target = [float(targets[k]) for k in keys]
+            ros_msg.target = [float(targets.get("targets")[0].get('s')) for k in keys]
             ros_msg.target_labels = keys
 
             # Utils
@@ -406,7 +408,7 @@ class HighLevelController(Node):
             self.target_pub.publish(ros_msg)
 
         except Exception as e:
-            self.get_logger().error(f"Send error: {e}")
+            self.get_logger().error(f"Send error: {e}, target : {targets}")
 
     def stop(self):
         """Stop receiving thread and timers, send zero commands."""

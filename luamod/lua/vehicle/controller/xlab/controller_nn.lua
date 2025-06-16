@@ -25,6 +25,7 @@ local realUpdateCount = 0
 local controllerState = {
   prevTarget = { time = 0, wheel_speed = 0 },
   nextTarget = { time = 0, wheel_speed = 0 },
+  old_diff_rear_wheel_speed_rad = 0,
 }
 
 local calibration = {}
@@ -112,23 +113,29 @@ local function applyTargets(dt)
   -- local desiredWheelSpeed = 40
   local throttledot
   local g = common.cachedGtReading
+  local cs = controllerState
   if nn_model and common.cachedGtReading then
     local engine_speed_rad = g.RPM * common.constants.rpmToAV
     local boost_pressure = g.turboBoost
     local rear_wheel_speed_rad = (g.wheelRR.angVel + g.wheelRL.angVel) / 2
     local throttle = g.throttle
-    local diff_rear_wheel_speed_rad = desiredWheelSpeed - rear_wheel_speed_rad
+    local diff_rear_wheel_speed_rad = rear_wheel_speed_rad - desiredWheelSpeed
+    local delta_diff_rear_wheel_speed_rad = diff_rear_wheel_speed_rad
+      - cs.old_diff_rear_wheel_speed_rad
+    cs.old_diff_rear_wheel_speed_rad = diff_rear_wheel_speed_rad
     local out = nn.run(nn_model, {
       engine_speed_rad / 400,
       boost_pressure / 10,
       rear_wheel_speed_rad / 30,
       throttle,
+      delta_diff_rear_wheel_speed_rad / 30,
       diff_rear_wheel_speed_rad / 30,
     })
     local ff = out[1]
     local kp = out[2]
     throttledot = tanh(ff + kp * (diff_rear_wheel_speed_rad / 30))
     throttledot = 22.5 * throttledot - 7.5
+    log('I', logTag, 'throttledot = ' .. throttledot)
     controllerState.nextTarget.engine_torque = out[1]
     controllerState.nextTarget.brake = out[2]
   end
@@ -169,7 +176,7 @@ function M.init(c)
   common = c
   nn = require('lua/vehicle/controller/xlab/lib/nn')
   nn.init()
-  nn_model = nn.loadModel('lua/vehicle/controller/xlab/models/wheel_speed.json')
+  nn_model = nn.loadModel('lua/vehicle/controller/xlab/models/wheel_speed_v1.json')
   log('I', logTag, 'NN controller initialized')
 end
 

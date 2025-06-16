@@ -17,8 +17,8 @@ local realLastClock = os.clock()
 local realUpdateCount = 0
 
 local controllerState = {
-  prevTarget = { time = 0 },
-  nextTarget = { time = 0 },
+  targetList = {}, -- Will store the array of targets from HLC
+  currentVehicleS = 0.0, -- Vehicle's current longitudinal position in the Frenet frame of the current target list
 }
 
 local calibration = {}
@@ -37,16 +37,30 @@ local function parseMessage(msg)
     return false
   end
 
-  local reachTime = data.time
+  -- Expect 'targets' array
+  if not data.targets or type(data.targets) ~= 'table' then
+    log('E', logTag, "Incoming message does not have a 'targets' array or it's not a table.")
+    return false
+  end
 
-  -- shift our two‐slot target buffer
-  controllerState.prevTarget = controllerState.nextTarget
-  controllerState.nextTarget = {
-    time = reachTime,
-  }
+  if #data.targets == 0 then
+    log('W', logTag, "Received empty 'targets' array.")
+    controllerState.targetList = {}
+    controllerState.currentVehicleS = 0.0
+    -- Allow processing of empty target list if that's a valid state (e.g. to stop)
+    return true
+  end
 
-  -- special immediate‐apply case: zero out interpolation
-  if reachTime == 0 then controllerState.prevTarget = controllerState.nextTarget end
+  -- Basic validation of the first target's structure (can be more comprehensive)
+  local firstTarget = data.targets[1]
+  if not firstTarget or type(firstTarget) ~= 'table' or firstTarget.s == nil then
+    log('E', logTag, "First target in 'targets' array is invalid or missing 's' coordinate.")
+    return false
+  end
+
+  -- New target list received, update controller state
+  controllerState.targetList = data.targets
+  controllerState.currentVehicleS = 0.0 -- Reset S as this is a new reference frame
 
   -- perf metrics
   local pm = common.performanceMetrics
@@ -77,29 +91,22 @@ local function createStateMessage()
   return js
 end
 
--- apply computed controls by interpolating between prevTarget→nextTarget
+-- applyTargets in the framework is mostly for logging and conceptual processing
 local function applyTargets(dt)
-  -- interpolation factor
-  local p = controllerState.prevTarget
-  local n = controllerState.nextTarget
-  local t0, t1 = p.time or nowSim, n.time or nowSim
-  local f = 1
-  if t1 > t0 then
-    f = (nowSim - t0) / (t1 - t0)
-    if f < 0 then
-      f = 0
-    elseif f > 1 then
-      f = 1
-    end
+  local cs = controllerState
+  local vr = common.cachedGtReading -- Assume this is populated by common.updateGtReading()
+
+  -- Calculate vehicle's current speed (magnitude of velocity vector)
+  local speed = 0
+  if vr and vr.vel then
+    -- Using 3D velocity magnitude; consider if 2D (horizontal) speed is more appropriate
+    speed = math.sqrt((vr.vel[1] or 0) ^ 2 + (vr.vel[2] or 0) ^ 2 + (vr.vel[3] or 0) ^ 2)
   end
 
-  -- lerp each channel
-  -- local desiredTorque = p.engine_torque + (n.engine_torque - p.engine_torque) * f
+  -- Update vehicle's longitudinal position (s) along the path
+  cs.currentVehicleS = cs.currentVehicleS + speed * dt
 
-  -- send into BeamNG
-  -- input.event('throttle', thr, FILTER_AI)
-
-  -- latency metrics (ring-buffer of size N=100)
+  -- Latency metrics (can remain as is or be adapted)
   do
     local pm = common.performanceMetrics
     local lat = nowSim - pm.lastCommandTimestamp
@@ -110,18 +117,47 @@ local function applyTargets(dt)
 
   -- occasional logging
   do
-    if nowClock == realLastClock then
-      local simTimeApplied = common.getSimTime() or 0
-      log(
-        'I',
-        logTag,
-        string.format(
-          'Target received with time=%.4f, applied at SimTime=%.4f\navgLat=%.1fms\n',
-          n.time,
-          simTimeApplied,
-          common.performanceMetrics.avgLatency * 1000
+    if nowClock == realLastClock then -- Log at the specified real clock interval
+      if #cs.targetList == 0 then
+        log(
+          'I',
+          logTag,
+          string.format(
+            'SimTime=%.3f, currentVehicleS=%.2f. No targets in list.',
+            nowSim,
+            cs.currentVehicleS
+          )
         )
-      )
+      else
+        local targetA = nil
+        local targetB = nil
+        for i, targetPoint in ipairs(cs.targetList) do
+          if targetPoint.s <= cs.currentVehicleS then
+            targetA = targetPoint
+          else
+            targetB = targetPoint
+            break
+          end
+        end
+
+        local logMsg =
+          string.format('SimTime=%.3f, currentVehicleS=%.2f. ', nowSim, cs.currentVehicleS)
+        if targetA then
+          logMsg = logMsg .. string.format('TargetA s=%.1f. ', targetA.s)
+        else
+          logMsg = logMsg .. 'No TargetA found (vehicle before first target). '
+        end
+        if targetB then
+          logMsg = logMsg .. string.format('TargetB s=%.1f. ', targetB.s)
+        else
+          logMsg = logMsg .. 'No TargetB found (vehicle past last target). '
+        end
+        log(
+          'I',
+          logTag,
+          logMsg .. string.format('AvgLat=%.1fms', common.performanceMetrics.avgLatency * 1000)
+        )
+      end
     end
   end
 end
@@ -207,8 +243,8 @@ end
 
 function M.reset()
   controllerState = {
-    prevTarget = { time = 0 },
-    nextTarget = { time = 0 },
+    targetList = {},
+    currentVehicleS = 0.0,
   }
   updateAccum = 0
   messageCounter = 0

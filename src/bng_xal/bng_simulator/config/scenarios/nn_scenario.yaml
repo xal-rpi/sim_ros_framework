@@ -46,11 +46,6 @@ vehicles:
         drivetrain:
           mode: 1 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
           startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
-        calibration:
-          maxSteeringAngle : 40 # has to be obtained manually
-          throttleP : 0.2
-          throttleI : 0.000
-          throttleD : 0.000
 
 
 high_level_controller:

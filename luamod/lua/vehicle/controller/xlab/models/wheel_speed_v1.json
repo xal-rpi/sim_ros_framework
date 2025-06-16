@@ -1,0 +1,108 @@
+{
+  "num_layers": 2,
+  "layers": [
+    {
+      "type": "dense",
+      "in_features": 6,
+      "out_features": 6,
+      "weights": [
+        0.005347146186977625,
+        0.6396384239196777,
+        -1.255757451057434,
+        -0.2105807363986969,
+        -0.895930826663971,
+        -0.20507284998893738,
+        -0.44985103607177734,
+        -0.0335540734231472,
+        -0.06420029699802399,
+        -0.6996254920959473,
+        -0.5412832498550415,
+        -1.3128842115402222,
+        0.1954580545425415,
+        -0.7558225393295288,
+        -0.12668707966804504,
+        1.3733950853347778,
+        7.707647323608398,
+        1.7547659873962402,
+        -0.45972973108291626,
+        -0.7574437260627747,
+        -0.6839745044708252,
+        -0.031010426580905914,
+        0.44792863726615906,
+        -0.6785862445831299,
+        -0.8334320783615112,
+        -0.11090650409460068,
+        -0.29653364419937134,
+        -0.3874861001968384,
+        -0.676449179649353,
+        0.7729355692863464,
+        1.6736974716186523,
+        -1.652366042137146,
+        -0.4091389775276184,
+        -0.2556912302970886,
+        -6.371339797973633,
+        0.8203659057617188
+      ],
+      "biases": [
+        -0.341979056596756,
+        -0.2214021533727646,
+        0.0947064757347107,
+        0.06214065104722977,
+        0.0,
+        0.7543492317199707
+      ],
+      "activation": "RELU"
+    },
+    {
+      "type": "dense",
+      "in_features": 6,
+      "out_features": 2,
+      "weights": [
+        0.9883051514625549,
+        -0.977817177772522,
+        -1.0961359739303589,
+        -0.17103758454322815,
+        -0.30510276556015015,
+        0.34023699164390564,
+        -0.44457340240478516,
+        0.26689136028289795,
+        -2.083381414413452,
+        0.32658159732818604,
+        -1.0415011644363403,
+        -4.172821044921875
+      ],
+      "biases": [
+        0.08075930178165436,
+        -1.0123813152313232
+      ],
+      "activation": "NONE"
+    }
+  ],
+  "nn_input_var": [
+    "engine_speed_rads_unscaled",
+    "boost_pressure_unscaled",
+    "rear_wheelspeed_rads_unscaled",
+    "throttle_unscaled",
+    "delta_diff_wr",
+    "diff_wr"
+  ],
+  "nn_input_scaling": [
+    400.0,
+    10.0,
+    30.0,
+    1.0,
+    30.0,
+    30.0
+  ],
+  "description": {
+    "rear_wheelspeed_rads_unscaled": "Average (wrl + wrr) / 2, Rear wheel speed in radians per second",
+    "engine_speed_rads_unscaled": "Engine speed in radians per second",
+    "boost_pressure_unscaled": "Boost pressure (Beamng Units)",
+    "throttle_unscaled": "Throttle (0,1)",
+    "diff_wr": "Delta (rear_wheelspeed_rads_unscaled - target_wr)",
+    "delta_diff_wr": " Delta (diff_wr)",
+    "nn_input": "Scaled Quantities of nn_input_var, Find scaling factor (as divider term) in Json, nn_input_scaling",
+    "nn_output": "[feedforward, Kp] ---> tanh(feedforward + Kp * scaled(diff_wr))",
+    "throttle_output": "Throttle output to apply ---> throttle_unscaled + delta_t * nn_output | delta_t = 0.01 default"
+  }
+}
