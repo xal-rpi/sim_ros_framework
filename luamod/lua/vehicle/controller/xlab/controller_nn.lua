@@ -123,13 +123,14 @@ local function applyTargets(dt)
     local delta_diff_rear_wheel_speed_rad = diff_rear_wheel_speed_rad
       - cs.old_diff_rear_wheel_speed_rad
     cs.old_diff_rear_wheel_speed_rad = diff_rear_wheel_speed_rad
+    -- Scaling is done in lua.nn based on nn_input_scaling in json
     local out = nn.run(nn_model, {
-      engine_speed_rad / 400,
-      boost_pressure / 10,
-      rear_wheel_speed_rad / 30,
+      engine_speed_rad,
+      boost_pressure,
+      rear_wheel_speed_rad,
       throttle,
-      delta_diff_rear_wheel_speed_rad / 30,
-      diff_rear_wheel_speed_rad / 30,
+      delta_diff_rear_wheel_speed_rad,
+      diff_rear_wheel_speed_rad,
     })
     local ff = out[1]
     local kp = out[2]

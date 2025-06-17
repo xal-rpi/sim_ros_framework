@@ -1,7 +1,7 @@
--- controller_path_speed.lua
+-- controller_steer_basic.lua
 local M = {}
 local common
-local logTag = 'controller_path_speed'
+local logTag = 'controller_steer_basic'
 local updateAccum = 0
 local nowSim, nowClock = 0, 0
 local realLastClock = os.clock()
@@ -9,20 +9,26 @@ local realUpdateCount = 0
 
 local controllerState = {
   targetList = {},
-  currentVehicleS = 0.0,
+  -- s-coordinate relative to the start of the current targetList
+  relativeS = 0.0,
   currentTargetIdx = 1,
   lastAppliedSteering = 0,
   lastAppliedThrottle = 0,
   lastAppliedBrake = 0,
+  -- Flag to trigger a one-time projection for a new path
+  projectionNeeded = true,
 }
 
 local calibration = {
   maxSteeringAngle = 0.69,
   Kp_speed = 0.2,
   defaultDesiredSpeed = 10.0,
+  wheelbase = 2.8,
 }
 
 local desiredSteer = 0
+
+-- Intercept input for debug (no changes)
 local _origInputEvent = input.event
 input.event = function(itype, ivalue, filter, angle, lockType, osClockHP, source)
   if itype ~= 'steering' and itype ~= 'throttle' and itype ~= 'brake' then
@@ -31,6 +37,7 @@ input.event = function(itype, ivalue, filter, angle, lockType, osClockHP, source
   return _origInputEvent(itype, ivalue, filter, angle, lockType, osClockHP, source)
 end
 
+-- Parse incoming targets and reset the relative state
 local function parseMessage(msg)
   if not msg or msg == '' then return false end
   if not jsonDecode then
@@ -42,35 +49,44 @@ local function parseMessage(msg)
     log('E', logTag, 'JSON parse error: ' .. tostring(data))
     return false
   end
-  if not data.targets or type(data.targets) ~= 'table' then
+  if type(data.targets) ~= 'table' then
     log('E', logTag, "Missing 'targets' array or wrong type")
     return false
   end
   if #data.targets > 0 then
-    local f = data.targets[1]
-    if
-      f.s == nil
-      or f.x == nil
-      or f.y == nil
-      or f.z == nil
-      or f.road_wheel_angle == nil
-      or f.desired_speed == nil
-    then
-      log('E', logTag, 'Each target needs x,y,z,s,road_wheel_angle,desired_speed')
-      return false
+    for i, t in ipairs(data.targets) do
+      if
+        t.s == nil
+        or t.x == nil
+        or t.y == nil
+        or t.z == nil
+        or t.road_wheel_angle == nil
+        or t.desired_speed == nil
+        or t.tx == nil
+        or t.ty == nil
+        or t.tz == nil
+      then
+        log('E', logTag, ('Target[%d] missing fields'):format(i))
+        return false
+      end
     end
   else
     log('W', logTag, "Empty 'targets' -> zero/default controls")
   end
+
+  -- New path received: reset state for this relative path
   controllerState.targetList = data.targets
-  controllerState.currentVehicleS = 0.0
+  controllerState.relativeS = 0.0
   controllerState.currentTargetIdx = 1
+  controllerState.projectionNeeded = true -- Force re-projection
+
   local pm = common.performanceMetrics
   pm.lastCommandTimestamp = nowSim
   pm.commandsReceived = pm.commandsReceived + 1
   return true
 end
 
+-- Build state JSON for telemetry (no changes)
 local function createStateMessage()
   if not jsonEncode then
     log('E', logTag, 'JSON encoder not initialized')
@@ -108,10 +124,13 @@ local function createStateMessage()
   return js
 end
 
+-- Apply steering & speed based on targets
 local function applyTargets(dt)
   local cs = controllerState
   local vr = common.cachedGtReading
-  if not vr or not vr.vel or #cs.targetList < 1 then
+
+  if not vr or not vr.vel or not vr.pos or not vr.dirX or #cs.targetList < 1 then
+    cs.projectionNeeded = true
     desiredSteer = 0
     cs.lastAppliedSteering = 0
     input.event('throttle', 0, FILTER_AI)
@@ -123,80 +142,107 @@ local function applyTargets(dt)
     return
   end
 
-  -- 1) project vehicle position onto the piecewise-linear target curve
-  local cx, cy, cz = vr.pos[1], vr.pos[2], vr.pos[3]
-  local bestD2, bestIdx, bestT = 1e99, 1, 0
-  for i = 1, #cs.targetList - 1 do
-    local A, B = cs.targetList[i], cs.targetList[i + 1]
-    local vx, vy, vz = B.x - A.x, B.y - A.y, B.z - A.z
-    local wx, wy, wz = cx - A.x, cy - A.y, cz - A.z
-    local L2 = vx * vx + vy * vy + vz * vz + 1e-12
-    local t = (wx * vx + wy * vy + wz * vz) / L2
-    t = math.max(0, math.min(1, t)) -- Simplified clamp
-    local px, py, pz = A.x + t * vx, A.y + t * vy, A.z + t * vz
-    local dx, dy, dz = cx - px, cy - py, cz - pz
-    local d2 = dx * dx + dy * dy + dz * dz
-    if d2 < bestD2 then
-      bestD2, bestIdx, bestT = d2, i, t
+  -- This is the reference point the controller uses. The executor must match.
+  local frontAxlePos = {
+    vr.pos[1] + calibration.wheelbase * vr.dirX[1],
+    vr.pos[2] + calibration.wheelbase * vr.dirX[2],
+    vr.pos[3] + calibration.wheelbase * vr.dirX[3],
+  }
+
+  local T1, T2, f
+
+  if cs.projectionNeeded then
+    -- Project the FRONT AXLE onto the new path to find our initial relativeS
+    local cx, cy, cz = frontAxlePos[1], frontAxlePos[2], frontAxlePos[3]
+    local bestD2, bestIdx, bestT = 1e99, 1, 0
+    for i = 1, #cs.targetList - 1 do
+      local A, B = cs.targetList[i], cs.targetList[i + 1]
+      local vx, vy, vz = B.x - A.x, B.y - A.y, B.z - A.z
+      local wx, wy, wz = cx - A.x, cy - A.y, cz - A.z
+      local L2 = vx * vx + vy * vy + vz * vz + 1e-12
+      local t = (wx * vx + wy * vy + wz * vz) / L2
+      t = math.max(0, math.min(1, t)) -- Simplified clamp
+      local px, py, pz = A.x + t * vx, A.y + t * vy, A.z + t * vz
+      local dx, dy, dz = cx - px, cy - py, cz - pz
+      local d2 = dx * dx + dy * dy + dz * dz
+      if d2 < bestD2 then
+        bestD2, bestIdx, bestT = d2, i, t
+      end
+    end
+    cs.currentTargetIdx = bestIdx
+    T1 = cs.targetList[cs.currentTargetIdx]
+    T2 = cs.targetList[math.min(cs.currentTargetIdx + 1, #cs.targetList)]
+    cs.relativeS = T1.s + bestT * (T2.s - T1.s)
+    f = bestT
+    cs.projectionNeeded = false
+  else
+    -- Progress along the current path using Frenet frame
+    T1 = cs.targetList[cs.currentTargetIdx]
+    T2 = cs.targetList[math.min(cs.currentTargetIdx + 1, #cs.targetList)]
+
+    -- Recompute interpolation factor f using relative s values
+    local delta_s = T2.s - T1.s
+    f = 0
+    if delta_s > 1e-6 then
+      f = (cs.relativeS - T1.s) / delta_s
+      f = math.max(0, math.min(1, f)) -- Clamp f
+    end
+
+    -- *** FIX 3: INTERPOLATE TANGENT FOR MORE ACCURATE ADVANCEMENT ***
+    local t1_norm = math.sqrt(T1.tx ^ 2 + T1.ty ^ 2 + T1.tz ^ 2)
+    local t2_norm = math.sqrt(T2.tx ^ 2 + T2.ty ^ 2 + T2.tz ^ 2)
+    local interp_tx = T1.tx + f * (T2.tx - T1.tx)
+    local interp_ty = T1.ty + f * (T2.ty - T1.ty)
+    local interp_tz = T1.tz + f * (T2.tz - T1.tz)
+    local interp_norm = math.sqrt(interp_tx ^ 2 + interp_ty ^ 2 + interp_tz ^ 2)
+    if interp_norm > 1e-6 then
+      interp_tx = interp_tx / interp_norm
+      interp_ty = interp_ty / interp_norm
+      interp_tz = interp_tz / interp_norm
+    end
+
+    local ds = (vr.vel[1] * interp_tx + vr.vel[2] * interp_ty + vr.vel[3] * interp_tz) * dt
+    cs.relativeS = cs.relativeS + ds -- Increment relativeS
+
+    -- Advance segment index if we passed the next target's relative s
+    while
+      cs.currentTargetIdx < #cs.targetList
+      and cs.relativeS > cs.targetList[cs.currentTargetIdx + 1].s
+    do
+      cs.currentTargetIdx = cs.currentTargetIdx + 1
+    end
+    T1 = cs.targetList[cs.currentTargetIdx] -- T1 might have updated
+    T2 = cs.targetList[math.min(cs.currentTargetIdx + 1, #cs.targetList)]
+    -- Recompute interpolation factor f with potentially new T1/T2
+    delta_s = T2.s - T1.s
+    f = 0
+    if delta_s > 1e-6 then
+      f = (cs.relativeS - T1.s) / delta_s
+      f = math.max(0, math.min(1, f)) -- Clamp f
     end
   end
 
-  -- If we have no valid projection, fall back to the first target
-  if #cs.targetList == 1 then
-    bestIdx = 1
-    bestT = 0
-    log('W', logTag, 'No valid projection')
-  end
-
-  -- 2) Log when we pass a target for debugging
-  local TA_log = cs.targetList[bestIdx]
-  local TB_log = cs.targetList[math.min(bestIdx + 1, #cs.targetList)]
-  local s_proj = TA_log.s + bestT * (TB_log.s - TA_log.s)
-  cs.currentVehicleS = s_proj
-  while cs.currentTargetIdx < #cs.targetList and s_proj > cs.targetList[cs.currentTargetIdx].s do
-    -- log(
-    --   'I',
-    --   logTag,
-    --   string.format(
-    --     'Reached target #%d (s=%.2f), next is #%d (s=%.2f)',
-    --     cs.currentTargetIdx,
-    --     cs.targetList[cs.currentTargetIdx].s,
-    --     cs.currentTargetIdx + 1,
-    --     cs.targetList[cs.currentTargetIdx + 1].s
-    --   )
-    -- )
-    cs.currentTargetIdx = cs.currentTargetIdx + 1
-  end
-
-  -- 3) Interpolate control commands based on the projection result
-  local A = cs.targetList[bestIdx]
-  local B = cs.targetList[math.min(bestIdx + 1, #cs.targetList)]
-  local f = bestT
-
-  -- 4) steering
-  desiredSteer = A.road_wheel_angle + (B.road_wheel_angle - A.road_wheel_angle) * f
+  -- Steering (now correctly interpolates between planned commands)
+  desiredSteer = T1.road_wheel_angle + (T2.road_wheel_angle - T1.road_wheel_angle) * f
   cs.lastAppliedSteering = desiredSteer / calibration.maxSteeringAngle
   input.event('steering', cs.lastAppliedSteering, FILTER_AI)
 
-  -- 5) speed P‐controller
-  local vx3, vy3, vz3 = vr.vel[1], vr.vel[2], vr.vel[3]
-  local vmag = math.sqrt(vx3 ^ 2 + vy3 ^ 2 + vz3 ^ 2)
-  local tgt_spd = A.desired_speed + (B.desired_speed - A.desired_speed) * f
-  local err = tgt_spd - vmag
+  -- Speed P-controller (logic is unchanged)
+  local vmag = math.sqrt(vr.vel[1] ^ 2 + vr.vel[2] ^ 2 + vr.vel[3] ^ 2)
+  local tgt = T1.desired_speed + (T2.desired_speed - T1.desired_speed) * f
+  local err = tgt - vmag
   local cmd = calibration.Kp_speed * err
   local thr, brk = 0, 0
   if cmd > 0.01 then thr = math.min(cmd, 1) end
   if cmd < -0.01 then brk = math.min(-cmd, 1) end
-
   input.event('throttle', thr, FILTER_AI)
   electrics.values.throttle = thr
   cs.lastAppliedThrottle = thr
-
   input.event('brake', brk, FILTER_AI)
   electrics.values.brake = brk
   cs.lastAppliedBrake = brk
 
-  -- latency metrics (optional)
+  -- latency metrics (no changes)
   do
     local pm = common.performanceMetrics
     local lat = nowSim - pm.lastCommandTimestamp
@@ -205,6 +251,9 @@ local function applyTargets(dt)
     pm.maxLatency = pm.latency.max
   end
 end
+
+-- Boilerplate functions (M.init, M.update, etc.)
+-- Only M.reset and M.getStatus are modified to use relativeS
 
 function M.init(c)
   common = c
@@ -225,11 +274,7 @@ function M.update(dt)
   nowClock = os.clock()
   realUpdateCount = realUpdateCount + 1
   if nowClock - realLastClock >= 1 then
-    log(
-      'I',
-      logTag,
-      string.format('Real rate: %.1f Hz', realUpdateCount / (nowClock - realLastClock))
-    )
+    log('I', logTag, ('Real rate: %.1f Hz'):format(realUpdateCount / (nowClock - realLastClock)))
     realUpdateCount = 0
     realLastClock = nowClock
   end
@@ -277,11 +322,12 @@ end
 function M.reset()
   controllerState = {
     targetList = {},
-    currentVehicleS = 0.0,
+    relativeS = 0.0,
     currentTargetIdx = 1,
     lastAppliedSteering = 0,
     lastAppliedThrottle = 0,
     lastAppliedBrake = 0,
+    projectionNeeded = true,
   }
   updateAccum = 0
   common.lastGtReadingTime = 0

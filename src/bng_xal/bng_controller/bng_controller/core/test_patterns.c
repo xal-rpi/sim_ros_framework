@@ -105,7 +105,13 @@ static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
                          PyFloat_FromDouble(brake_torque));
     PyDict_SetItemString(target_dict, "road_wheel_angle",
                          PyFloat_FromDouble(0.0));
-
+    double s_i = s_values[i];
+    PyDict_SetItemString(target_dict, "x", PyFloat_FromDouble(s_i));
+    PyDict_SetItemString(target_dict, "y", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "z", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "tx", PyFloat_FromDouble(1.0));
+    PyDict_SetItemString(target_dict, "ty", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "tz", PyFloat_FromDouble(0.0));
     if (PyList_Append(targets_list, target_dict) < 0) {
       Py_DECREF(target_dict);
       Py_DECREF(targets_list);
