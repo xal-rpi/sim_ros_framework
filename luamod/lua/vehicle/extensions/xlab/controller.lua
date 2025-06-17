@@ -21,7 +21,7 @@ end
 --- Removes a ground truth state sensor
 -- @param sensorId ID of the sensor to remove
 function M.remove(controllerId)
-  controller.unloadControllerExternal('lowLevelController' .. controllerId)
+  controller.unloadControllerExternal('xlabControllerManager')
   activeController = nil
 end
 
