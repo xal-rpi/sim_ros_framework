@@ -469,7 +469,10 @@ local function init(data)
     'Missing node indices in sensor configuration'
   )
   assert(data.u and data.v, 'Missing barycentric coordinates in config')
-  assert((data.u + data.v) <= 1 + 1e-6, 'Invalid barycentric coordinates (u + v must be <= 1)')
+  -- assert(
+  --   (data.u + data.v) <= 1 + 1e-6,
+  --   'Invalid barycentric coordinates (u + v must be <= 1, got ' .. data.u .. ', ' .. data.v .. ')'
+  -- )
 
   -- Initialize extension integration
   gtStateManager = extensions.xlab_gtState

@@ -1,76 +1,58 @@
-flowchart TD
-  %%––– Node styles
-  classDef userInput       fill:#e1f5fe
-  classDef pythonNodes     fill:#e8f5e9
-  classDef cNodes          fill:#fcc9c9
-  classDef rosNodes        fill:#fff3e0
-  classDef luaNodes        fill:#f3e5f5
-  classDef beamngNodes     fill:#ffebee
+flowchart TB
+  %% --- Style Definitions for a Print-Friendly, Detailed View ---
+  classDef system stroke:#333,stroke-width:2px,fill:#f9f9f9
+  classDef python fill:#fff,stroke:#38761d,stroke-width:2px
+  classDef cpp fill:#fff,stroke:#a61c00,stroke-width:2px,stroke-dasharray: 5 5
+  classDef lua fill:#fff,stroke:#741b47,stroke-width:2px,stroke-dasharray: 2 2
+  classDef engine fill:#e6e6e6,stroke:#000
+  classDef rosmsg fill:#fff,stroke:#f1c232,stroke-width:2px
+  classDef user stroke-width:2px,stroke-dasharray: 5 5
+  classDef hidden height:0px;
 
-  %%––– Main diagram
-  User(("User")):::userInput
-
-  subgraph ROSEnv["ROS Environment"]
-    ControllerInterface["controller_interface.py"]:::pythonNodes
-    direction TB
-    subgraph SimComponents["Simulation Node"]
-      direction TB
-      SimManager["simulation_manager.py"]:::pythonNodes
-      VehicleManager["manager.py"]:::pythonNodes
-      SensorRegistry["SensorRegistry"]:::pythonNodes
-      GtStateSensor["GtState.py"]:::pythonNodes
-      LowLevelController["low_level_controller.py"]:::pythonNodes
-      ControllerRegistry["ControllerRegistry"]:::pythonNodes
+  %% --- Main System Blocks ---
+  subgraph ros[ROS 2 Environment]
+    subgraph sim_node[Simulation Node]
+      SimManager[Simulation Manager]:::python
+      VehicleManager[Vehicle Manager]:::python
+      SensorRegistry[Sensor Registry]:::python
+      ControllerRegistry[Controller Registry]:::python
     end
-    subgraph CtrlComponents["Controller Node"]
-      direction TB
-      HighLevelController["high_level_controller.py"]:::pythonNodes
-      HighLevelCompute["controller_core.c"]:::cNodes
+    subgraph ctrl_node[Controller Node]
+      HighLevelController[High-Level Controller]:::python
+      HighLevelCompute[Compute Control]:::cpp
     end
-    ROSMsgs["ROS Messages"]:::rosNodes
+    ROSMsgs[(ROS Messages)]:::rosmsg
   end
 
-  subgraph BeamNGEnv["BeamNG Environment"]
-    direction TB
-    BeamNGPy["BeamNGpy Interface"]:::pythonNodes
-    subgraph LuaSystem["Game Engine (ge) Lua"]
-      direction TB
-      XlabCore["xlabCore.lua"]:::luaNodes
-      SensorsLua["sensors.lua"]:::luaNodes
+  subgraph bng[BeamNG.tech Environment]
+    BeamNGPy[BeamNGpy Interface]:::python
+    subgraph vehicle_lua[Vehicle Lua]
+      ExtController[Low Level Controller]:::lua
+      GTState[Ground Truth Module]:::lua
     end
-    subgraph VehicleLua["Vehicle Lua"]
-      direction TB
-      GtStateModule["gtState.lua"]:::luaNodes
-      extController["controller.lua"]:::luaNodes
-      ctrlManager["controllerManager.lua"]:::luaNodes
-      ctrlImpl["controllerDefault.lua"]:::luaNodes
-    end
-    BeamNGPhysics["BeamNG Physics Engine"]:::beamngNodes
+    Physics[Physics Engine]:::engine
   end
 
-  %%––– Command flows (solid orange)
-  User -->|Launch| ControllerInterface
-  ControllerInterface -->|config & initialize| SimManager
-  ControllerInterface -->|config & initialize| HighLevelController
-  SimManager -->|control vehicle & scenario| BeamNGPy
-  SimManager -->|setup| VehicleManager
-  VehicleManager -->|register| ControllerRegistry
-  VehicleManager -->|register| SensorRegistry
-  ControllerRegistry -->|create| LowLevelController
-  SensorRegistry -->|create| GtStateSensor
-  LowLevelController -->|open controller| BeamNGPy
-  BeamNGPy -->|send commands| XlabCore
-  XlabCore -->|setup| extController
-  XlabCore -->|manage sensors| SensorsLua
-  extController -->|register|ctrlManager
-  ctrlManager -->|call|ctrlImpl
-  HighLevelController <-->|UDP socket: send target & receive data| extController
+  %% --- External Actor ---
+  User(("User")):::user
 
-  %%––– Internal compute
-  HighLevelController <--> |compute target| HighLevelCompute
+  %% --- Interactions ---
+  %% Control and Command Flow (Solid Lines)
+  User -- "Configure & Launch" --- mid:::hidden
+  mid --> sim_node & ctrl_node
+  SimManager -- "Initialize" --> VehicleManager
+  VehicleManager -- "Register Components" --> SensorRegistry
+  VehicleManager -- "Register Components" --> ControllerRegistry
+  HighLevelController -- "Compute Target" --> HighLevelCompute
+  HighLevelCompute -- "Return Target" --> HighLevelController
+  HighLevelController -- "UDP: Send Target" --> ExtController
+  SimManager -- "Initialize" --> BeamNGPy
+  BeamNGPy -- "Instantiation" --> vehicle_lua
+  ExtController -- "Update" --> Physics
 
-  %%––– Data flows (dashed blue)
-  SensorsLua -->|sensor data| GtStateModule
-  ctrlImpl <--> |update| BeamNGPhysics
-  GtStateModule <-->|poll data| GtStateSensor & ctrlManager
-  GtStateSensor -->|convert| ROSMsgs
+  %% Data Flow (Dashed Lines)
+  ExtController -. "UDP: Send State" .-> HighLevelController
+  Physics -. "Physics State" .-> GTState
+  GTState -. "Raw Data" .-> SensorRegistry
+  SensorRegistry -. "Publish" .-> ROSMsgs
+%%   ROSMsgs -. "Sensor Data" .-> HighLevelController

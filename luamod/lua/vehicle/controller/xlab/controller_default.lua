@@ -1,25 +1,17 @@
--- ./vehicle/controller/xlab/controller_default.lua
+-- controller_default.lua
 local M = {}
 local common
 local logTag = 'controller_default'
+local _ = nil -- avoid global warning
 
--- local throwaway to avoid global definition warning
-local _ = nil
-
--- Module-local state
-local messageCounter = 0
-local nowSim = 0.0
-local nextUpdateTime = 0.0
-
--- for logging real update rate
-local nowClock = 0
-local realLastClock = os.clock()
+-- Module state
+local nowSim, nowClock, realLastClock = 0.0, 0.0, os.clock()
 local realUpdateCount = 0
 
--- For steering input
+-- Last applied commands
 local desiredSteer = 0
 
--- controller internal state, now with two target slots
+-- Controller state
 local controllerState = {
   torqueErrorIntegral = 0,
   torqueErrorPrev = 0,
@@ -30,10 +22,14 @@ local controllerState = {
   lastAppliedBrake = 0,
   lastAppliedSteering = 0,
 
-  prevTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
-  nextTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
+  -- multi‐target scheme
+  targetList = {},
+  currentTargetIdx = 1,
+  currentVehicleS = 0.0,
+  projectionNeeded = true,
 }
 
+-- Calibration (add wheelbase)
 local calibration = {
   throttleP = 1.0,
   throttleI = 0.2,
@@ -44,63 +40,60 @@ local calibration = {
   brakeMinRamp = 0.0,
   brakeMaxRamp = 50.0,
   maxSteeringAngle = 0.69,
+  wheelbase = 2.5, -- [m]; must match your vehicle
 }
 
--- Parse incoming JSON control message
+-- Parse incoming JSON
 local function parseMessage(msg)
-  if not msg or msg == '' then return false end
-  if not jsonDecode then
-    log('E', logTag, 'JSON decoder not initialized')
-    return false
-  end
-
+  if not msg or msg == '' or not jsonDecode then return false end
   local ok, data = pcall(jsonDecode, msg)
   if not ok then
-    log('E', logTag, 'Failed to parse JSON: ' .. tostring(data))
+    log('E', logTag, 'JSON parse error: ' .. tostring(data))
+    return false
+  end
+  if type(data.targets) ~= 'table' then
+    log('E', logTag, "Missing 'targets' array")
+    return false
+  end
+  if #data.targets == 0 then
+    log('W', logTag, 'Empty targets → clearing')
+    controllerState.targetList = {}
+    controllerState.currentVehicleS = 0.0
+    controllerState.currentTargetIdx = 1
+    controllerState.projectionNeeded = true
+    return true
+  end
+
+  -- Validate the *first* target has what we need
+  local t0 = data.targets[1]
+  if
+    t0.s == nil
+    or t0.x == nil
+    or t0.y == nil
+    or t0.z == nil
+    or t0.tx == nil
+    or t0.ty == nil
+    or t0.tz == nil
+    or t0.wheel_torque == nil
+    or t0.brake_torque == nil
+    or t0.road_wheel_angle == nil
+  then
+    log('E', logTag, 'Target[1] missing required fields')
     return false
   end
 
-  -- must have the three control channels
-  if not data.wheel_torque or not data.road_wheel_angle or not data.brake_torque then
-    log('E', logTag, 'Incomplete control message')
-    return false
-  end
+  -- *Accept* and reset for a new multi‐target batch
+  controllerState.targetList = data.targets
+  controllerState.currentVehicleS = 0.0
+  controllerState.currentTargetIdx = 1
+  controllerState.projectionNeeded = true
 
-  -- decide reachTime: prefer data.time, else data.timestamp, else now
-  local reachTime
-  if data.time ~= nil then
-    reachTime = data.time
-    -- if it's not the special "0" and it's already in the past, drop it
-    if reachTime ~= 0 and reachTime < nowSim then
-      log(
-        'W',
-        logTag,
-        string.format('Expired target (time %.3f < now %.3f), ignoring', reachTime, nowSim)
-      )
-      return false
-    end
-  else
-    reachTime = data.timestamp or nowSim
-  end
-
-  -- shift our two‐slot target buffer
-  controllerState.prevTarget = controllerState.nextTarget
-  controllerState.nextTarget = {
-    wheelTorque = data.wheel_torque,
-    roadWheelAngle = data.road_wheel_angle,
-    brakeTorque = data.brake_torque,
-    time = reachTime,
-  }
-
-  -- special immediate‐apply case: zero out interpolation
-  if reachTime == 0 then controllerState.prevTarget = controllerState.nextTarget end
-
-  -- perf metrics
+  -- perf
   local pm = common.performanceMetrics
   pm.lastCommandTimestamp = nowSim
   pm.commandsReceived = pm.commandsReceived + 1
-  messageCounter = messageCounter + 1
 
+  log('I', logTag, string.format('→ Received %d targets', #data.targets))
   return true
 end
 
@@ -163,7 +156,8 @@ local function createStateMessage()
     gearbox = {
       gear = vr.gear or 0,
       gear_index = vr.gearIndex or 0,
-      gear_ratio = (powertrain.getDevice('gearbox').children[1].cumulativeGearRatio * vr.gearRatio) or 0,
+      gear_ratio = (powertrain.getDevice('gearbox').children[1].cumulativeGearRatio * vr.gearRatio)
+        or 0,
     },
 
     -- Wheel data
@@ -204,38 +198,102 @@ local function createStateMessage()
   end
   return js
 end
+
 -- apply computed controls by interpolating between prevTarget→nextTarget
 local function applyTargets(dt)
-  local vs = common.vehicleState
-  local vr = common.cachedGtReading
-  local cs = controllerState
-
-  -- interpolation factor
-  local p = cs.prevTarget
-  local n = cs.nextTarget
-  local t0, t1 = p.time or nowSim, n.time or nowSim
-  local f = 1
-  if t1 > t0 then
-    f = (nowSim - t0) / (t1 - t0)
-    if f < 0 then
-      f = 0
-    elseif f > 1 then
-      f = 1
-    end
+  local cs, vr, vs = controllerState, common.cachedGtReading, common.vehicleState
+  if not vr or not vr.pos or not vr.dirX or not vr.vel or #cs.targetList < 1 then
+    -- emergency zero
+    cs.projectionNeeded = true
+    cs.currentVehicleS = 0.0
+    input.event('steering', 0, FILTER_AI)
+    input.event('throttle', 0, FILTER_AI)
+    input.event('brake', 0, FILTER_AI)
+    return
   end
 
-  -- lerp each channel
-  local desiredWheelT = p.wheelTorque + (n.wheelTorque - p.wheelTorque) * f
+  -- 1) Front‐axle world‐coords
+  local fx, fy, fz = vr.dirX[1], vr.dirX[2], vr.dirX[3]
+  local cx = vr.pos[1] + calibration.wheelbase * fx
+  local cy = vr.pos[2] + calibration.wheelbase * fy
+  local cz = vr.pos[3] + calibration.wheelbase * fz
 
-  local desiredSteerAng = p.roadWheelAngle + (n.roadWheelAngle - p.roadWheelAngle) * f
-  desiredSteer = desiredSteerAng / calibration.maxSteeringAngle
+  local T1, T2, f
 
-  local desiredBrakeT = p.brakeTorque + (n.brakeTorque - p.brakeTorque) * f
+  if cs.projectionNeeded then
+    -- Project front‐axle onto the new polyline
+    local bestD2, bestIdx, bestT = 1e99, 1, 0
+    for i = 1, #cs.targetList - 1 do
+      local A, B = cs.targetList[i], cs.targetList[i + 1]
+      local vx, vy, vz = B.x - A.x, B.y - A.y, B.z - A.z
+      local wx, wy, wz = cx - A.x, cy - A.y, cz - A.z
+      local L2 = vx * vx + vy * vy + vz * vz + 1e-12
+      local t = (wx * vx + wy * vy + wz * vz) / L2
+      if t < 0 then
+        t = 0
+      elseif t > 1 then
+        t = 1
+      end
+      local px, py, pz = A.x + t * vx, A.y + t * vy, A.z + t * vz
+      local dx, dy, dz = cx - px, cy - py, cz - pz
+      local d2 = dx * dx + dy * dy + dz * dz
+      if d2 < bestD2 then
+        bestD2, bestIdx, bestT = d2, i, t
+      end
+    end
 
-  ------------------------------------------------------------------------
-  -- steering
-  ------------------------------------------------------------------------
+    cs.currentTargetIdx = bestIdx
+    T1 = cs.targetList[bestIdx]
+    T2 = cs.targetList[math.min(bestIdx + 1, #cs.targetList)]
+    cs.currentVehicleS = T1.s + bestT * (T2.s - T1.s)
+    f = bestT
+    cs.projectionNeeded = false
+  else
+    -- Advance along the path by velocity·tangent
+    T1 = cs.targetList[cs.currentTargetIdx]
+    T2 = cs.targetList[math.min(cs.currentTargetIdx + 1, #cs.targetList)]
+
+    -- interpolate tangent
+    local delta_s = T2.s - T1.s
+    local frac = (delta_s > 1e-6) and ((cs.currentVehicleS - T1.s) / delta_s) or 0
+    frac = math.max(0, math.min(1, frac))
+    local tx = T1.tx + frac * (T2.tx - T1.tx)
+    local ty = T1.ty + frac * (T2.ty - T1.ty)
+    local tz = T1.tz + frac * (T2.tz - T1.tz)
+    local n = math.sqrt(tx * tx + ty * ty + tz * tz)
+    if n > 1e-6 then
+      tx, ty, tz = tx / n, ty / n, tz / n
+    end
+
+    -- delta_s = v · t · dt
+    local ds = (vr.vel[1] * tx + vr.vel[2] * ty + vr.vel[3] * tz) * dt
+    cs.currentVehicleS = cs.currentVehicleS + ds
+
+    -- bump segment index if needed
+    while
+      cs.currentTargetIdx < #cs.targetList
+      and cs.currentVehicleS > cs.targetList[cs.currentTargetIdx + 1].s
+    do
+      cs.currentTargetIdx = cs.currentTargetIdx + 1
+    end
+
+    -- recompute interpolation
+    T1 = cs.targetList[cs.currentTargetIdx]
+    T2 = cs.targetList[math.min(cs.currentTargetIdx + 1, #cs.targetList)]
+    delta_s = T2.s - T1.s
+    f = (delta_s > 1e-6) and ((cs.currentVehicleS - T1.s) / delta_s) or 0
+    f = math.max(0, math.min(1, f))
+  end
+
+  -- 2) interpolate controls
+  local wT = T1.wheel_torque + f * (T2.wheel_torque - T1.wheel_torque)
+  local bT = T1.brake_torque + f * (T2.brake_torque - T1.brake_torque)
+  local phi = T1.road_wheel_angle + f * (T2.road_wheel_angle - T1.road_wheel_angle)
+
+  -- 3) steering
+  desiredSteer = phi / calibration.maxSteeringAngle
   cs.lastAppliedSteering = desiredSteer
+  input.event('steering', desiredSteer, FILTER_AI)
 
   ------------------------------------------------------------------------
   -- throttle
@@ -247,13 +305,13 @@ local function applyTargets(dt)
   local dErrorN = 0
   local ff = 0
   local totalRatio = 0
-  if desiredWheelT > 0 then
+  if wT > 0 then
     local pt = powertrain.getDevice
     local gearbox = pt('gearbox')
     totalRatio = gearbox.children[1].cumulativeGearRatio * vr.gearRatio
 
     -- raw engine torque demand
-    desiredEngineT = desiredWheelT / (totalRatio + 1e-6)
+    desiredEngineT = wT / (totalRatio + 1e-6)
     actualEngineT = vr.flywheelTorque
 
     -- --–––  STATIC GAIN + OFFSET CORRECTION  ––––--
@@ -262,7 +320,7 @@ local function applyTargets(dt)
     local K_stat = 1.10789884832988
     local B_fric = 398.247968291034
 
-    local wheelTCorr = K_stat * desiredWheelT + B_fric * (desiredWheelT > 0 and 1 or -1)
+    local wheelTCorr = K_stat * wT + B_fric * (wT > 0 and 1 or -1)
     desiredEngineT = wheelTCorr / (totalRatio + 1e-6)
 
     -- 1) feed-forward
@@ -295,19 +353,19 @@ local function applyTargets(dt)
   end
 
   cs.lastAppliedThrottle = thr
+  input.event('throttle', thr, FILTER_AI)
+  electrics.values.throttle = thr
 
   ------------------------------------------------------------------------
   -- brake
   ------------------------------------------------------------------------
-  local estMax = vs.mass * 10
-  local br = math.min(math.max(desiredBrakeT / estMax, 0), 1)
-  cs.lastAppliedBrake = br
-
-  -- send into BeamNG
-  input.event('throttle', thr, FILTER_AI)
-  electrics.values.throttle = thr
-  input.event('brake', br, FILTER_AI)
-  electrics.values.brake = br
+  do
+    local estMax = vs.mass * 10
+    local br = math.min(math.max(bT / estMax, 0), 1)
+    cs.lastAppliedBrake = br
+    input.event('brake', br, FILTER_AI)
+    electrics.values.brake = br
+  end
 
   -- latency metrics (ring-buffer of size N=100)
   do
@@ -342,7 +400,7 @@ local function applyTargets(dt)
             .. ' TWgt=%.1f  Te_des=%.1f  Te_act=%.1f  TW_act=%.1f |'
             .. ' err=%.2f  dErr=%.2f  I=%.2f  ff=%.2f',
           totalRatio,
-          desiredWheelT,
+          wT,
           desiredEngineT,
           actualEngineT,
           wheelAct,
@@ -448,8 +506,8 @@ function M.reset()
     lastAppliedBrake = 0,
     lastAppliedSteering = 0,
 
-    prevTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
-    nextTarget = { wheelTorque = 0, roadWheelAngle = 0, brakeTorque = 0, time = 0 },
+    targetList = {},
+    currentVehicleS = 0.0,
   }
 
   messageCounter = 0

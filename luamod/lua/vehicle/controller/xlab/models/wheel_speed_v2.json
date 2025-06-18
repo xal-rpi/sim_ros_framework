@@ -1,0 +1,100 @@
+{
+  "num_layers": 2,
+  "layers": [
+    {
+      "type": "dense",
+      "in_features": 5,
+      "out_features": 6,
+      "weights": [
+        0.8474694490432739,
+        -0.20747464895248413,
+        0.03449183702468872,
+        -2.1832001209259033,
+        -5.631056308746338,
+        0.08741343766450882,
+        -1.358418583869934,
+        0.020435569807887077,
+        2.536780595779419,
+        -7.067668437957764,
+        0.18163733184337616,
+        -0.25246885418891907,
+        -0.7334922552108765,
+        0.07710672169923782,
+        -0.12380194664001465,
+        -0.210506409406662,
+        1.994134783744812,
+        0.3263157606124878,
+        2.0644867420196533,
+        5.1196441650390625,
+        0.9418177604675293,
+        0.9387526512145996,
+        -0.15508994460105896,
+        3.1584699153900146,
+        -15.566360473632812,
+        -0.9095991849899292,
+        -0.8535509705543518,
+        0.3952960968017578,
+        0.49953654408454895,
+        -0.09824755042791367
+      ],
+      "biases": [
+        0.3067449629306793,
+        0.22385194897651672,
+        -0.18231791257858276,
+        -1.3687254190444946,
+        0.5869330763816833,
+        -0.0312165729701519
+      ],
+      "activation": "RELU"
+    },
+    {
+      "type": "dense",
+      "in_features": 6,
+      "out_features": 2,
+      "weights": [
+        0.7210754156112671,
+        -0.5302518010139465,
+        -0.5168240666389465,
+        -0.4925105571746826,
+        0.03079598769545555,
+        -0.1575843244791031,
+        -3.8331944942474365,
+        1.0434410572052002,
+        -0.31404390931129456,
+        -5.213757514953613,
+        -8.4773588180542,
+        -0.3662105202674866
+      ],
+      "biases": [
+        0.06564854830503464,
+        -0.44510674476623535
+      ],
+      "activation": "NONE"
+    }
+  ],
+  "nn_input_var": [
+    "engine_speed_rads_unscaled",
+    "boost_pressure_unscaled",
+    "rear_wheelspeed_rads_unscaled",
+    "throttle_unscaled",
+    "diff_wr"
+  ],
+  "nn_input_scaling": [
+    400.0,
+    10.0,
+    30.0,
+    1.0,
+    30.0
+  ],
+  "description": {
+    "rear_wheelspeed_rads_unscaled": "Average (wrl + wrr) / 2, Rear wheel speed in radians per second",
+    "engine_speed_rads_unscaled": "Engine speed in radians per second",
+    "boost_pressure_unscaled": "Boost pressure (Beamng Units)",
+    "throttle_unscaled": "Throttle (0,1)",
+    "diff_wr": "Delta (rear_wheelspeed_rads_unscaled - target_wr)",
+    "delta_diff_wr": " Delta (diff_wr)",
+    "nn_input": "Scaled Quantities of nn_input_var, Find scaling factor (as divider term) in Json, nn_input_scaling",
+    "nn_output": "[feedforward, Kp] ---> tanh(feedforward + Kp * scaled(diff_wr))",
+    "throttle_output": "Throttle output to apply ---> throttle_unscaled + delta_t * nn_output | delta_t = 0.01 default"
+  }
+}

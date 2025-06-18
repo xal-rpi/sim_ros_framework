@@ -1,4 +1,4 @@
-// controller_core_c.c
+// test_patterns.c
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <math.h>
@@ -76,28 +76,65 @@ static PyObject *compute_control_multi_test(PyObject *self, PyObject *args) {
   double wheel_torque = rawT > 0.0 ? rawT : 0.0;
   double brake_torque = rawT < 0.0 ? -rawT : 0.0;
 
-  /* Build result dict */
-  PyObject *result = PyDict_New();
-  if (!result)
+  /* Build targets list */
+  PyObject *targets_list = PyList_New(0);
+  if (!targets_list)
     return NULL;
 
-  PyDict_SetItemString(result, "wheel_torque",
-                       PyFloat_FromDouble(wheel_torque));
-  PyDict_SetItemString(result, "brake_torque",
-                       PyFloat_FromDouble(brake_torque));
-  PyDict_SetItemString(result, "road_wheel_angle", PyFloat_FromDouble(0.0));
+  double s_values[] = {0.0, 20.0, 40.0};
+  int num_targets = sizeof(s_values) / sizeof(s_values[0]);
 
   /* Compute & clamp latency */
   double latency = max_latency + 0.005;
   if (latency > 0.1)
     latency = 0.1;
   double time_val = simtime + control_rate + latency;
+
+  for (int i = 0; i < num_targets; ++i) {
+    PyObject *target_dict = PyDict_New();
+    if (!target_dict) {
+      Py_DECREF(targets_list);
+      return NULL;
+    }
+    PyDict_SetItemString(target_dict, "s", PyFloat_FromDouble(s_values[i]));
+    PyDict_SetItemString(target_dict, "d", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "phi", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "wheel_torque",
+                         PyFloat_FromDouble(wheel_torque));
+    PyDict_SetItemString(target_dict, "brake_torque",
+                         PyFloat_FromDouble(brake_torque));
+    PyDict_SetItemString(target_dict, "road_wheel_angle",
+                         PyFloat_FromDouble(0.0));
+    double s_i = s_values[i];
+    PyDict_SetItemString(target_dict, "x", PyFloat_FromDouble(s_i));
+    PyDict_SetItemString(target_dict, "y", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "z", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "tx", PyFloat_FromDouble(1.0));
+    PyDict_SetItemString(target_dict, "ty", PyFloat_FromDouble(0.0));
+    PyDict_SetItemString(target_dict, "tz", PyFloat_FromDouble(0.0));
+    if (PyList_Append(targets_list, target_dict) < 0) {
+      Py_DECREF(target_dict);
+      Py_DECREF(targets_list);
+      return NULL;
+    }
+    Py_DECREF(target_dict); // PyList_Append increments ref count
+  }
+
+  /* Build result dict */
+  PyObject *result = PyDict_New();
+  if (!result) {
+    Py_DECREF(targets_list);
+    return NULL;
+  }
+  PyDict_SetItemString(result, "targets", targets_list);
   PyDict_SetItemString(result, "time", PyFloat_FromDouble(time_val));
+  // Py_DECREF(targets_list); // PyDict_SetItemString does not steal a reference
+  // here, but it's good practice to DECREF if it did. However, targets_list is
+  // part of the result, so it should not be DECREF'd until result is.
 
   return result;
 }
 
-// MPC controller
 // Empty testing controller
 static PyObject *compute_control_empty(PyObject *self, PyObject *args) {
   PyObject *sensor_data;

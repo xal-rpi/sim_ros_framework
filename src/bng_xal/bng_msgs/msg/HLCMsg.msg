@@ -1,11 +1,11 @@
-# HLC message
-std_msgs/Header header
+# HLCMsg.msg
 
-# Simulation time
-float64 time
+std_msgs/Header header       # stamped with compute time
 
-float32 controller_latency
+float32 controller_latency   # average control loop latency (s)
 
-# Target
-float64[] target
-string[] target_labels
+# dynamic, per‐target data:
+#  - target_labels[i] is the key/name
+#  - target_values[i] is the corresponding value
+string[]          target_labels
+float64[]         target_values

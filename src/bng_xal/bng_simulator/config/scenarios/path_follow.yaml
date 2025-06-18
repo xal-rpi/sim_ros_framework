@@ -26,7 +26,7 @@ vehicles:
     partConfig: /vehicles/utv/wild.pc
     license: EGO
     scenario_args:
-      pos: [0,0,30]
+      pos: [0, 0, 0]
       yaw_angle: 0
     sensors:
       gtstate:
@@ -44,14 +44,21 @@ vehicles:
         sendPort: 64258
         gtStateName: gtstate
         calibration:
-          maxSteeringAngle : 0.69 # has to be obtained manually
+          maxSteeringAngle: 0.69
+          Kp_speed: 0.2
+          wheelbase: 2.58
 
 high_level_controller:
   control_fn: core://path_follow:compute_control
   control_rate: 0.01
+  pp_lookahead: 6
+  pp_lookahead_gain: 0.4
+  stanley_k: 0.7
+  lookahead_distances_pct: [0.4, 0.8, 1.2]
+  desired_speed: 5.0
   path_file: loop_700_500_30_50_1-2_20.csv
-  lookahead: 5.0   # meters
   max_steer_rad: 0.69
+  wheelbase: 2.58
 
 # ROS configuration
 ros_poll_config:

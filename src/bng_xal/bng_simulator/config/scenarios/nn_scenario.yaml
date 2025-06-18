@@ -46,15 +46,10 @@ vehicles:
         drivetrain:
           mode: 1 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
           startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
-        calibration:
-          maxSteeringAngle : 40 # has to be obtained manually
-          throttleP : 0.2
-          throttleI : 0.000
-          throttleD : 0.000
 
 
 high_level_controller:
-  control_fn: core://test_patterns:compute_control_multi_test # The controller implementation
+  control_fn: core://test_wheel_speed:compute_test_wheel_speed # The controller implementation
   control_rate: 0.01
 
 # ROS configuration
