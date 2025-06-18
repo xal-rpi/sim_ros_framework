@@ -4,58 +4,81 @@ local common
 local logTag = 'controller_nn'
 
 local tanh = math.tanh
+local _ = nil -- avoid global warning
 
--- local throwaway to avoid global definition warning
-local _ = nil
-
--- module‐local handle for the network
+-- nn handle
 local nn = nil
 local nn_model = nil
 
--- Module-local state
+-- timing & rate
 local updateAccum = 0
 local messageCounter = 0
 local nowSim = 0
 
--- for logging real update rate
+-- real‐time logging
 local nowClock = 0
 local realLastClock = os.clock()
 local realUpdateCount = 0
 
+-- controller state (framework‐style)
 local controllerState = {
-  prevTarget = { time = 0, wheel_speed = 0 },
-  nextTarget = { time = 0, wheel_speed = 0 },
+  targetList = {},
+  currentVehicleS = 0.0,
+  currentTargetIdx = 1,
+  projectionNeeded = true,
+  old_diff_rear_wheel_speed_rad = 0,
 }
 
-local calibration = {}
+-- calibration (we only need wheelbase here)
+local calibration = {
+  wheelbase = 2.5,
+}
 
--- Parse incoming JSON control message
+-- Parse incoming JSON “{ targets: [ { s, x,y,z, tx,ty,tz, wheel_speed }, … ] }”
 local function parseMessage(msg)
   if not msg or msg == '' then return false end
   if not jsonDecode then
     log('E', logTag, 'JSON decoder not initialized')
     return false
   end
-
   local ok, data = pcall(jsonDecode, msg)
   if not ok then
-    log('E', logTag, 'Failed to parse JSON: ' .. tostring(data))
+    log('E', logTag, 'JSON parse error: ' .. tostring(data))
+    return false
+  end
+  if type(data.targets) ~= 'table' then
+    log('E', logTag, "Missing 'targets' array")
+    return false
+  end
+  if #data.targets == 0 then
+    log('W', logTag, 'Empty targets list')
+    controllerState.targetList = {}
+    controllerState.currentVehicleS = 0.0
+    controllerState.currentTargetIdx = 1
+    controllerState.projectionNeeded = true
+    return true
+  end
+  -- check first target has the fields we need
+  local t0 = data.targets[1]
+  if
+    t0.s == nil
+    or t0.x == nil
+    or t0.y == nil
+    or t0.z == nil
+    or t0.tx == nil
+    or t0.ty == nil
+    or t0.tz == nil
+    or t0.wheel_speed == nil
+  then
+    log('E', logTag, 'First target missing required fields')
     return false
   end
 
-  local reachTime = data.time
+  controllerState.targetList = data.targets
+  controllerState.currentVehicleS = 0.0
+  controllerState.currentTargetIdx = 1
+  controllerState.projectionNeeded = true
 
-  -- shift our two‐slot target buffer
-  controllerState.prevTarget = controllerState.nextTarget
-  controllerState.nextTarget = {
-    time = reachTime,
-    wheel_speed = data.wheel_speed,
-  }
-
-  -- special immediate‐apply case: zero out interpolation
-  if reachTime == 0 then controllerState.prevTarget = controllerState.nextTarget end
-
-  -- perf metrics
   local pm = common.performanceMetrics
   pm.lastCommandTimestamp = nowSim
   pm.commandsReceived = pm.commandsReceived + 1
@@ -64,79 +87,124 @@ local function parseMessage(msg)
   return true
 end
 
--- Build a JSON state message
-local function createStateMessage()
-  if not jsonEncode then
-    log('E', logTag, 'JSON encoder not initialized')
-    return '{}'
-  end
-  local pm = common.performanceMetrics
-  pm.lastResponseTimestamp = nowSim
-
-  local vr = common.cachedGtReading
-  local state = {
-    simtime = nowSim,
-    -- Vehicle velocity
-    velocity = {
-      x = (vr.vel and vr.vel[1]) or 0,
-      y = (vr.vel and vr.vel[2]) or 0,
-      z = (vr.vel and vr.vel[3]) or 0,
-    },
-  }
-  local ok, js = pcall(jsonEncode, state)
-  if not ok then
-    log('E', logTag, 'JSON encode error: ' .. tostring(js))
-    return '{}'
-  end
-  return js
-end
-
--- apply computed controls by interpolating between prevTarget→nextTarget
+-- Apply the projection+interpolation, then feed desiredWheelSpeed into NN logic
 local function applyTargets(dt)
-  -- interpolation factor
-  local p = controllerState.prevTarget
-  local n = controllerState.nextTarget
-  local t0, t1 = p.time or nowSim, n.time or nowSim
-  local f = 1
-  if t1 > t0 then
-    f = (nowSim - t0) / (t1 - t0)
-    if f < 0 then
-      f = 0
-    elseif f > 1 then
-      f = 1
-    end
+  local cs = controllerState
+  local vr = common.cachedGtReading
+
+  -- need a valid gt reading + targets
+  if not vr or not vr.vel or not vr.pos or not vr.dirX or #cs.targetList < 1 then
+    cs.projectionNeeded = true
+    cs.currentVehicleS = 0.0
+    input.event('throttle', 0, FILTER_AI)
+    log('E', logTag, 'Missing info for applyTargets')
+    return
   end
 
-  -- lerp each channel
-  local desiredWheelSpeed = p.wheel_speed + (n.wheel_speed - p.wheel_speed) * f
-  -- local desiredWheelSpeed = 40
-  local throttledot
+  -- vehicle speed
+  local vx, vy, vz = vr.vel[1], vr.vel[2], vr.vel[3]
+  local speed = math.sqrt(vx * vx + vy * vy + vz * vz)
+
+  -- front‐axle position
+  local fx, fy, fz = vr.dirX[1], vr.dirX[2], vr.dirX[3]
+  local cx = vr.pos[1] + calibration.wheelbase * fx
+  local cy = vr.pos[2] + calibration.wheelbase * fy
+  local cz = vr.pos[3] + calibration.wheelbase * fz
+
+  local T1, T2, f
+
+  if cs.projectionNeeded then
+    -- project front axle onto the polyline
+    local bestD2, bestIdx, bestT = 1e99, 1, 0
+    for i = 1, #cs.targetList - 1 do
+      local A, B = cs.targetList[i], cs.targetList[i + 1]
+      local ux, uy, uz = B.x - A.x, B.y - A.y, B.z - A.z
+      local wx, wy, wz = cx - A.x, cy - A.y, cz - A.z
+      local L2 = ux * ux + uy * uy + uz * uz + 1e-12
+      local t = (wx * ux + wy * uy + wz * uz) / L2
+      if t < 0 then
+        t = 0
+      elseif t > 1 then
+        t = 1
+      end
+      local px, py, pz = A.x + t * ux, A.y + t * uy, A.z + t * uz
+      local dx, dy, dz = cx - px, cy - py, cz - pz
+      local d2 = dx * dx + dy * dy + dz * dz
+      if d2 < bestD2 then
+        bestD2, bestIdx, bestT = d2, i, t
+      end
+    end
+    cs.currentTargetIdx = bestIdx
+    T1 = cs.targetList[bestIdx]
+    T2 = cs.targetList[math.min(bestIdx + 1, #cs.targetList)]
+    cs.currentVehicleS = T1.s + bestT * (T2.s - T1.s)
+    f = bestT
+    cs.projectionNeeded = false
+  else
+    -- advance along path by speed*tangent*dt
+    T1 = cs.targetList[cs.currentTargetIdx]
+    T2 = cs.targetList[math.min(cs.currentTargetIdx + 1, #cs.targetList)]
+    local ds_s = T2.s - T1.s
+    local frac = (ds_s > 1e-6) and ((cs.currentVehicleS - T1.s) / ds_s) or 0
+    frac = math.max(0, math.min(1, frac))
+
+    local tx = T1.tx + frac * (T2.tx - T1.tx)
+    local ty = T1.ty + frac * (T2.ty - T1.ty)
+    local tz = T1.tz + frac * (T2.tz - T1.tz)
+    local nnorm = math.sqrt(tx * tx + ty * ty + tz * tz)
+    if nnorm > 1e-6 then
+      tx, ty, tz = tx / nnorm, ty / nnorm, tz / nnorm
+    end
+
+    local ds = (vx * tx + vy * ty + vz * tz) * dt
+    cs.currentVehicleS = cs.currentVehicleS + ds
+
+    while
+      cs.currentTargetIdx < #cs.targetList
+      and cs.currentVehicleS > cs.targetList[cs.currentTargetIdx + 1].s
+    do
+      cs.currentTargetIdx = cs.currentTargetIdx + 1
+    end
+
+    T1 = cs.targetList[cs.currentTargetIdx]
+    T2 = cs.targetList[math.min(cs.currentTargetIdx + 1, #cs.targetList)]
+    local ds_s2 = T2.s - T1.s
+    f = (ds_s2 > 1e-6) and ((cs.currentVehicleS - T1.s) / ds_s2) or 0
+    f = math.max(0, math.min(1, f))
+  end
+
+  -- interpolate wheel_speed
+  local desiredWheelSpeed = T1.wheel_speed + f * (T2.wheel_speed - T1.wheel_speed)
+
+  -- NN logic
   local g = common.cachedGtReading
-  if nn_model and common.cachedGtReading then
+  if nn_model and g then
     local engine_speed_rad = g.RPM * common.constants.rpmToAV
     local boost_pressure = g.turboBoost
     local rear_wheel_speed_rad = (g.wheelRR.angVel + g.wheelRL.angVel) / 2
     local throttle = g.throttle
-    local diff_rear_wheel_speed_rad = desiredWheelSpeed - rear_wheel_speed_rad
+    local diff_rear_wheel_speed_rad = rear_wheel_speed_rad - desiredWheelSpeed
+    local delta_diff = diff_rear_wheel_speed_rad - cs.old_diff_rear_wheel_speed_rad
+    cs.old_diff_rear_wheel_speed_rad = diff_rear_wheel_speed_rad
+
     local out = nn.run(nn_model, {
-      engine_speed_rad / 400,
-      boost_pressure / 10,
-      rear_wheel_speed_rad / 30,
+      engine_speed_rad,
+      boost_pressure,
+      rear_wheel_speed_rad,
       throttle,
-      diff_rear_wheel_speed_rad / 30,
+      delta_diff,
+      diff_rear_wheel_speed_rad,
     })
     local ff = out[1]
     local kp = out[2]
-    throttledot = tanh(ff + kp * (diff_rear_wheel_speed_rad / 30))
+    local throttledot = tanh(ff + kp * (diff_rear_wheel_speed_rad / 30))
     throttledot = 22.5 * throttledot - 7.5
-    controllerState.nextTarget.engine_torque = out[1]
-    controllerState.nextTarget.brake = out[2]
-  end
-  -- send into BeamNG
-  local throttle = g.throttle + (0.01 * throttledot)
-  input.event('throttle', throttle, FILTER_AI)
 
-  -- latency metrics (ring-buffer of size N=100)
+    local newThrottle = throttle + (0.01 * throttledot)
+    input.event('throttle', newThrottle, FILTER_AI)
+  end
+
+  -- latency metrics
   do
     local pm = common.performanceMetrics
     local lat = nowSim - pm.lastCommandTimestamp
@@ -145,57 +213,45 @@ local function applyTargets(dt)
     pm.maxLatency = pm.latency.max
   end
 
-  -- occasional logging
-  do
-    if nowClock == realLastClock then
-      local simTimeApplied = common.getSimTime() or 0
-      log(
-        'I',
-        logTag,
-        string.format(
-          'Target received with time=%.4f, applied at SimTime=%.4f\navgLat=%.1fms\n',
-          n.time,
-          simTimeApplied,
-          common.performanceMetrics.avgLatency * 1000
-        )
+  -- occasional logging (1 Hz)
+  nowClock = os.clock()
+  realUpdateCount = realUpdateCount + 1
+  if nowClock - realLastClock >= 1 then
+    log(
+      'I',
+      logTag,
+      string.format(
+        'SimTime=%.3f  S=%.2f  thr=%.2f  avgLat=%.1fms',
+        nowSim,
+        controllerState.currentVehicleS,
+        (g and g.throttle) or 0,
+        common.performanceMetrics.avgLatency * 1000
       )
-    end
+    )
+    realLastClock = nowClock
+    realUpdateCount = 0
   end
 end
 
--- Extension interface
-
+-- Module interface ----------------------
 function M.init(c)
   common = c
   nn = require('lua/vehicle/controller/xlab/lib/nn')
+  assert(nn, 'nn.lua library could not be loaded')
   nn.init()
-  nn_model = nn.loadModel('lua/vehicle/controller/xlab/models/wheel_speed.json')
-  log('I', logTag, 'NN controller initialized')
+  nn_model = nn.loadModel('lua/vehicle/controller/xlab/models/wheel_speed_v1.json')
+  log('I', logTag, 'NN controller initialized with path interpolation')
 end
 
 function M.update(dt)
   if not common.isRunning then return end
 
-  -- limit rate
   updateAccum = updateAccum + dt
-  if updateAccum >= common.controllerRate then
-    updateAccum = updateAccum - common.controllerRate
-  else
-    return
-  end
-
+  if updateAccum < common.controllerRate then return end
+  updateAccum = updateAccum - common.controllerRate
   nowSim = common.getSimTime()
-  -- track true update rate
-  realUpdateCount = realUpdateCount + 1
-  nowClock = os.clock()
-  local elapsed = nowClock - realLastClock
-  if elapsed >= 1 then
-    log('I', logTag, string.format('Real update rate: %.1f Hz', realUpdateCount / elapsed))
-    realUpdateCount = 0
-    realLastClock = nowClock
-  end
 
-  -- 1) drain UDP queue, keep only last message
+  -- drain UDP, keep only last
   if common.socketIn then
     local lastMsg, err
     repeat
@@ -203,61 +259,63 @@ function M.update(dt)
       msg, _, _, err = common.socketIn:receivefrom()
       if msg and #msg > 0 then lastMsg = msg end
     until not msg and (not err or err == 'timeout')
-
     if err and err ~= 'timeout' then log('E', logTag, 'socketIn error: ' .. tostring(err)) end
     if lastMsg then parseMessage(lastMsg) end
   else
     log('E', logTag, 'socketIn is nil')
   end
 
-  -- 2) refresh gt-reading if due
   common.updateGtReading()
-
-  -- 3) always apply controls (with interpolation) every frame
   if not common.isBypassed then applyTargets(dt) end
 
-  -- 4) send state message at fixed rate
+  -- send back minimal state
   if common.socketOut then
-    local s, se = createStateMessage(), nil
-    _, se = common.socketOut:sendto(s, common.sendIp, common.sendPort)
-    if se then log('E', logTag, 'socketOut err=' .. tostring(se)) end
-  elseif not common.socketOut then
+    local state = { simtime = nowSim }
+    local ok, js = pcall(jsonEncode, state)
+    if ok then
+      common.socketOut:sendto(js, common.sendIp, common.sendPort)
+    else
+      log('E', logTag, 'JSON encode error: ' .. tostring(js))
+    end
+  else
     log('E', logTag, 'socketOut is nil')
   end
 
-  -- clear cached reading
   common.cachedGtReading = nil
 end
 
 function M.stop()
-  log('I', logTag, 'Default controller cleanup')
-  nn.freeModel(nn_model)
+  log('I', logTag, 'NN controller cleanup')
+  if nn_model then nn.freeModel(nn_model) end
 end
 
 function M.setGtStateSensor(id) common.gtStateSensorId = id end
 
 function M.calibrate(params)
-  log('I', logTag, 'Calibrating controller')
+  log('I', logTag, 'Calibrating NN controller')
   for k, v in pairs(params) do
     if calibration[k] ~= nil then
       calibration[k] = v
       log('I', logTag, 'cal.' .. k .. '=' .. tostring(v))
     else
-      log('W', logTag, 'calibration entry ' .. k .. ' not found')
+      log('W', logTag, 'Unknown cal param ' .. k)
     end
   end
 end
 
 function M.reset()
   controllerState = {
-    prevTarget = { time = 0 },
-    nextTarget = { time = 0 },
+    targetList = {},
+    currentVehicleS = 0.0,
+    currentTargetIdx = 1,
+    projectionNeeded = true,
+    old_diff_rear_wheel_speed_rad = 0,
   }
   updateAccum = 0
   messageCounter = 0
   common.lastGtReadingTime = 0
   common.cachedGtReading = nil
-  log('I', logTag, 'Controller state reset')
+  log('I', logTag, 'NN controller state reset')
 end
 
 function M.getStatus()
