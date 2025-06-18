@@ -85,7 +85,6 @@ local function parseMessage(msg)
   pm.lastCommandTimestamp = nowSim
   pm.commandsReceived = pm.commandsReceived + 1
   messageCounter = messageCounter + 1
-  log('I', logTag, string.format('Received %d targets', #data.targets))
   return true
 end
 

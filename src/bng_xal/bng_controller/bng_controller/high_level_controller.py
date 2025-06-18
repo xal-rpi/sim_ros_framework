@@ -393,18 +393,20 @@ class HighLevelController(Node):
             self.last_command_time = time.time()
 
             # --- publish dynamic targets to /current_target ---
-            keys = sorted(targets.keys())
             ros_msg = HLCMsg()
             ros_msg.header = convert_time_to_header(
                 targets.get("time", self.last_command_time)
             )
-
-            # Target
-            ros_msg.target = [float(targets.get("targets")[0].get('s')) for k in keys]
-            ros_msg.target_labels = keys
-
-            # Utils
             ros_msg.controller_latency = float(self.metrics.average)
+
+            # assume targets["targets"] is a list of dicts, all with the same keys:
+            first = targets["targets"][0]
+            keys  = sorted(first.keys())
+            ros_msg.target_labels = keys
+            ros_msg.target_values = [
+                float(tgt[k]) for tgt in targets["targets"] for k in keys
+            ]
+
             self.target_pub.publish(ros_msg)
 
         except Exception as e:

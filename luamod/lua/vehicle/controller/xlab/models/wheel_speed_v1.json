@@ -100,7 +100,7 @@
     "boost_pressure_unscaled": "Boost pressure (Beamng Units)",
     "throttle_unscaled": "Throttle (0,1)",
     "diff_wr": "Delta (rear_wheelspeed_rads_unscaled - target_wr)",
-    "delta_diff_wr": " Delta (diff_wr)",
+    "delta_diff_wr": "Delta (diff_wr)",
     "nn_input": "Scaled Quantities of nn_input_var, Find scaling factor (as divider term) in Json, nn_input_scaling",
     "nn_output": "[feedforward, Kp] ---> tanh(feedforward + Kp * scaled(diff_wr))",
     "throttle_output": "Throttle output to apply ---> throttle_unscaled + delta_t * nn_output | delta_t = 0.01 default"

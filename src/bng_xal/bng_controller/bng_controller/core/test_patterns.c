@@ -1,4 +1,4 @@
-// controller_core_c.c
+// test_patterns.c
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <math.h>

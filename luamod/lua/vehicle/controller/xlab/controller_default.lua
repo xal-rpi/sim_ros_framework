@@ -2,6 +2,7 @@
 local M = {}
 local common
 local logTag = 'controller_default'
+local _ = nil -- avoid global warning
 
 -- Module state
 local nowSim, nowClock, realLastClock = 0.0, 0.0, os.clock()
