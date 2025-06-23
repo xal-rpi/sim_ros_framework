@@ -106,7 +106,8 @@ M.handleOpenController = function(request)
     end
   end
 
-  if data.controllerType == 'nn' then
+  -- TODO: This may need some more generality in case controller names 
+  if data.controllerType == 'nn' or data.controllerType == 'nn_v1' then
     assert(
       not Engine.Sandbox.Lua.isEnabled(),
       'This controller can only run when the Lua security sandbox is disabled. '
@@ -114,6 +115,12 @@ M.handleOpenController = function(request)
     )
     local mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.so'
     local fs_libpath = 'tmp/libnn.so'
+    if jit and jit.os then
+      if jit.os == "Windows" then
+        mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.dll'
+        fs_libpath = 'tmp/libnn.dll'
+      end
+    end
     copyfile(mod_libpath, fs_libpath)
 
     be:sendToMailbox('libnnPath', FS:virtual2Native(fs_libpath))
