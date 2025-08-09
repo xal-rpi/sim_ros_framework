@@ -180,6 +180,15 @@ local function onVehicleDestroyed(vid)
   end
 end
 
+local function getGtStateController(sensorId)
+  if gtStates[sensorId] then
+    return gtStates[sensorId].controller
+  else
+    log('E', logTag, 'GtState controller not found for sensor ID: ' .. tostring(sensorId))
+    return nil
+  end
+end
+
 -- Public interface:
 M.create = create
 M.remove = remove
@@ -189,6 +198,7 @@ M.getLatest = getLatest
 M.updateGFX = updateGFX
 M.onVehicleDestroyed = onVehicleDestroyed
 M.getDriveModeStatus = getDriveModeStatus
+M.getGtStateController = getGtStateController
 
 return M
 

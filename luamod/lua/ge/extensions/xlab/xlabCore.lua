@@ -107,7 +107,7 @@ M.handleOpenController = function(request)
   end
 
   -- TODO: This may need some more generality in case controller names 
-  if data.controllerType == 'nn' or data.controllerType == 'nn_v1' then
+  if string.find(data.controllerType, "nn_") then
     assert(
       not Engine.Sandbox.Lua.isEnabled(),
       'This controller can only run when the Lua security sandbox is disabled. '
