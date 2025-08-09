@@ -10,7 +10,7 @@ Before building and using this mod, ensure you have the following installed:
 
 *   **BeamNG.tech:** The simulation environment this mod is designed for.
 *   **Git:** For cloning the repository and for the build script to list files.
-*   **C Compiler:** A C compiler (e.g., GCC, Clang, referred to as `cc` in the build script) is required to compile a neural network utility (`nn.c`).
+*   **C Compiler:** A C compiler (e.g., mingw32-gcc, GCC, Clang, referred to as `cc` in the build script) is required to compile a neural network utility (`nn.c`).
 *   **Zip Utility:** For packaging the mod files.
 *   **Bash Environment:** The build script is designed to run in a Bash shell (common on Linux and macOS, available on Windows via WSL or Git Bash).
 
@@ -24,11 +24,32 @@ Before building and using this mod, ensure you have the following installed:
     ```
 
 2.  **Run the Build Script:**
-    The `build.bash` script automates the process of collecting necessary Lua files, compiling a C utility, and packaging the mod.
+    The `build.bash` script automates the process of collecting necessary Lua files, compiling a C utility, and packaging the mod. This Bash script automates packaging your BeamNG.drive mod (`xlab.zip`) from tracked or all source files in your Git repository. It ensures platform-specific compilation, includes relevant Lua and JSON files, and outputs a ready-to-use zip file.
+
+    When using with WSL/Windows, make sure to set the `BEAMNG_MOD_DIR` environment variable to your BeamNG.drive mods directory in Windows (e.g., `C:\Users\<YourUsername>\AppData\Local\BeamNG.drive\0.35\mods`). You can add this to your `.bashrc` or `.bash_profile` for convenience:
+    ```bash
+    export BEAMNG_MOD_DIR="/mnt/c/Users/<YourUsername>/AppData/Local/BeamNG.drive/0.35/mods"
+    echo 'export BEAMNG_MOD_DIR=\"/mnt/c/Users/<your-username>/AppData/Local/BeamNG.drive/0.35/mods\"' >> ~/.bashrc # More definitive solution
+    ```
+
     Navigate to the `luamod` directory within the repository and execute the script:
     ```bash
     cd /path/to/your/repository/luamod
-    ./build.bash
+    ./build.bash [--platform=windows|--win] [--platform=linux|--linux] [--models=tracked|--tracked] [--models=all|--all]
+    ```
+
+    To call this script from anywhere, ensure it is executable:
+    ```bash
+    chmod +x build.bash
+    ln -s build.bash ~/.local/bin/xlab-build # Make sure ~/.local/bin is in your PATH
+    ```
+
+    Then, you can run it directly fro anywhere in your terminal:
+
+    ```bash
+    xlab-build
+    xlab-build --platform=windows --models=all
+    xlab-build --all # same as xlab-build --platform=linux --models=all
     ```
 
 3.  **Output:**
