@@ -280,10 +280,15 @@ local function applyTargets(dt)
   
   -- Interpolate target values using projection parameter t
   -- Maybe an interpolation to pick the next time or s + ds.
-  local desiredWheelSpeed = cs.wr[idx1] + t * (cs.wr[idx2] - cs.wr[idx1])
-  local desiredSteer = cs.steer[idx1] + t * (cs.steer[idx2] - cs.steer[idx1])
-  local desired_wr_dot = cs.wr_dot[idx1] + t * (cs.wr_dot[idx2] - cs.wr_dot[idx1])
-  local desiredFxr = cs.Fxr[idx1] + t * (cs.Fxr[idx2] - cs.Fxr[idx1])
+  -- local desiredSteer = cs.steer[idx1] + t * (cs.steer[idx2] - cs.steer[idx1])
+  -- local desiredWheelSpeed = cs.wr[idx1] + t * (cs.wr[idx2] - cs.wr[idx1])
+  -- local desired_wr_dot = cs.wr_dot[idx1] + t * (cs.wr_dot[idx2] - cs.wr_dot[idx1])
+  -- local desiredFxr = cs.Fxr[idx1] + t * (cs.Fxr[idx2] - cs.Fxr[idx1])
+  local idx_next = min(idx1 + 1, cs.targetCount)
+  local desiredSteer = cs.steer[idx_next]
+  local desiredWheelSpeed = cs.wr[idx_next]
+  local desired_wr_dot = cs.wr_dot[idx_next]
+  local desiredFxr = cs.Fxr[idx_next]
 
   -- Write down the desired values into the gtState
   gtStateController.setCustomField("target_wr", desiredWheelSpeed)
@@ -336,12 +341,15 @@ local function applyTargets(dt)
     -- Full autonomous mode - control both throttle and steering
     input.event('throttle', newThrottle, FILTER_AI)
     electrics.values.throttle = newThrottle
+    electrics.values.throttle_input = newThrottle
+    electrics.values.steering_input = desiredSteer
     input.event('steering', desiredSteer, FILTER_AI)
     -- input.event('steering', cs.lastAppliedSteering, FILTER_AI)
     
   elseif calibration.controlMode == CONTROL_MODE.STEERING_AUTO then
     -- Steering-only mode - only control steering
     input.event('steering', desiredSteer, FILTER_AI)
+    -- electrics.values.steering_input = desiredSteer
     -- Throttle is left to the human driver
   end
 

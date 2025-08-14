@@ -1,0 +1,12 @@
+# MPConfig.srv - Service for MPC configuration
+
+# Request
+---
+# Response
+bool success                            # Whether the configuration was successful
+string[] mpc_fields_name                # Names of the fields used in MPC
+string[] state_n_control_fields_name    # Names of the state and control fields
+int32 num_fields                        # Number of fields in the MPC
+int32 mpc_horizon                       # MPC horizon length
+string mpc_config_file                  # Path to the MPC configuration file
+int32 num_x                            # Number of state variables
