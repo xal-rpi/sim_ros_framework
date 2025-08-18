@@ -264,11 +264,40 @@ class SimulationManager:
             out = current_obj(**func_args)
             out_mod = {} if out is None else out
             return out_mod if isinstance(out_mod, dict) else {"result": out_mod}
+        
+        if func_name.startswith("vehicle."):
+            func_handle = func_name.split(".")[1]
+            return self.vehicle_api_request(func_handle, **func_args)
 
         # We assume it is a proxy for vehicle properties
         # this will return an error if the function is not found
         return self.proxy_for_vehicle_properties(func_name, **func_args)
 
+    def vehicle_api_request(self, func_name, **func_args):
+        """
+        Handle vehicle API requests.
+
+        Args:
+            **func_args: Function arguments
+
+        Returns:
+            Dict[str, Any]: Result of the function call
+        """
+        vehicle_name = func_args.pop("vehicle_name", self.default_vehicle_name)
+        if vehicle_name not in self.vehicles:
+            raise ValueError(f"Vehicle {vehicle_name} not found in the scenario")
+        vehicle_manager = self.vehicles[vehicle_name]
+        vehicle = vehicle_manager.vehicle
+        assert hasattr(vehicle, func_name), f"Vehicle {vehicle_name} has no method {func_name}"
+        method = getattr(vehicle, func_name)
+        try:
+            out = method(**func_args)
+            out_mod = {} if out is None else out
+            return out_mod if isinstance(out_mod, dict) else {"result": out_mod}
+        except Exception as e:
+            self.logger.error(f"Error executing {func_name} on vehicle {vehicle_name}: {e}")
+            return {"error": str(e)}
+    
     @property
     def default_vehicle_name(self) -> str:
         """

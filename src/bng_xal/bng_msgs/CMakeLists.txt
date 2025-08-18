@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.5)
 project(bng_msgs)
 
+if(POLICY CMP0148)
+  cmake_policy(SET CMP0148 OLD)
+endif()
+
+
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
@@ -17,10 +22,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BasicStateMsg.msg"
   "msg/GtStateMsg.msg"
   "msg/HLCMsg.msg"
+  "msg/MPCSolution.msg"
   "srv/ExecuteRequest.srv"
   "srv/StartLogger.srv"
   "srv/StopLogger.srv"
   "srv/OverrideTargets.srv"
+  "srv/MPConfig.srv"
   # "msg/VehicleStatus.msg"
   # "msg/ScenarioState.msg"
   # "srv/Spawn.srv"

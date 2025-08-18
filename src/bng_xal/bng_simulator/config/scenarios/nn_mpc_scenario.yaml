@@ -1,0 +1,151 @@
+# Simulator configuration
+beamng:
+  host: 127.0.0.1
+  port: 25252
+  open_args:
+    launch: False
+    debug: False
+    extensions:
+      - xlab/xlabCore
+  setup_funcs:
+    beamng.settings.set_deterministic:
+      steps_per_second: 0
+    beamng.ui.show_hud: {}
+
+# Scenario configuration
+scenario:
+  level: tech_ground # tech_ground # smallgrid
+  name: basic
+
+post_scenario: {}
+
+# Vehicle configuration
+vehicles:
+  ego: # Name of the car
+    model: utv
+    partConfig: /vehicles/utv/wild.pc
+    license: EGO
+    scenario_args:
+      pos: [0,0,0]
+      yaw_angle: 0
+    sensors:
+      gtstate:
+        type: GtState
+        gfx_update_time: 0.15
+        physics_update_time: 0.005
+        num_physics_steps_for_gfx_save: 2
+    controllers:
+      LowLevelController: # The python class used
+        controllerType: nn_mpc # The lua controller used
+        controllerRate: 0.005
+        listenIp: 127.0.0.1
+        listenPort: 64257
+        sendIp: 127.0.0.1
+        sendPort: 64258
+        gtStateName: gtstate
+        drivetrain:
+          mode: 2 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
+          startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
+        calibration:
+          controlMode : auto
+          gtStateSendRate: 0.01
+          modelName: wheel_speed_v4.json
+          commandTimeout: 1.0 # Timeout between two mpc solutions before giving back control
+
+# ROS configuration
+ros_poll_config:
+  ego:
+    gtstate:
+      topic: /ego/gtstate
+      poll_time: 0.15
+      publish: 1
+
+
+# high_level_controller:
+#   # # Check ipopt_rt_optimizer for the different fields and default values.
+#   # num_stages: 21             # (int) Number of prediction stages (default: 20)
+#   # delta_s:                   # (float or dict) Horizon step size(s)
+#   #   base_ds: 1              # (float) Base step size (default: 0.5)
+#   #   n_base: 10               # (int) Number of base steps (default: 15)
+#   #   long_ds: 1.0             # (float) Long step size (default: 0.5)
+
+#   # # Check ipopt_rt_optimizer for the different fields and default values.
+#   # num_stages: 70             # (int) Number of prediction stages (default: 20)
+#   # delta_s:                   # (float or dict) Horizon step size(s)
+#   #   base_ds: 1.0              # (float) Base step size (default: 0.5)
+#   #   n_base: 10               # (int) Number of base steps (default: 15)
+#   #   long_ds: 1             # (float) Long step size (default: 0.5)
+
+#   # Check ipopt_rt_optimizer for the different fields and default values.
+#   num_stages: 21             # (int) Number of prediction stages (default: 20)
+#   delta_s:                   # (float or dict) Horizon step size(s)
+#     base_ds: 1.0              # (float) Base step size (default: 0.5)
+#     n_base: 10               # (int) Number of base steps (default: 15)
+#     long_ds: 1             # (float) Long step size (default: 0.5)
+
+#   # # Q: State weighting (diag/cross-terms possible)
+#   # Q:
+#   #   e: 0.2
+#   #   dphi: 3.0
+#   #   beta: 5.0
+#   #   wr: 0.2
+#   #   delta: 0.1
+#   #   # eng_tor: 0.1
+#   #   throttle: 0.1
+
+#   # # R: Control weighting
+#   # R:
+#   #   # delta_r: 0.05
+#   #   # eng_tor_r: 0.1
+#   #   delta_r: 1
+#   #   # eng_tor_r: 0.1
+#   #   throttle_r: 1.0
+
+#   # # Q_t: Terminal state weighting
+#   # Q_t:
+#   #   e: 5
+#   #   dphi: 10.0
+#   #   beta: 10.0
+#   #   wr: 1.0
+#   #   delta: 0.1
+#   #   V: 1.0
+#   #   r: 1.0
+#   #   # eng_tor: 
+
+#   # Q: State weighting (diag/cross-terms possible)
+#   Q:
+#     e: 10
+#     dphi: 100.0
+#     beta: 100.0
+#     wr: 5000
+#     delta: 100
+#     eng_tor: 100
+#     # V: 100
+#     # r: 100
+
+#   # R: Control weighting
+#   R:
+#     # delta_r: 100
+#     # eng_tor_r: 10
+#     delta_r: 10
+#     eng_tor_r: 10
+
+#   # Q_t: Terminal state weighting
+#   Q_t:
+#     e: 10
+#     dphi: 1000
+#     beta: 1000
+#     wr: 1000
+#     delta: 1000
+#     # V: 1000.0
+#     # r: 1000.0
+#     eng_tor: 1000
+
+#   # x_range: state name -> [lb, ub]
+#   x_range:
+#     # e: [-4.0, 4.0]     # (float list) Lateral error range
+#     e: [-50.0, 50.0]     # (float list) Lateral error range
+  
+#   # Reference path -> TODO: Proper path structure
+#   # reference_traj: optimal_trajectory_v2.csv
+#   reference_traj: fuji_full_state_optimal_trajectory_wheel.csv
