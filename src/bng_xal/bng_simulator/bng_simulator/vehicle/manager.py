@@ -81,7 +81,7 @@ class VehicleManager:
             self._scenario_args.pop("yaw_angle", None)
             self._scenario_args.pop("pitch_angle", None)
             self._scenario_args.pop("roll_angle", None)
-        self._logger.debug(
+        self._logger.info(
             f"Scenario arguments for vehicle --{self._name}--: \n{self._scenario_args}"
         )
         return self._scenario_args

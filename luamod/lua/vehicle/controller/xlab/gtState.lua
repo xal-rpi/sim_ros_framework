@@ -14,6 +14,9 @@ local function sign(x) return max(min((x * 1e200) * 1e200, 1), -1) end
 -- Logging tag for debugging purposes
 local logTag = 'GtState'
 
+-- Will store custom fields added by controllers or other modules.
+local customFields = {}
+
 -- Reference to the global state manager extension
 local gtStateManager = nil
 
@@ -130,6 +133,38 @@ local worldThird = vec3(0, 0, 0)
 -- Store the engine and gearbox for more accurate data
 local engine = nil
 local gearbox = nil
+
+--[[
+    Initialize fields that can be store inside the gtstate sensor.
+    Parameters:
+        fieldName (string): The name of the custom field to register.
+        defaultValue (any): The default value for the custom field.
+    Returns:
+        bool: True if the field was registered successfully
+]]
+local function registerCustomField(fieldName, defaultValue)
+  customFields[fieldName] = defaultValue
+  log('I', logTag, 'Registered custom field: ' .. fieldName)
+  return true
+end
+
+--[[
+    Set a custom field value.
+    Parameters:
+        fieldName (string): The name of the custom field to set.
+        value (any): The value to assign to the custom field.
+    Returns:
+        bool: True if the field was set successfully, false if the field does not exist.
+]]
+local function setCustomField(fieldName, value)
+  if customFields[fieldName] ~= nil then
+    customFields[fieldName] = value
+    return true
+  else
+    log('E', logTag, 'Custom field not found: ' .. fieldName)
+  end
+  return false
+end
 
 --[[
     Converts local frame unit vectors into a quaternion representing orientation.
@@ -436,7 +471,13 @@ local function update(dtSim)
     end
   end
 
-  -- Store the latest readings for this State sensor in the extension. This is used for sending back on the physics step.
+  -- 4) Add the custom fields
+  for fieldName, value in pairs(customFields) do
+    latestReading[fieldName] = value
+  end
+
+  -- Store the latest readings for this State sensor in the extension. 
+  -- This is used for sending back on the physics step.
   gtStateManager.cacheLatestReading(sensorId, latestReading)
 
   -- Update the number of physics steps for the GFX save.
@@ -622,5 +663,7 @@ M.reset = reset
 M.getSensorData = getSensorData
 M.getLatest = getLatest
 M.incrementTimer = incrementTimer
+M.registerCustomField = registerCustomField
+M.setCustomField = setCustomField
 
 return M
