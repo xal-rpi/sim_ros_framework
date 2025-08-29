@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository contains the XLab low-level controller mod for BeamNG.tech. It allows for external control of vehicles within the BeamNG.tech simulation environment via TCP commands, providing a bridge for custom AI or robotics applications to interact with the simulated vehicle physics. The mod includes components for sensor data retrieval, vehicle state management, and controller execution.
+This repository contains the XLab low-level controller mod for BeamNG.tech, which allows external control of vehicles via TCP commands. It provides a bridge for custom AI or robotics applications to interact with the simulated vehicle physics, including sensor data retrieval, vehicle state management, and controller execution.
 
 ## Prerequisites
 

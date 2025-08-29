@@ -50,11 +50,11 @@ This package primarily consists of `.msg` and `.srv` files, which define the str
 ### Messages
 
 *   **`BasicStateMsg.msg`**
-    *   **Purpose:** Likely contains fundamental vehicle state information such as position, orientation, velocity, and other basic telemetry.
+    *   **Purpose:** Contains fundamental vehicle state information such as position, orientation, and velocity.
 *   **`GtStateMsg.msg`**
-    *   **Purpose:** "Gt" may stand for Ground Truth. This message probably carries more detailed or simulation-specific state information, potentially including data not directly available from real-world sensors but useful for simulation and analysis.
+    *   **Purpose:** Stands for "Ground Truth" and carries detailed simulation-specific state information, including data not directly available from real-world sensors but useful for simulation and analysis.
 *   **`HLCMsg.msg`**
-    *   **Purpose:** "HLC" likely stands for High-Level Controller. This message is probably used for communication with, or commands from, a high-level vehicle control system (e.g., sending driving commands like target speed or steering angle).
+    *   **Purpose:** Stands for "High-Level Controller" and is used for communication with a high-level vehicle control system, sending driving commands like target speed or steering angle.
 
 ### Services
 

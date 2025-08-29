@@ -172,7 +172,7 @@ ros2 run bng_simulator start_logs [--max_queue_size N] [--flush_interval T]
 For details on arguments, see the [bng_simulator README](src/bng_xal/bng_simulator/README.md#important-scripts-bng_simulatorscripts).
 
 #### `find_ema` (from `bng_simulator`)
-A utility to help tune Exponential Moving Average (EMA) parameters used in `gtstate.lua` (part of `luamod`).
+A utility to help tune Exponential Moving Average (EMA) parameters used in `gtState.lua` (part of `luamod`).
 ```bash
 ros2 run bng_simulator find_ema [OPTIONS]
 ```
@@ -190,7 +190,7 @@ Override the targets sent by the compute_control function of the HLC.
 ```bash
 ros2 run bng_controller send_override_target [OPTIONS]
 ```
-For details on arguments, see the [bng_controller README](src/bng_xal/bng_controller/README.md#target_override_script).
+For details on arguments, see the [bng_controller README](src/bng_xal/bng_controller/README.md#target-override-script).
 
 ### ROS2 Services
 
@@ -234,11 +234,11 @@ For a list of available services and their definitions, refer to the [bng_msgs R
    - **Problem:** The reported torque is different from the target torque
    - **Solution:** Ensure units are metric in the GUI settings of BNG
 
-6. **Xlab extension not found with `-headless`:**
+7. **Xlab extension not found with `-headless`:**
    - **Problem:** When running BNG in headless mode the Xlab extension cannot be loaded
    - **Solution:** Use these flags when running BeamNG: `-headless -noui -nosteam`
 
-7. **Checking out old commit doesn't work**
+8. **Checking out old commit doesn't work**
    - **Problem:** Something suddenly stopped working and checking out an old commit did not resolve the issue
    - **Solution:** Remember that you have to run `./luamod/build.bash` each time you change the code inside of it, including through git
 
