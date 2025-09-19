@@ -9,6 +9,7 @@ from copy import deepcopy
 import rclpy
 from rclpy.impl.rcutils_logger import RcutilsLogger
 
+import beamngpy
 from beamngpy import BeamNGpy, Scenario
 from beamngpy.logging import BNGValueError
 
@@ -97,6 +98,8 @@ class SimulationManager:
         Create and load the scenario based on configuration.
         """
         scenario_config = self.config.get("scenario", {})
+        scenario_config = deepcopy(scenario_config)
+        extra_objects = scenario_config.pop("extra_objects", {})
         self.logger.info(f"Creating scenario: \n{scenario_config}")
 
         # Create new scenario
@@ -106,6 +109,9 @@ class SimulationManager:
         vehicles_config = self.config.get("vehicles", {})
         for vehicle_name, vehicle_config in vehicles_config.items():
             self.add_vehicle(vehicle_name, vehicle_config)
+            
+        # Let's add extra objects if any
+        self.add_scenario_objects(extra_objects)
 
         # Make and load scenario
         assert self.beamng is not None
@@ -121,6 +127,55 @@ class SimulationManager:
             vehicle_manager.setup_all_sensors()
             vehicle_manager.setup_controllers()
         self.logger.debug("Finished loading sensors")
+
+    def add_scenario_objects(self, objects_config: Dict[str, Any]):
+        """
+        Add scenario objects to the current scenario.
+
+        Args:
+            objects_config (Dict[str, Any]): Configuration for scenario objects
+        """
+        if not objects_config:
+            return
+
+        # scenario_obj = beamngpy.ScenarioObject(
+        #     oid="roadblock",
+        #     name="sawhorse",
+        #     otype="BeamNGVehicle",
+        #     pos=(10, 0, 0),
+        #     rot_quat=(0, 0, 0, 1),
+        #     scale=(1, 1, 1),
+        #     JBeam="sawhorse",
+        #     datablock="default_vehicle",
+        # )
+        # print(scenario_obj.__dict__)
+        # self.scenario.add_object(scenario_obj)
+        
+        for obj_name, obj_cfg in objects_config.items():
+            obj_type = obj_cfg.pop("type", None)
+            if obj_type is None:
+                self.logger.error(f"Scenario object type not specified for {obj_name}")
+                continue
+            if not hasattr(beamngpy, obj_type):
+                self.logger.error(f"Scenario object type not found in beamngpy: {obj_type}")
+                continue
+            obj_class = getattr(beamngpy, obj_type)
+            rot_args = obj_cfg.pop("rot", {})
+            if "yaw_angle" in rot_args or "pitch_angle" in rot_args or "roll_angle" in rot_args:
+                yaw_rad = rot_args.get("yaw_angle", 0) * (self._PI / 180)
+                pitch_rad = rot_args.get("pitch_angle", 0) * (self._PI / 180)
+                roll_rad = rot_args.get("roll_angle", 0) * (self._PI / 180)
+                rot_quat = convert_euler_to_quaternion(
+                    (roll_rad, pitch_rad, yaw_rad)
+                )  # TODO : fix type mistmatch
+                rot_quat = tuple([float(q) for q in rot_quat])
+                obj_cfg["rot_quat"] = rot_quat
+            obj_cfg["name"] = obj_name
+            obj_cfg["pos"] = tuple(obj_cfg.get("pos", (0, 0, 0)))
+            obj_cfg["scale"] = tuple(obj_cfg.get("scale", (1, 1, 1)))
+            obj = obj_class(**obj_cfg)
+            self.logger.debug(f"Created scenario object: {obj.__dict__}")
+            self.scenario.add_object(obj)
 
     def add_vehicle(self, vehicle_name: str, vehicle_config: Dict[str, Any]):
         """

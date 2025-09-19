@@ -117,7 +117,7 @@ local function packStateData(gtReading)
   -- But we use velocity in local frame, so we just need atan2(vy, vx)
   local V = sqrt(vel_x*vel_x + vel_y * vel_y)
   local sideslip = 0
-  if abs(V) > 0.1 then -- Avoid division by zero or erratic values at very low speeds
+  if abs(V) > 2.0 then -- Avoid division by zero or erratic values at very low speeds
     sideslip = atan2(vel_y, vel_x)
   end
   

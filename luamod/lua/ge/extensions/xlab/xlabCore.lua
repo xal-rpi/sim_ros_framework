@@ -7,6 +7,10 @@ local M = {}
 local GtStates = {}
 local Controllers = {}
 
+if not extensions.scenario_scenariosLoader then
+  extensions.load('scenario/scenariosLoader')
+end
+
 -- Basic Hello Xlab
 M.handleHelloXlab = function(request)
   log('I', logTag, 'Hello Xlab')
@@ -201,6 +205,122 @@ M.handleSetControllerGtState = function(request)
     'Updated controller ' .. controllerName .. ' to use gtState sensor ' .. gtStateName
   )
   request:sendACK('ControllerGtStateUpdated')
+end
+
+
+M.handleStartLevel = function(request)
+  local levelName = request['levelName']
+  if not levelName then
+    log('E', logTag, 'No level name provided in StartLevel request')
+    return
+  end
+
+  local levelInfo = extensions.core_levels.getLevelByName(levelName)
+  if not levelInfo then
+    log('E', logTag, 'Level not found: ' .. levelName)
+    return
+  end
+
+  extensions.core_levels.startLevel(levelInfo.fullfilename)
+  log('I', logTag, 'Started level: ' .. levelName)
+  request:sendACK('StartedLevel')
+end
+
+M.handleGetAdvancedLevelInfo = function(request)
+
+  local levelName = request['levelName']
+  if not levelName then
+    log('E', logTag, 'No level name provided in GetAdvancedLevelInfo request')
+    return false
+  end
+
+  -- Get level info
+  local levelInfo = extensions.core_levels.getLevelByName(levelName)
+  if not levelInfo then
+    log('E', logTag, 'Level not found: ' .. levelName)
+    return false
+  end
+
+  -- -- Check if the requested level is already loaded
+  -- local currentLevelName = extensions.core_levels.getLevelName(getMissionFilename())
+  -- local wasLevelLoaded = currentLevelName == levelName
+  -- if not wasLevelLoaded then
+  --   extensions.core_levels.startLevel(levelInfo.fullfilename)
+  -- end
+
+  -- Get scenarios for the level
+  local allScenarios = extensions.scenario_scenariosLoader.getList()
+  local levelScenarios = {}
+  for _, scenario in ipairs(allScenarios) do
+    if scenario.levelName == levelName then
+      table.insert(levelScenarios, {
+        name = scenario.name,
+        humanName = scenario.humanName or scenario.name,
+        description = scenario.description,
+        sourceFile = scenario.sourceFile  -- Path to load the scenario
+      })
+    end
+  end
+
+  -- Enrich spawn points with pos/rot (from levels.lua onGetRawPoiListForLevel)
+  local enrichedSpawnPoints = {}
+  for _, spawnPoint in ipairs(levelInfo.spawnPoints or {}) do
+    if spawnPoint.objectname then
+      local obj = scenetree.findObject(spawnPoint.objectname)
+      if obj then
+        table.insert(enrichedSpawnPoints, {
+          objectname = spawnPoint.objectname,
+          translationId = spawnPoint.translationId,
+          previews = spawnPoint.previews,
+          pos = obj:getPosition(),  -- vec3 {x, y, z}
+          rot = obj:getRotation()   -- quat {x, y, z, w}
+        })
+      else
+        log('W', 'handleGetAdvancedLevelInfo', 'Spawn point object not found: ' .. spawnPoint.objectname)
+      end
+    end
+  end
+
+  -- Prepare response
+  local resp = {
+    type = 'GetAdvancedLevelInfo',
+    levelName = levelName,
+    levelInfo = levelInfo,  -- Full level metadata
+    scenarios = levelScenarios,  -- List of scenarios with names and paths
+    spawnPoints = enrichedSpawnPoints,  -- Spawn points with pos/rot
+  }
+  request:sendResponse(resp)
+
+  -- local levelName = request['levelName']
+  -- if not levelName then
+  --   log('E', logTag, 'No level name provided in GetAdvancedLevelInfo request')
+  --   return false
+  -- end
+
+  -- -- Get level info (includes spawnPoints)
+  -- local levelInfo = extensions.core_levels.getLevelByName(levelName)
+  -- if not levelInfo then
+  --   log('E', logTag, 'Level not found: ' .. levelName)
+  --   return false
+  -- end
+
+  -- -- Get all scenarios and filter by level
+  -- local allScenarios = extensions.scenario_scenariosLoader.getList()
+  -- local levelScenarios = {}
+  -- for _, scenario in ipairs(allScenarios) do
+  --   if scenario.levelName == levelName then
+  --     table.insert(levelScenarios, scenario.name)  -- Only names, or full scenario if needed
+  --   end
+  -- end
+
+  -- -- Prepare response
+  -- local resp = {
+  --   type = 'GetAdvancedLevelInfo',
+  --   levelName = levelName,
+  --   levelInfo = levelInfo,  -- Includes spawnPoints, previews, etc.
+  --   scenarios = levelScenarios  -- List of scenario names
+  -- }
+  -- request:sendResponse(resp)
 end
 
 local function onSocketMessage(request)

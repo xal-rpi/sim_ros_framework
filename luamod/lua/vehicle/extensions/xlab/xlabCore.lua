@@ -654,6 +654,39 @@ local function getVehicleProperties(props)
   }
 end
 
+-- --[[
+--     Gets vehicle's global center of gravity and principal vectors
+--     @param withoutWheels: boolean - (Optional) Exclude wheels from COG calculation
+--     @return: table - {cogGlobal, vectorForward, vectorUp, vectorLeft}
+-- ]]
+-- local function getVehiclePrincipalAxis()
+--   -- Basic reference setup
+--   local r = v.data.refNodes[0]
+--   local n = v.data.nodes
+--   local pos = {
+--     ref = vec3(n[r.ref].pos),
+--     back = vec3(n[r.back].pos),
+--     up = vec3(n[r.up].pos),
+--   }
+
+--   -- Core calculations
+--   local forward = (pos.ref - pos.back):normalized()
+--   local up = (pos.up - pos.ref):normalized()
+
+--   -- Center of mass in local space
+--   local _useless, cog = relativeCenterOfMass(false)
+--   local currPos = obj:getPosition()
+--   cog = currPos + (cog - pos.ref)
+
+--   return {
+--     cogPosStatic = cog:toTable(),
+--     cogPosRel = (cog - currPos):toTable(),
+--     vectorForward = forward:toTable(),
+--     vectorUp = up:toTable(),
+--     vectorLeft = up:cross(forward):normalized():toTable(),
+--   }
+-- end
+
 --[[
     Gets vehicle's global center of gravity and principal vectors
     @param withoutWheels: boolean - (Optional) Exclude wheels from COG calculation
@@ -661,12 +694,17 @@ end
 ]]
 local function getVehiclePrincipalAxis()
   -- Basic reference setup
-  local r = v.data.refNodes[0]
-  local n = v.data.nodes
+  local refNodes = v.data.refNodes[0] -- Preserved [0] index access
+  -- Extract some of the reference node positions
+  local nodeRef = v.data.nodes[refNodes.ref] -- Assume node ref is on the drvetrain
+  local nodeBack = v.data.nodes[refNodes.back]
+  local nodeUp = v.data.nodes[refNodes.up]
+
+  -- Get the position of the nodes in the world space
   local pos = {
-    ref = vec3(n[r.ref].pos),
-    back = vec3(n[r.back].pos),
-    up = vec3(n[r.up].pos),
+    ref = obj:getNodePosition(nodeRef.cid),
+    back = obj:getNodePosition(nodeBack.cid),
+    up = obj:getNodePosition(nodeUp.cid),
   }
 
   -- Core calculations
@@ -674,12 +712,13 @@ local function getVehiclePrincipalAxis()
   local up = (pos.up - pos.ref):normalized()
 
   -- Center of mass in local space
-  local _useless, cog = relativeCenterOfMass(false)
+  local _useless, cog = relativeCenterOfMass(true)
   local currPos = obj:getPosition()
   cog = currPos + (cog - pos.ref)
 
   return {
     cogPosStatic = cog:toTable(),
+    cogPosRel = (cog - currPos):toTable(),
     vectorForward = forward:toTable(),
     vectorUp = up:toTable(),
     vectorLeft = up:cross(forward):normalized():toTable(),

@@ -130,14 +130,14 @@ class GtStateWrapper(CommBase):
         data["physicsUpdateTime"] = physics_update_time
         data["numPhysicsStepsForGfxSave"] = num_physics_steps_for_gfx_save
         data["pos"] = self.calculate_cog_pos(pos)
-        data["dir"] = self.calculate_dir(dir)
-        data["left"] = self.calculate_dir(left)
+        data["dir"] = self.vectorForward # self.vectorForward # dir # self.calculate_dir(dir)
+        data["left"] = self.vectorLeft # self.vectorLeft   # self.calculate_dir(left)
         data["isUsingGravity"] = is_using_gravity
         data["isAllowWheelNodes"] = is_allow_wheel_nodes
         data["isVisualised"] = is_visualised
         data["isSnappingDesired"] = is_snapping_desired
         data["isForceInsideTriangle"] = is_force_inside_triangle
-        data["isDirWorldSpace"] = True
+        data["isDirWorldSpace"] = True # True
         args = {
             "type": "OpenGtState",
             "ack": "OpenedGtState",
@@ -167,10 +167,10 @@ class GtStateWrapper(CommBase):
         well as the vehicle's center of mass.
         """
         veh_prop = get_vehicle_principal_axis(self.vehicle)
-        self.cogPos = veh_prop["cogPosStatic"]
-        self.vectorForward = veh_prop["vectorForward"]
-        self.vectorLeft = veh_prop["vectorLeft"]
-        self.vectorUp = veh_prop["vectorUp"]
+        self.cogPos = veh_prop["cogPosRel"] # Position relative to the vehicle's ref point
+        self.vectorForward = tuple(veh_prop["vectorForward"]) # Forward vector in world coordinates
+        self.vectorLeft = tuple(veh_prop["vectorLeft"]) # Left vector in world coordinates
+        self.vectorUp = veh_prop["vectorUp"] # Up vector in world coordinates
         self.logger.info(f"Vehicle properties extracted: \n{veh_prop}")
 
     def calculate_cog_pos(self, pos: Float3) -> Float3:

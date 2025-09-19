@@ -60,6 +60,23 @@ local function createGtState(vid, args)
     isVisualised = args.isVisualised,
   }
 
+  -- Let's log node indices and barycentric coordinates.
+  log(
+    'I',
+    'gtState',
+    string.format(
+      'Attaching GtState sensor %d to vehicle %d with nodes (%d, %d, %d) and barycentric coords (u=%.3f, v=%.3f), signedProjDist=%.3f',
+      sensorId,
+      vid,
+      attachData['nodeIndex1'],
+      attachData['nodeIndex2'],
+      attachData['nodeIndex3'],
+      attachData['u'],
+      attachData['v'],
+      attachData['signedProjDist']
+    )
+  )
+
   -- Serialize the data and send it to the vehicle in vlua.
   local serializedData = string.format('extensions.xlab_gtState.create(%q)', lpack.encode(data))
   be:queueObjectLua(vid, serializedData)
