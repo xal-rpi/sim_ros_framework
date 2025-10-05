@@ -198,7 +198,8 @@ class HighLevelController(Node):
         self.override_expiry_time = None  # Will store an rclpy.time.Time object
 
         # pubs & subs
-        self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 1)
+        # self._on_sim_ready(None)
+        self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 10)
         self.create_subscription(Twist, "cmd_vel", self._cmd_vel_callback, 1)
         self.target_pub = self.create_publisher(HLCMsg, "hlc_msg", 1)
 
@@ -399,17 +400,17 @@ class HighLevelController(Node):
             )
             ros_msg.controller_latency = float(self.metrics.average)
 
-            # assume targets["targets"] is a list of dicts, all with the same keys:
-            first = targets["targets"][0]
-            keys  = sorted(first.keys())
+            keys  = sorted(targets.keys())
             ros_msg.target_labels = keys
             ros_msg.target_values = [
-                float(tgt[k]) for tgt in targets["targets"] for k in keys
+                float(targets[k])  for k in keys
             ]
 
             self.target_pub.publish(ros_msg)
 
         except Exception as e:
+            # import traceback
+            # traceback.print_exc()
             self.get_logger().error(f"Send error: {e}, target : {targets}")
 
     def stop(self):

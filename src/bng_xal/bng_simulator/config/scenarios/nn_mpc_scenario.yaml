@@ -12,10 +12,583 @@ beamng:
       steps_per_second: 0
     beamng.ui.show_hud: {}
 
+# content/vehicles/
+# "default_vehicle" - The standard datablock for vehicles (static or dynamic)
+# "simple_object" - For basic physics objects
+# "static_object" - For completely static, non-interactive objects
+# "dynamic_object" - For physics-enabled interactive objects
+
+# "BeamNGVehicle" - For any vehicle-based object (both drivable vehicles and static vehicle props)
+# "TSStatic" - For static mesh objects that don't have physics
+# "DecalRoad" - For road objects
+# "TerrainBlock" - For terrain objects
+
 # Scenario configuration
 scenario:
-  level: tech_ground # tech_ground # smallgrid
+  level: tech_ground # derby # Utah # tech_ground # tech_ground # smallgrid
   name: basic
+  # # Additional objects to the scenario
+  # extra_objects:
+  #   sawhorse: # Descriptive name
+  #     type: ScenarioObject
+  #     oid: etk_test           # Unique object ID
+  #     otype: BeamNGVehicle  # Object type - important!
+  #     pos: [-3, -125, 0]
+  #     rot:                  # Will be converted to a quaternion
+  #       yaw_angle: 0
+  #     scale: [1, 1, 1]
+  #     JBeam: etk800     # Vehicle model name
+  #     datablock: default_vehicle
+
+  #   sawhorseT: # Descriptive name
+  #     type: ScenarioObject
+  #     oid: etk_tt           # Unique object ID
+  #     otype: BeamNGVehicle  # Object type - important!
+  #     pos: [0, -125, 0]
+  #     rot:                  # Will be converted to a quaternion
+  #       yaw_angle: 0
+  #     scale: [1, 1, 1]
+  #     JBeam: etk800     # Vehicle model name
+  #     datablock: default_vehicle
+  
+  #   sawhorseN: # Descriptive name
+  #     type: ScenarioObject
+  #     oid: etk_t           # Unique object ID
+  #     otype: BeamNGVehicle  # Object type - important!
+  #     pos: [-2.3, -175, 0]
+  #     rot:                  # Will be converted to a quaternion
+  #       yaw_angle: 0
+  #     scale: [1, 1, 1]
+  #     JBeam: etk800     # Vehicle model name
+  #     datablock: default_vehicle
+
+  #   sawhorsett: # Descriptive name
+  #     type: ScenarioObject
+  #     oid: etk_ttt           # Unique object ID
+  #     otype: BeamNGVehicle  # Object type - important!
+  #     pos: [-6.3, -175, 0]
+  #     rot:                  # Will be converted to a quaternion
+  #       yaw_angle: 0
+  #     scale: [1, 1, 1]
+  #     JBeam: etk800     # Vehicle model name
+  #     datablock: default_vehicle
+
+  # extra_objects:
+  #   cone0:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone0
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - -6.0
+  #     - -3.6739403974420594e-16
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone1:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone1
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - -5.999999999999999
+  #     - -20.0
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone10:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone10
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 47.26114814429711
+  #     - 30.852227969682442
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone11:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone11
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 46.66539374398922
+  #     - 51.57671883944455
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone12:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone12
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 37.196812500218115
+  #     - 73.10254383166539
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone13:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone13
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 12.354493316584058
+  #     - 78.67005552430427
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone14:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone14
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - -3.5738628675184207
+  #     - 60.12380162542953
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone15:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone15
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - -5.9998399317274655
+  #     - 38.49896736027963
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone2:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone2
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - -5.996248918825451
+  #     - -40.02657740037402
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone3:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone3
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - -2.9509899476758483
+  #     - -61.8192053553918
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone4:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone4
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 14.404244515319574
+  #     - -79.29066160679095
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone5:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone5
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 38.58701441570929
+  #     - -71.50020786335966
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone6:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone6
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 46.860282773161146
+  #     - -49.713143684908346
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone7:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone7
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 47.26115471277826
+  #     - -29.147772030317274
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone8:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone8
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 47.261152523284544
+  #     - -9.147772030317396
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone9:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone9
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 47.26115033379083
+  #     - 10.852227969682483
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_0:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_0
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 7.0
+  #     - 4.286263797015736e-16
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_1:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_1
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 7.000000000000001
+  #     - -20.0
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_10:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_10
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 34.26114814429719
+  #     - 30.85222654651153
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_11:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_11
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 33.76600088034438
+  #     - 49.962511991067124
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_12:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_12
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 27.989684654517042
+  #     - 63.92491903911062
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_13:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_13
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 17.239974084669427
+  #     - 66.62297796729203
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_14:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_14
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 8.808434149640387
+  #     - 56.16416520539548
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_15:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_15
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 7.000157968363342
+  #     - 38.49157833906067
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_2:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_2
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 7.0036234929748655
+  #     - -39.96898159399015
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_3:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_3
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 9.22088048067738
+  #     - -57.2535104164608
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_4:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_4
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 18.126838645086366
+  #     - -66.83504869754293
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_5:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_5
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 28.728147884388953
+  #     - -63.02655748600684
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_6:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_6
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 33.92035461647313
+  #     - -48.46484111751822
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_7:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_7
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 34.261154712778335
+  #     - -29.147773453488185
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_8:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_8
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 34.26115252328462
+  #     - -9.147773453488309
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+  #   cone_9:
+  #     JBeam: cones
+  #     datablock: default_vehicle
+  #     oid: cone_9
+  #     otype: BeamNGVehicle
+  #     pos:
+  #     - 34.26115033379091
+  #     - 10.85222654651157
+  #     - 0.0
+  #     rot:
+  #       yaw_angle: 0.0
+  #     scale:
+  #     - 1.0
+  #     - 1.0
+  #     - 1.0
+  #     type: ScenarioObject
+
+
+
 
 post_scenario: {}
 
@@ -28,6 +601,10 @@ vehicles:
     scenario_args:
       pos: [0,0,0]
       yaw_angle: 0
+      # pos: [1898.416,3264.380,180.369]
+      # # # pos: [-922.15802,-929.867981,135.533997]
+      # yaw_angle: 180.0
+      # # rot_quat: [0, 0, 0, 1.0]
     sensors:
       gtstate:
         type: GtState
@@ -49,8 +626,16 @@ vehicles:
         calibration:
           controlMode : auto
           gtStateSendRate: 0.01
-          modelName: wheel_speed_v4.json
+          # modelName: wheel_speed_v4.json
+          modelName: wheel_speed_wit_integ_v1.json
           commandTimeout: 1.0 # Timeout between two mpc solutions before giving back control
+  # bolide: # Name of the car
+  #   model: bolide
+  #   # partConfig: /vehicles/utv/wild.pc
+  #   license: EGO
+  #   scenario_args:
+  #     pos: [94.8773766,-53.2508202,23.1649094] # [50,0,0]
+  #     yaw_angle: 0
 
 # ROS configuration
 ros_poll_config:

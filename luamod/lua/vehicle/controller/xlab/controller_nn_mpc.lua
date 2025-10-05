@@ -55,6 +55,8 @@ local controllerState = {
   currentIdx = 1,
   targetCount = 0,
   old_diff_rear_wheel_speed_ms = 0,
+  leaky_err_wr = 0,
+  integ_steering_err = 0,
 }
 
 -- Controller calibration parameters
@@ -135,6 +137,7 @@ local function packStateData(gtReading)
     yaw = yaw,                 -- Yaw angle
     we = gtReading.RPM * common.constants.rpmToAV, -- Engine speed in rad/s
     pb = gtReading.turboBoost, -- Boost pressure
+    throttle = gtReading.throttle, -- Throttle position
   }
 end
 
@@ -222,6 +225,47 @@ local function findClosestTargetIdx(vehicle_x, vehicle_y)
 end
 
 --[[
+  Finds closest target point and t in [0,1] the along-segment projection of the current
+  target along that segment.
+]]
+local function  findClosestSegment(vehicle_x, vehicle_y)
+  local cs = controllerState
+  local N = cs.targetCount
+  local best_i, best_j = 1, 2
+  local best_t = 0.0
+  local best_px, best_py = cs.x[1], cs.y[1]
+  local best_d2 = 1e10
+  for i = 1, N-1 do
+    local j = (i < N) and (i+1) or 1
+    local x1, y1 = cs.x[i], cs.y[i]
+    local x2, y2 = cs.x[j], cs.y[j]
+    local vx, vy = x2 - x1, y2 - y1
+    local wx, wy = vehicle_x - x1, vehicle_y - y1
+    local seg_len2 = vx*vx + vy*vy
+    local t, px, py
+    if seg_len2 <= 1e-12 then
+      t = 0.0
+      px, py = x1, y1
+    else
+      t = (wx*vx + wy*vy) / seg_len2
+      t = max(0, min(1, t))
+      px = x1 + t * vx
+      py = y1 + t * vy
+    end
+
+    local dx, dy = vehicle_x - px, vehicle_y - py
+    local d2 = dx*dx + dy*dy
+    if d2 < best_d2 then
+      best_d2 = d2
+      best_i, best_j = i, j
+      best_t = t
+      best_px, best_py = px, py
+    end
+  end
+  return best_i, best_j, best_t
+end
+
+--[[
     Applies target values from the trajectory to the vehicle.
     Performs path projection, target interpolation, and NN control.
     
@@ -242,53 +286,84 @@ local function applyTargets(dt)
   local vehicle_x = g.pos[1]
   local vehicle_y = g.pos[2]
 
-  -- Find closest target index based on distance
-  local closest_idx = findClosestTargetIdx(vehicle_x, vehicle_y)
+  -- -- Find closest target index based on distance
+  -- local closest_idx = findClosestTargetIdx(vehicle_x, vehicle_y)
+
+  -- -- Check if we've reached the end of the path
+  -- if closest_idx >= cs.targetCount then
+  --   log('W', logTag, string.format(
+  --     'End of path target list (idx %d of %d)', closest_idx, cs.targetCount)
+  --   )
+  --   mpcMode = MPC_MODE.TARGETCOUNT_PASSED
+  --   cs.integ_steering_err = 0
+  --   cs.old_diff_rear_wheel_speed_ms = 0
+  -- end
+
+  local idx1, idx2, t = findClosestSegment(vehicle_x, vehicle_y)
 
   -- Check if we've reached the end of the path
-  if closest_idx >= cs.targetCount then
+  if idx2 >= cs.targetCount and t >= 1.0 then
     log('W', logTag, string.format(
-      'End of path target list (idx %d of %d)', closest_idx, cs.targetCount)
+      'End of path target list (idx %d of %d)', idx2, cs.targetCount)
     )
     mpcMode = MPC_MODE.TARGETCOUNT_PASSED
+    cs.integ_steering_err = 0
+    cs.old_diff_rear_wheel_speed_ms = 0
+    cs.leaky_err_wr = 0
   end
 
-  -- Get indices for the forward segment, ensuring they're valid
-  local idx1 = min(closest_idx, cs.targetCount - 1)  -- Start index (closest point)
-  local idx2 = min(closest_idx + 1, cs.targetCount)  -- End index (next point)
+  -- -- Get indices for the forward segment, ensuring they're valid
+  -- local idx1 = min(closest_idx, cs.targetCount - 1)  -- Start index (closest point)
+  -- local idx2 = min(closest_idx + 1, cs.targetCount)  -- End index (next point)
   
-  -- Extract segment endpoints
-  local x1 = cs.x[idx1]
-  local y1 = cs.y[idx1]
-  local x2 = cs.x[idx2]
-  local y2 = cs.y[idx2]
+  -- -- Extract segment endpoints
+  -- local x1 = cs.x[idx1]
+  -- local y1 = cs.y[idx1]
+  -- local x2 = cs.x[idx2]
+  -- local y2 = cs.y[idx2]
   
-  -- Compute segment vector for projection
-  local dx_seg = x2 - x1
-  local dy_seg = y2 - y1
-  local seg_length_squared = dx_seg*dx_seg + dy_seg*dy_seg
+  -- -- Compute segment vector for projection
+  -- local dx_seg = x2 - x1
+  -- local dy_seg = y2 - y1
+  -- local seg_length_squared = dx_seg*dx_seg + dy_seg*dy_seg
   
-  -- Compute projection parameter
-  local t_raw = 0
-  if seg_length_squared > 1e-7 then -- Avoid division by near-zero
-    t_raw = ((vehicle_x - x1) * dx_seg + (vehicle_y - y1) * dy_seg) / seg_length_squared
-  end
-  local t = max(0, min(1, t_raw)) -- Clamp to [0,1]
+  -- -- Compute projection parameter
+  -- local t_raw = 0
+  -- if seg_length_squared > 1e-7 then -- Avoid division by near-zero
+  --   t_raw = ((vehicle_x - x1) * dx_seg + (vehicle_y - y1) * dy_seg) / seg_length_squared
+  -- end
+  -- local t = max(0, min(1, t_raw)) -- Clamp to [0,1]
 
   -- Store current position in path for status reporting
   cs.currentIdx = idx1
   
-  -- Interpolate target values using projection parameter t
-  -- Maybe an interpolation to pick the next time or s + ds.
-  -- local desiredSteer = cs.steer[idx1] + t * (cs.steer[idx2] - cs.steer[idx1])
-  -- local desiredWheelSpeed = cs.wr[idx1] + t * (cs.wr[idx2] - cs.wr[idx1])
-  -- local desired_wr_dot = cs.wr_dot[idx1] + t * (cs.wr_dot[idx2] - cs.wr_dot[idx1])
-  -- local desiredFxr = cs.Fxr[idx1] + t * (cs.Fxr[idx2] - cs.Fxr[idx1])
-  local idx_next = min(idx1 + 1, cs.targetCount)
-  local desiredSteer = cs.steer[idx_next]
-  local desiredWheelSpeed = cs.wr[idx_next]
-  local desired_wr_dot = cs.wr_dot[idx_next]
-  local desiredFxr = cs.Fxr[idx_next]
+  -- -- Interpolate target values using projection parameter t
+  -- -- Maybe an interpolation to pick the next time or s + ds.
+  local desiredSteer = cs.steer[idx1] + t * (cs.steer[idx2] - cs.steer[idx1])
+  local desiredWheelSpeed = cs.wr[idx1] + t * (cs.wr[idx2] - cs.wr[idx1])
+  local desired_wr_dot = cs.wr_dot[idx1] + t * (cs.wr_dot[idx2] - cs.wr_dot[idx1])
+  local desiredFxr = cs.Fxr[idx1] + t * (cs.Fxr[idx2] - cs.Fxr[idx1])
+
+  -- local idx_next = min(idx1 + 1, cs.targetCount)
+  local idx_next = idx2
+  desiredSteer = cs.steer[idx_next]
+  desiredWheelSpeed = cs.wr[idx_next]
+  desired_wr_dot = cs.wr_dot[idx_next]
+  desiredFxr = cs.Fxr[idx_next]
+
+  -- local curr_velocity = g.vel[1]
+  -- if curr_velocity <= 4 then
+  --     local index_wr = cs.targetCount
+  --     desiredWheelSpeed = cs.wr[index_wr]
+  --     desiredFxr = cs.Fxr[index_wr]
+  --     desired_wr_dot = 0
+  -- end
+
+  -- local idx_next = min(idx1 + 1, cs.targetCount)
+  -- local desiredSteer = cs.steer[idx_next]
+  -- local desiredWheelSpeed = cs.wr[idx_next]
+  -- local desired_wr_dot = cs.wr_dot[idx_next]
+  -- local desiredFxr = cs.Fxr[idx_next]
 
   -- Write down the desired values into the gtState
   gtStateController.setCustomField("target_wr", desiredWheelSpeed)
@@ -298,52 +373,64 @@ local function applyTargets(dt)
 
   -- NN logic to compute throttle control
   local newThrottle
+  local rear_wheel_speed_ms = (g.wheelRR.speed + g.wheelRL.speed) / 2
+  local tau_train, max_error_wr, train_dt = 0.01, 100, 0.01 -- From training config
   if nn_model then
     -- Prepare input variables for the neural network
     local engine_speed_rad = g.RPM * common.constants.rpmToAV
     local boost_pressure = g.turboBoost
-    local rear_wheel_speed_ms = (g.wheelRR.speed + g.wheelRL.speed) / 2
     local throttle = g.throttle
     local diff_rear_wheel_speed_ms = rear_wheel_speed_ms - desiredWheelSpeed
     local delta_diff = rear_wheel_speed_ms - cs.old_diff_rear_wheel_speed_ms
-    cs.old_diff_rear_wheel_speed_ms = rear_wheel_speed_ms
+    cs.old_diff_rear_wheel_speed_ms  = rear_wheel_speed_ms
 
-    -- if rear_wheel_speed_ms <= 3 then
-    --   -- If the rear wheel speed is very low, we can assume the vehicle is stationary
-    --   -- and set desiredWheelSpeed to 0 to avoid erratic behavior.
-    --   -- desiredWheelSpeed = 5
-    --   desired_wr_dot = 5.0
-    -- end
+    local alpha = (train_dt / (train_dt + tau_train))
+    cs.leaky_err_wr = alpha * cs.leaky_err_wr + diff_rear_wheel_speed_ms
+    cs.leaky_err_wr = max(-max_error_wr, min(max_error_wr, cs.leaky_err_wr))
 
     local out = nn.run(nn_model, {
       engine_speed_rad,
       boost_pressure,
       rear_wheel_speed_ms,
       throttle,
-      desired_wr_dot * 0.01, -- Scale factor from training
+      desired_wr_dot * train_dt, -- Scale factor from training
       desiredFxr,
       delta_diff,
+      -- New addition. Not compatible with old models.
+      cs.leaky_err_wr,
+      --
       diff_rear_wheel_speed_ms,
     })
     local ff = out[1]
     local kp = out[2]
-    local throttledot = tanh(ff + kp * (diff_rear_wheel_speed_ms / 20)) -- TODO: Proper 20 calibration
-    throttledot = 22.5 * throttledot - 7.5
+    -- -- Old compatibility - comment out later
+    -- local throttledot = tanh(ff + kp * (diff_rear_wheel_speed_ms / 20)) -- TODO: Proper 20 calibration
+    -- throttledot = 22.5 * throttledot - 7.5
+    -- --
+    local throttledot = tanh(ff + kp * (diff_rear_wheel_speed_ms / 15.0)) -- TODO: Proper 15 calibration
+    throttledot = 5.0 * throttledot
 
     -- Integrate to get new throttle
-    newThrottle = throttle + (0.01 * throttledot)
+    newThrottle = throttle + (train_dt * throttledot)
   else
     log('E', logTag, 'NN model is not loaded')
   end
 
   -- Apply computed controls
+  local roadwheel_angle = (common.cachedGtReading.wheelFR.angle + common.cachedGtReading.wheelFL.angle) / 2
+  local current_steering = roadwheel_angle / -0.5948683325943701
+  local err_steer = (desiredSteer - current_steering)
+  local alpha_integ = 0.9
+  cs.integ_steering_err = alpha_integ * cs.integ_steering_err + (1-alpha_integ) * err_steer
+  local inputSteer = desiredSteer + 0.0 * err_steer + 0.0 * cs.integ_steering_err
   if calibration.controlMode == CONTROL_MODE.AUTO and newThrottle then
     -- Full autonomous mode - control both throttle and steering
     input.event('throttle', newThrottle, FILTER_AI)
     electrics.values.throttle = newThrottle
     electrics.values.throttle_input = newThrottle
-    electrics.values.steering_input = desiredSteer
-    input.event('steering', desiredSteer, FILTER_AI)
+    input.event('steering', inputSteer, FILTER_AI)
+    electrics.values.steering_input = inputSteer
+    electrics.values.steering = -4.71238898038469 * inputSteer
     -- input.event('steering', cs.lastAppliedSteering, FILTER_AI)
     
   elseif calibration.controlMode == CONTROL_MODE.STEERING_AUTO then
@@ -371,15 +458,16 @@ local function applyTargets(dt)
       'I',
       logTag,
       string.format(
-        'SimTime=%.3f Idx=%d/%d t=%.2f s=%.2f wr=%.2f wrDot=%.2f steer=%.2f FxR=%.2f Latency=%.1fms',
+        'SimTime=%.3f Idx=%d/%d t=%.2f s=%.2f wr_t=%.2f wr=%.2f wrDot=%.2f steer=%.2f FxR=%.2f Latency=%.1fms',
         nowSim,
         idx1,
         cs.targetCount,
         t,
         idx_s,
+        rear_wheel_speed_ms,
         desiredWheelSpeed,
-        desired_wr_dot * 0.01,
-        desiredSteer,
+        desired_wr_dot * train_dt,
+        desiredSteer-current_steering,
         desiredFxr,
         common.performanceMetrics.avgLatency * 1000
       )
@@ -491,6 +579,9 @@ function M.update(dt)
     log('W', logTag, 'MPC command timeout - falling back to manual control after ' .. 
         string.format("%.2f", calibration.commandTimeout) .. 's')
     mpcMode = MPC_MODE.OFF
+    controllerState.integ_steering_err = 0
+    controllerState.old_diff_rear_wheel_speed_ms = 0
+    controllerState.leaky_err_wr = 0
   end
 
   common.updateGtReading()
@@ -602,7 +693,9 @@ function M.reset()
     steer = {},
     currentIdx = 1,
     targetCount = 0,
-    old_diff_rear_wheel_speed_ms = 0
+    old_diff_rear_wheel_speed_ms = 0,
+    integ_steering_err = 0,
+    leaky_err_wr = 0,
   }
   updateAccum = 0
   gtStateSendAccum = 0
