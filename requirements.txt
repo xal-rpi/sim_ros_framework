@@ -1,0 +1,10 @@
+# Runtime deps used by bng_simulator / bng_controller
+beamngpy
+PyYAML
+numpy
+tqdm
+
+# Build-time deps when colcon uses a venv python
+empy
+catkin_pkg
+lark-parser

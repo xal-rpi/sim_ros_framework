@@ -70,6 +70,9 @@ run() {
 command -v colcon >/dev/null 2>&1 || { err "colcon not found. Install ROS 2 dev tools first."; exit 1; }
 command -v python3 >/dev/null 2>&1 || { err "python3 not found."; exit 1; }
 
+# Enforce colcon to use the output of which python3
+export COLCON_PYTHON_EXECUTABLE=$(which python3)
+
 if [[ -z "$ROS_DISTRO" ]]; then
   # try to guess from common installs if not in env
   for d in /opt/ros/*; do
@@ -173,3 +176,7 @@ done
 
 echo -e "${c_green}All done.${c_reset} Remember to source this overlay in new shells:"
 echo "  source \"${WORKSPACE}/install/setup.bash\""
+
+REQ="${WORKSPACE}/src/sim_ros_framework/requirements.txt"
+run "Install Python deps" python3 -m pip install -U pip
+run "Install Python deps" python3 -m pip install -r "$REQ"
