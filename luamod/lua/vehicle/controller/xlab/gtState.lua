@@ -385,29 +385,30 @@ local function update(dtSim)
   -- ----------------------------------------------------------------------
   --                     WheelAngle Calculation                          --
   -- ----------------------------------------------------------------------
-  local signSteering = sign(electrics.values.steering_input)
+  -- local signSteering = sign(electrics.values.steering_input)
 
-  -- helper: planar angle (deg) between two nodes, with sign
-  local function planarAngleRad(nodeA, nodeB, signSteer)
-    local cosAng = obj:nodeVecPlanarCosRightForward(nodeA, nodeB)
-    return acos(cosAng) * -signSteer
+  -- helper: planar angle (rad) between two nodes, with sign
+  local function planarAngleRad(nodeA, nodeB)
+    local c = obj:nodeVecPlanarCosRightForward(nodeA, nodeB)
+    local s = obj:nodeVecPlanarSinRightForward(nodeA, nodeB)
+    return math.atan2(s, c)
   end
 
   -- front right
   local wheel_fr_info = getWheelInfos(wheel_fr)
-  wheel_fr_info.angle = planarAngleRad(wheel_fr.node1, wheel_fr.node2, signSteering)
+  wheel_fr_info.angle = planarAngleRad(wheel_fr.node1, wheel_fr.node2)
 
   -- front left (note swapped order if needed)
   local wheel_fl_info = getWheelInfos(wheel_fl)
-  wheel_fl_info.angle = planarAngleRad(wheel_fl.node2, wheel_fl.node1, signSteering)
+  wheel_fl_info.angle = planarAngleRad(wheel_fl.node2, wheel_fl.node1)
 
   -- rear right
   local wheel_rr_info = getWheelInfos(wheel_rr)
-  wheel_rr_info.angle = planarAngleRad(wheel_rr.node1, wheel_rr.node2, signSteering)
+  wheel_rr_info.angle = planarAngleRad(wheel_rr.node1, wheel_rr.node2)
 
   -- rear left
   local wheel_rl_info = getWheelInfos(wheel_rl)
-  wheel_rl_info.angle = planarAngleRad(wheel_rl.node2, wheel_rl.node1, signSteering)
+  wheel_rl_info.angle = planarAngleRad(wheel_rl.node2, wheel_rl.node1)
   --  -------------------------------------------------------
 
   -- These inputs are updated at a lower frequency than the physics steps.
