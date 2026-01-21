@@ -41,10 +41,14 @@ WORKSPACE="${HOME}/ros2_ws"
 ROS_DISTRO="${ROS_DISTRO:-}"
 JOBS=""
 RUN_ROSDEP=1
+CLEAN_ALL=0
+CLEAN_PKGS=()
 
 # parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --clean) CLEAN_ALL=1; shift;;
+    --clean-pkg) CLEAN_PKGS+=("$2"); shift 2;;
     -w|--workspace) WORKSPACE="$2"; shift 2;;
     -r|--ros-distro) ROS_DISTRO="$2"; shift 2;;
     -j|--jobs) JOBS="$2"; shift 2;;
@@ -94,6 +98,18 @@ if [[ ! -d "$WORKSPACE" ]]; then
   run "Create workspace directories" mkdir -p "${WORKSPACE}/src"
 fi
 cd "$WORKSPACE"
+
+if [[ "$CLEAN_ALL" -eq 1 ]]; then
+  warn "Cleaning build/ install/ log/"
+  rm -rf build/ install/ log/
+fi
+
+if [[ "${#CLEAN_PKGS[@]}" -gt 0 ]]; then
+  for p in "${CLEAN_PKGS[@]}"; do
+    warn "Cleaning package artifacts for: $p"
+    rm -rf "build/$p" "install/$p"
+  done
+fi
 
 # source ROS distro
 # shellcheck disable=SC1090
@@ -146,8 +162,10 @@ run "Build ${PKG_CPP}" \
 run "Source workspace overlay" bash -c "source install/setup.bash"
 
 # 2) build Python packages with symlink-install
-run "Build Python packages (${PKGS_PY[*]}) with --symlink-install" \
-  colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --symlink-install --packages-select "${PKGS_PY[@]}"
+# run "Build Python packages (${PKGS_PY[*]}) with --symlink-install" \
+#   colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --symlink-install --packages-select "${PKGS_PY[@]}"
+run "Build Python packages (${PKGS_PY[*]})" \
+  colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --packages-select "${PKGS_PY[@]}"
 
 # source final overlay
 # shellcheck disable=SC1091

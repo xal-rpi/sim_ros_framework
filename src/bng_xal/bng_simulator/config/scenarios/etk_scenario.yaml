@@ -1,0 +1,115 @@
+# Example of a basic scenario configuration file for initiatin beamng sim
+
+# Simulator configuration
+beamng:
+  host: 127.0.0.1
+  port: 25252
+  open_args:
+    launch: False
+    debug: False
+    extensions:
+      - xlab/xlabCore
+  setup_funcs:
+    beamng.settings.set_deterministic:
+      # -1: Run 1000/fpslimit ms of physics per frame
+      # 0: Simulate physics time based on wallclock delta to the last frame
+      # n: Simulate n * 50ms of physics per frame (for any positive n)
+      steps_per_second: 0
+    beamng.ui.show_hud: {}
+
+# Scenario configuration
+scenario:
+  level: derby # tech_ground
+  name: main.level.json
+
+# post_scenario: {}
+
+# Vehicle configuration
+vehicles:
+  ego: # Name of the car
+  # config: vehicles/rockbouncer/rock_racer.pc 
+    model: sunburst2 # bolide # utv # etk800 # utv # bolide, etk800, wild (utv)
+    partConfig: /vehicles/sunburst2/drift_pro.pc
+    # color: blue
+    # color2: red
+    # color3: green
+    # license: EGO
+    scenario_args:
+      # pos: [0, 0, 0]
+      pos: [44.05, 127.22, 79.3]
+      # rot_quat: [0, 0, -0.7071, 0.7071]
+      yaw_angle: 0
+      # rot_ang: [0, 0, 0]
+    # All the sensors that the vehicle has
+    sensors:
+      # gps:
+      #   type: GPS
+      #   pos: [0, 0, 0]
+      #   gfx_update_time: 0.0
+      #   physics_update_time: 0.01
+      #   ref_lon: 0
+      #   ref_lat: 0
+      # electrics:
+      #   type: Electrics
+      basicState:
+        type: BasicState
+      # # imu:
+      # #   type: AdvancedIMU
+      # #   gfx_update_time: 0.05
+      # #   physics_update_time: 0.01
+      # #   is_using_gravity: True
+      # #   is_visualised: True
+      # #   is_dir_world_space: False
+      # #   # Up and dir name are confusing, but it is the way it is
+      # #   dir: [0, -1, 0] # First axis
+      # #   up: [1, 0, 0] # Second axis in right hand rule
+      # #   pos: [0, 0, 3]
+      gtstate:
+        type: GtState
+        gfx_update_time: 0.025
+        physics_update_time: 0.005
+        num_physics_steps_for_gfx_save: 2
+        # pos: [0, 0, 3] # Position is relative to the center of mass of the vehicle
+        # pos: cog # Position could be a string: 'cog, 'front', 'rear', 'left', 'right'.
+        # is_pos_relative_to_cog: True
+        # use_reference_info: True
+        # is_visualised: True
+        # is_dir_world_space: False
+        # # Up and dir name are confusing, but it is the way it is
+        # dir: [0, -1, 0] # First axis
+        # up: [1, 0, 0] # Second axis in right hand rule
+    # controllers:
+    #   LowLevelController: # The python setup class used
+    #     controllerType: default # The lua controller used (controller_{type}.lua)
+    #     controllerRate: 0.005
+    #     listenIp: 127.0.0.1
+    #     listenPort: 64257
+    #     sendIp: 127.0.0.1
+    #     sendPort: 64258
+    #     gtStateName: gtstate
+    #     drivetrain:
+    #       mode: 1 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
+    #       startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
+    #     calibration:
+    #       maxSteeringAngle : 0.69 # has to be obtained manually, rad
+    #       throttleP : 0.2
+    #       throttleI : 0.000
+    #       throttleD : 0.000
+
+
+# high_level_controller:
+#   control_fn: core://test_patterns:compute_control_multi_test # The controller implementation
+#   control_rate: 0.01
+
+# ROS configuration
+ros_poll_config:
+  ego:
+    basicState:
+      # topic: /ego/basicState
+      poll_time: 0.05
+      publish: True
+    gtstate:
+      topic: /ego/gtstate
+      poll_time: 0.02 # Make sure this matches the gfx_update_time and is not 3 times slower
+      publish: 1 # 0 is false, 1 is true, 2 is true and publish to all
+      # publish_all: True
