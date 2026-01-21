@@ -9,8 +9,19 @@ class ThrottleSweepLogic:
             f"ThrottleSweepLogic initializing with control_rate: {control_rate}"
         )
 
+        # Acceleration duration
+        self.acceleration_duration = 5.0 # 5
+        self.decel_duration = 3
+        self.brake_while_coasting = True
+        self.phase_start_time = 0.0
+        
         self.control_rate = control_rate  # Expected control rate in seconds
         self.throttle_levels = [i / 10.0 for i in range(1, 11)]  # 0.1 to 1.0
+        self.brake_levels = [ i / 10.0 for i in range(1, 11)]  # 0.1 to 1.0
+        # level = 0.5
+        # self.throttle_levels = [1.0]
+        # self.brake_levels = [1.0]
+        # self.brake_throttle = self.throttle_levels[-1]  # Use max throttle for brake acceleration
 
         self.max_speed_plateau_duration = 3.0  # seconds
         self.max_speed_epsilon = 0.1  # m/s
@@ -53,9 +64,11 @@ class ThrottleSweepLogic:
 
         # State variables
         self.current_throttle_index = 0
+        self.current_brake_index = 0
         self.phase = "idle"
         self.stop_readings_count = 0
-        self.sim_time = 0.0  # Current simulation time from LLC
+        self.sim_time = None  # Current simulation time from LLC
+        self.init_time = None
         self.plateau_check_sim_time_start = 0.0 # Sim time when we started having enough data for plateau check
         self.initial_run = True  # To trigger initial reset
 
@@ -68,6 +81,7 @@ class ThrottleSweepLogic:
     def reset(self):
         self.logger.info("Resetting ThrottleSweepLogic state.")
         self.current_throttle_index = 0
+        self.current_brake_index = 0
         # self.phase = 'idle' # Start in idle, compute_control will transition
         self.rpm_limiter_last_hit_time = -1e9
         self.rpm_limiter_hit_count = 0
@@ -77,6 +91,7 @@ class ThrottleSweepLogic:
         self.stop_readings_count = 0
         self.plateau_check_sim_time_start = 0.0
         self.initial_run = False  # Reset complete
+        self.phase_start_time = 0.0
 
     def compute_control(self, latest_sensor_data, control_rate_val, max_latency_val):
         # Update control_rate if it changed (though typically fixed)
@@ -105,12 +120,26 @@ class ThrottleSweepLogic:
                     f"Invalid control_rate {self.control_rate} during update, keeping old deque settings."
                 )
 
-        self.sim_time = latest_sensor_data.get(
+        _sim_time = latest_sensor_data.get(
             "simtime", self.sim_time
         )  # Use last known if not present
+        
+        if self.init_time is None and _sim_time is not None:
+            self.init_time = _sim_time
+            
+        if _sim_time is not None:
+            self.sim_time = _sim_time
 
+        time_since_init = 0.0
+        if self.init_time is not None and self.sim_time is not None:
+            time_since_init = self.sim_time - self.init_time
+        # self.logger.info(
+        #     f"Compute control called at sim_time: {self.sim_time}, time_since_init: {time_since_init}"
+        # )
+        # print(f"Compute control called at sim_time: {self.sim_time}, time_since_init: {time_since_init}")
+            
         # Warmup
-        if self.sim_time < 10:
+        if time_since_init < 15:
             return {
                 "throttle_target": 0,
                 "brake_target": 0,
@@ -136,13 +165,14 @@ class ThrottleSweepLogic:
             self.logger.debug("Phase: starting_level")
             if self.current_throttle_index >= len(self.throttle_levels):
                 self.logger.info("Throttle sweep fully completed for all levels.")
-                self.phase = "idle"
+                self.phase = "brake_start"
                 return {
                     "throttle_target": 0,
                     "brake_target": 0,
                     "time": command_reach_time,
                 }
 
+            self.phase_start_time = self.sim_time
             current_throttle = self.throttle_levels[self.current_throttle_index]
             self.logger.info(f"Starting level for throttle: {current_throttle:.1f}")
             self.recent_speeds.clear()
@@ -225,6 +255,20 @@ class ThrottleSweepLogic:
                             "brake_target": 0,
                             "time": command_reach_time,
                         }
+            
+            if (t - self.phase_start_time) >= self.acceleration_duration:
+                self.logger.info(
+                    f"Max acceleration duration {self.acceleration_duration}s reached for throttle {current_throttle:.1f} "
+                    f"at speed {speed:.2f} m/s, RPM {rpm:.0f}, sim_time {self.sim_time:.2f}. "
+                )
+                self.phase = "coasting"
+                self.phase_start_time = self.sim_time
+                return {
+                    "throttle_target": 0,
+                    "steer_target": 0,
+                    "brake_target": 0,
+                    "time": command_reach_time,
+                }
 
             # If not enough data or plateau duration not met, or speed diff too high, continue accelerating
             return {
@@ -249,10 +293,104 @@ class ThrottleSweepLogic:
                 self.rpm_limiter_hit_count = 0
                 self.phase = "starting_level"
                 self.stop_readings_count = 0  # Reset for next stop detection
+            
+            t = self.sim_time
+            brake_target = 0 if not self.brake_while_coasting else (self.brake_levels[ self.current_throttle_index] / 2)
+            if self.decel_duration is not None and (t - self.phase_start_time) >= self.decel_duration:
+                self.logger.info(
+                    f"Max coasting duration {self.decel_duration}s reached at speed {speed:.2f} m/s, sim_time {self.sim_time:.2f}."
+                )
+                self.current_throttle_index += 1
+                self.rpm_limiter_hit_count = 0
+                self.phase = "starting_level"
+                self.stop_readings_count = 0  # Reset for next stop detection
 
             return {
                 "throttle_target": 0,
+                "brake_target": brake_target,
+                "time": command_reach_time,
+            }
+
+        elif self.phase == "brake_start":
+            self.logger.info("Starting brake test: accelerating to max speed.")
+            self.recent_speeds.clear()
+            self.plateau_check_sim_time_start = 0.0
+            self.phase = "brake_accelerating"
+            self.phase_start_time = self.sim_time
+            return {
+                "throttle_target": self.throttle_levels[self.current_brake_index],
                 "brake_target": 0,
+                "time": command_reach_time,
+            }
+
+        elif self.phase == "brake_accelerating":
+            speed = latest_sensor_data.get("speed", 0.0)
+            self.recent_speeds.append(speed)
+            rpm = latest_sensor_data.get("engine", {}).get("rpm", 0.0)
+
+            # Plateau detection
+            if len(self.recent_speeds) == self.min_readings_for_plateau:
+                if self.plateau_check_sim_time_start == 0.0:
+                    self.plateau_check_sim_time_start = self.sim_time
+                if self.sim_time - self.plateau_check_sim_time_start >= self.max_speed_plateau_duration:
+                    speed_diff = max(self.recent_speeds) - min(self.recent_speeds)
+                    if speed_diff < self.max_speed_epsilon:
+                        self.logger.info(f"Max speed reached for brake test at {speed:.2f} m/s. Applying brake level {self.current_brake_index + 1}.")
+                        self.phase = "brake_testing"
+                        return {
+                            "throttle_target": 0,
+                            "brake_target": self.brake_levels[self.current_brake_index],
+                            "time": command_reach_time,
+                        }
+            
+            if (self.sim_time - self.phase_start_time) >= self.acceleration_duration:
+                self.logger.info(f"Max acceleration duration {self.acceleration_duration}s reached for brake test at speed {speed:.2f} m/s, RPM {rpm:.0f}, sim_time {self.sim_time:.2f}. Applying brake level {self.current_brake_index + 1}.")
+                self.phase = "brake_testing"
+                return {
+                    "throttle_target": 0,
+                    "brake_target": self.brake_levels[self.current_brake_index],
+                    "time": command_reach_time,
+                }
+
+            return {
+                "throttle_target": self.throttle_levels[self.current_brake_index],
+                "brake_target": 0,
+                "time": command_reach_time,
+            }
+
+        elif self.phase == "brake_testing":
+            if self.current_brake_index >= len(self.brake_levels):
+                self.logger.info("Brake test fully completed.")
+                self.phase = "idle"
+                return {
+                    "throttle_target": 0,
+                    "brake_target": 0,
+                    "time": command_reach_time,
+                }
+
+            speed = latest_sensor_data.get("speed", 0.0)
+            current_brake = self.brake_levels[self.current_brake_index]
+
+            # Wait for stop
+            if speed < self.stop_speed_threshold:
+                self.stop_readings_count += 1
+            else:
+                self.stop_readings_count = 0
+
+            if self.stop_readings_count >= self.stop_duration_consecutive_readings:
+                self.logger.info(f"Stopped with brake {current_brake:.1f} at sim_time {self.sim_time:.2f}.")
+                self.current_brake_index += 1
+                self.stop_readings_count = 0
+                if self.current_brake_index < len(self.brake_levels):
+                    self.phase = "brake_start"
+                    self.recent_speeds.clear()
+                    self.plateau_check_sim_time_start = 0.0
+                else:
+                    self.phase = "idle"
+
+            return {
+                "throttle_target": 0,
+                "brake_target": current_brake,
                 "time": command_reach_time,
             }
 

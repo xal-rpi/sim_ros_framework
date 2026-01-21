@@ -21,31 +21,61 @@ local customFields = {}
 local gtStateManager = nil
 
 -- EMA alphas
+-- local emaAlpha = {
+--   vectors = {
+--     accel = { x = 0.13, y = 0.18, z = 0.16 },
+--     angAccel = { x = 0.15, y = 0.23, z = 0.15 },
+--     angVel = { x = 0.16, y = 0.18, z = 0.12 },
+--     vel = { x = 0.28, y = 0.29, z = 0.23 },
+--   },
+--   scalars = {
+--     flywheelTorque = 0.27,
+--     gearboxTorque = 0.17,
+--   },
+--   wheels = {
+--     wheelFL = { angVel = 0.12, speed = 0.12 },
+--     wheelFR = { angVel = 0.12, speed = 0.12 },
+--     wheelRL = {
+--       angle = 0.23,
+--       angVel = 0.46,
+--       angVelB = 0.31,
+--       speed = 0.21,
+--     },
+--     wheelRR = {
+--       angle = 0.23,
+--       angVel = 0.46,
+--       angVelB = 0.31,
+--       speed = 0.21,
+--     },
+--   },
+-- }
+
+-- Update EMA for System ID - Less aggressive than before
 local emaAlpha = {
   vectors = {
-    accel = { x = 0.13, y = 0.18, z = 0.16 },
-    angAccel = { x = 0.15, y = 0.23, z = 0.15 },
-    angVel = { x = 0.16, y = 0.18, z = 0.12 },
-    vel = { x = 0.28, y = 0.29, z = 0.23 },
+    accel = { x = 0.1, y = 0.1, z = 0.1 }, -- Unchanged
+    angAccel = { x = 0.15, y = 0.23, z = 0.15 }, -- Unchanged
+    angVel = { x = 0.8, y = 0.8, z = 0.8}, -- , , 0.3-0.6
+    vel = { x = 0.8, y = 0.8, z = 0.8 },
   },
   scalars = {
     flywheelTorque = 0.27,
     gearboxTorque = 0.17,
   },
   wheels = {
-    wheelFL = { angVel = 0.12, speed = 0.12 },
-    wheelFR = { angVel = 0.12, speed = 0.12 },
+    wheelFL = { angVel = 0.8, speed = 0.8},
+    wheelFR = { angVel = 0.8, speed = 0.8},
     wheelRL = {
-      angle = 0.23,
-      angVel = 0.46,
-      angVelB = 0.31,
-      speed = 0.21,
+      -- angle = 0.5,
+      angVel = 0.8,
+      -- angVelB = 0.5,
+      speed = 0.8,
     },
     wheelRR = {
-      angle = 0.23,
-      angVel = 0.46,
-      angVelB = 0.31,
-      speed = 0.21,
+      -- angle = 0.4,
+      angVel = 0.8,
+      -- angVelB = 0.5,
+      speed = 0.8,
     },
   },
 }

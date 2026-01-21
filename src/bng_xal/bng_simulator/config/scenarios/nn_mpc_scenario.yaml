@@ -608,8 +608,11 @@ vehicles:
     sensors:
       gtstate:
         type: GtState
+        # gfx_update_time: 0.1
+        # physics_update_time: 0.004
+        # num_physics_steps_for_gfx_save: 1
         gfx_update_time: 0.15
-        physics_update_time: 0.005
+        physics_update_time: 0.004
         num_physics_steps_for_gfx_save: 2
     controllers:
       LowLevelController: # The python class used
@@ -627,8 +630,18 @@ vehicles:
           controlMode : auto
           gtStateSendRate: 0.01
           # modelName: wheel_speed_v4.json
-          modelName: wheel_speed_wit_integ_v1.json
+          ctrl_type: 1 # 0 : wrdot,fxr; 1 : ff torque
+          # modelName: wheel_speed_wit_integ_v1.json
+          modelName: arata_torque_inverter.json
+          TorqueKp: -0.21040940284729004
+          TorqueKd: -0.000756041263230145
+          TorqueKi: -20.635147094726562
+          steeringKi: 0.1
+          steeringKp: 0.01
+          steeringToInput: -0.5948683325943701
+          steeringIntegAlpha: 0.9 # 0.9
           commandTimeout: 1.0 # Timeout between two mpc solutions before giving back control
+          ffcoef: 0.8
   # bolide: # Name of the car
   #   model: bolide
   #   # partConfig: /vehicles/utv/wild.pc

@@ -44,7 +44,7 @@ function M.init()
     end
     libnn = ffi.load(libnnPath)
     os.remove(libnnPath)
-    log('I', logTag, 'Loaded libnn.so')
+    log('I', logTag, 'Loaded nn library from ' .. libnnPath)
   end
 end
 
@@ -129,6 +129,15 @@ function M.run(model, input_tbl)
   end
 
   return out
+end
+
+function M.getModelMeta(model)
+  return model_meta[model]
+end
+
+function M.getModelInputScaling(model)
+  local meta = model_meta[model]
+  return meta.input_scaling
 end
 
 function M.freeModel(model)

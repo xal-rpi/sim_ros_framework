@@ -14,7 +14,7 @@ beamng:
 
 # Scenario configuration
 scenario:
-  level: smallgrid
+  level: tech_ground # smallgrid
   name: throttle_sweep
 
 post_scenario: {}
@@ -31,13 +31,13 @@ vehicles:
     sensors:
       gtstate:
         type: GtState
-        gfx_update_time: 0.15
-        physics_update_time: 0.005
+        gfx_update_time: 0.1
+        physics_update_time: 0.004
         num_physics_steps_for_gfx_save: 1
     controllers:
       LowLevelController: # The python class used
         controllerType: throttle_sweep # The lua controller used
-        controllerRate: 0.005
+        controllerRate: 0.01
         listenIp: 127.0.0.1
         listenPort: 64257
         sendIp: 127.0.0.1

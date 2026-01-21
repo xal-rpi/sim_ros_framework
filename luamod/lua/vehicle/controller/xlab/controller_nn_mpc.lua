@@ -45,13 +45,26 @@ local realLastClock = os.clock()
 local realUpdateCount = 0
 
 -- Controller state tracking
+-- local controllerState = {
+--   x = {},      -- x positions array
+--   y = {},      -- y positions array
+--   s = {},      -- s values array (path distance)
+--   wr = {},     -- wheel speed targets
+--   delta = {},  -- steering angle targets (in radians)
+--   steer = {},  -- steering inputs (-1 to 1)
+--   currentIdx = 1,
+--   targetCount = 0,
+--   old_diff_rear_wheel_speed_ms = 0,
+--   leaky_err_wr = 0,
+--   integ_steering_err = 0,
+-- }
 local controllerState = {
   x = {},      -- x positions array
   y = {},      -- y positions array
   s = {},      -- s values array (path distance)
   wr = {},     -- wheel speed targets
-  delta = {},  -- steering angle targets (in radians)
   steer = {},  -- steering inputs (-1 to 1)
+  desired_torque = {}, -- desired torque targets
   currentIdx = 1,
   targetCount = 0,
   old_diff_rear_wheel_speed_ms = 0,
@@ -138,6 +151,8 @@ local function packStateData(gtReading)
     we = gtReading.RPM * common.constants.rpmToAV, -- Engine speed in rad/s
     pb = gtReading.turboBoost, -- Boost pressure
     throttle = gtReading.throttle, -- Throttle position
+    accel_x = gtReading.accel[1], -- Longitudinal acceleration
+    accel_y = gtReading.accel[2], -- Lateral acceleration
   }
 end
 
@@ -157,30 +172,40 @@ local function parseMessage(msg)
   end
 
   -- Validate the required arrays exist and have proper length
-  if not data.x or not data.y or not data.wr or not data.steer or 
-    not data.wr_dot or not data.Fxr or not data.s then
+  if not data.x or not data.y or not data.wr or not data.steer then
     log('E', logTag, 'Missing required arrays in message')
     return false
   end
 
   -- Check array lengths
   local count = #data.x
-  if #data.y ~= count or #data.wr ~= count or #data.steer ~= count or
-    #data.wr_dot ~= count or #data.Fxr ~= count or #data.s ~= count then
+  if #data.y ~= count or #data.wr ~= count or #data.steer ~= count then
     log('E', logTag, 'Array lengths mismatch in target message')
     return false
   end
 
   -- Store the arrays directly
+  -- controllerState.x = data.x
+  -- controllerState.y = data.y
+  -- controllerState.wr = data.wr
+  -- controllerState.steer = data.steer
+  -- controllerState.wr_dot = data.wr_dot
+  -- controllerState.Fxr = data.Fxr
+  -- controllerState.targetCount = count
+  -- controllerState.s = data.s
+  -- controllerState.currentIdx = 1
+
   controllerState.x = data.x
   controllerState.y = data.y
   controllerState.wr = data.wr
   controllerState.steer = data.steer
+  controllerState.desired_torque = data.desired_torque
   controllerState.wr_dot = data.wr_dot
   controllerState.Fxr = data.Fxr
   controllerState.targetCount = count
   controllerState.s = data.s
   controllerState.currentIdx = 1
+
   gtStateController.setCustomField("mpc_dt", nowSim - lastMPCTime)
   lastMPCTime = nowSim
   mpcMode = MPC_MODE.ON -- Set MPC mode to ON
@@ -339,17 +364,26 @@ local function applyTargets(dt)
   
   -- -- Interpolate target values using projection parameter t
   -- -- Maybe an interpolation to pick the next time or s + ds.
-  local desiredSteer = cs.steer[idx1] + t * (cs.steer[idx2] - cs.steer[idx1])
-  local desiredWheelSpeed = cs.wr[idx1] + t * (cs.wr[idx2] - cs.wr[idx1])
+  -- local desiredSteer = cs.steer[idx1] + t * (cs.steer[idx2] - cs.steer[idx1])
+  -- local desiredWheelSpeed = cs.wr[idx1] + t * (cs.wr[idx2] - cs.wr[idx1])
   local desired_wr_dot = cs.wr_dot[idx1] + t * (cs.wr_dot[idx2] - cs.wr_dot[idx1])
   local desiredFxr = cs.Fxr[idx1] + t * (cs.Fxr[idx2] - cs.Fxr[idx1])
+  
+  local desiredSteer = cs.steer[idx1] + t * (cs.steer[idx2] - cs.steer[idx1])
+  local desiredWheelSpeed = cs.wr[idx1] + t * (cs.wr[idx2] - cs.wr[idx1])
+  local desired_torque = cs.desired_torque[idx1] + t * (cs.desired_torque[idx2] - cs.desired_torque[idx1])
 
   -- local idx_next = min(idx1 + 1, cs.targetCount)
   local idx_next = idx2
+  -- desiredSteer = cs.steer[idx_next]
+  -- desiredWheelSpeed = cs.wr[idx_next]
+  -- desired_wr_dot = cs.wr_dot[idx_next]
+  -- desiredFxr = cs.Fxr[idx_next]
   desiredSteer = cs.steer[idx_next]
   desiredWheelSpeed = cs.wr[idx_next]
   desired_wr_dot = cs.wr_dot[idx_next]
   desiredFxr = cs.Fxr[idx_next]
+  desired_torque = cs.desired_torque[idx_next]
 
   -- local curr_velocity = g.vel[1]
   -- if curr_velocity <= 4 then
@@ -368,11 +402,13 @@ local function applyTargets(dt)
   -- Write down the desired values into the gtState
   gtStateController.setCustomField("target_wr", desiredWheelSpeed)
   gtStateController.setCustomField("target_steer", desiredSteer)
-  gtStateController.setCustomField("target_wr_dot", desired_wr_dot)
-  gtStateController.setCustomField("target_Fxr", desiredFxr)
+  -- gtStateController.setCustomField("target_wr_dot", desired_wr_dot)
+  -- gtStateController.setCustomField("target_Fxr", desiredFxr)
+  gtStateController.setCustomField("target_torque", desired_torque)
 
   -- NN logic to compute throttle control
   local newThrottle
+  local ffthrottle = 0.0
   local rear_wheel_speed_ms = (g.wheelRR.speed + g.wheelRL.speed) / 2
   local tau_train, max_error_wr, train_dt = 0.01, 100, 0.01 -- From training config
   if nn_model then
@@ -381,48 +417,64 @@ local function applyTargets(dt)
     local boost_pressure = g.turboBoost
     local throttle = g.throttle
     local diff_rear_wheel_speed_ms = rear_wheel_speed_ms - desiredWheelSpeed
-    local delta_diff = rear_wheel_speed_ms - cs.old_diff_rear_wheel_speed_ms
-    cs.old_diff_rear_wheel_speed_ms  = rear_wheel_speed_ms
-
     local alpha = (train_dt / (train_dt + tau_train))
-    cs.leaky_err_wr = alpha * cs.leaky_err_wr + diff_rear_wheel_speed_ms
-    cs.leaky_err_wr = max(-max_error_wr, min(max_error_wr, cs.leaky_err_wr))
-
-    local out = nn.run(nn_model, {
-      engine_speed_rad,
-      boost_pressure,
-      rear_wheel_speed_ms,
-      throttle,
-      desired_wr_dot * train_dt, -- Scale factor from training
-      desiredFxr,
-      delta_diff,
-      -- New addition. Not compatible with old models.
-      cs.leaky_err_wr,
-      --
-      diff_rear_wheel_speed_ms,
-    })
-    local ff = out[1]
-    local kp = out[2]
-    -- -- Old compatibility - comment out later
-    -- local throttledot = tanh(ff + kp * (diff_rear_wheel_speed_ms / 20)) -- TODO: Proper 20 calibration
-    -- throttledot = 22.5 * throttledot - 7.5
-    -- --
-    local throttledot = tanh(ff + kp * (diff_rear_wheel_speed_ms / 15.0)) -- TODO: Proper 15 calibration
-    throttledot = 5.0 * throttledot
-
-    -- Integrate to get new throttle
-    newThrottle = throttle + (train_dt * throttledot)
+    if calibration.ctrl_type == 0 then
+      local delta_diff = rear_wheel_speed_ms - cs.old_diff_rear_wheel_speed_ms
+      cs.old_diff_rear_wheel_speed_ms = rear_wheel_speed_ms
+      cs.leaky_err_wr = alpha * cs.leaky_err_wr + diff_rear_wheel_speed_ms
+      cs.leaky_err_wr = max(-max_error_wr, min(max_error_wr, cs.leaky_err_wr))
+      local out = nn.run(nn_model, {
+        engine_speed_rad,
+        boost_pressure,
+        rear_wheel_speed_ms,
+        throttle,
+        desired_wr_dot * train_dt, -- Scale factor from training
+        desiredFxr,
+        delta_diff,
+        cs.leaky_err_wr,
+        diff_rear_wheel_speed_ms,
+      })
+      local ff = out[1]
+      local kp = out[2]
+      local throttledot = tanh(ff + kp * (diff_rear_wheel_speed_ms / 15.0)) -- TODO: Proper 15 calibration
+      throttledot = 5.0 * throttledot
+      newThrottle = throttle + (train_dt * throttledot)
+      ffthrottle = ff
+    elseif calibration.ctrl_type == 1 then
+      local delta_diff = diff_rear_wheel_speed_ms - cs.old_diff_rear_wheel_speed_ms
+      cs.old_diff_rear_wheel_speed_ms = delta_diff
+      cs.leaky_err_wr = alpha * cs.leaky_err_wr + diff_rear_wheel_speed_ms * train_dt
+      local out = nn.run(nn_model, {
+        engine_speed_rad,
+        boost_pressure,
+        rear_wheel_speed_ms,
+        desired_torque,
+      })
+      ffthrottle  = out[1]
+      local pid_throttle = calibration.TorqueKp * diff_rear_wheel_speed_ms + calibration.TorqueKi * cs.leaky_err_wr + calibration.TorqueKd * (delta_diff / train_dt)
+      pid_throttle= max(-1.0, min(1.0, pid_throttle))
+      pid_throttle = 0.5* pid_throttle + 0.5
+      local pid_throttle_dot = (pid_throttle - throttle) / 1.0 -- Train file
+      pid_throttle = throttle + 0.005 * pid_throttle_dot -- Make 0.005 configurable?
+      newThrottle = calibration.ffcoef * ffthrottle + (1.0 - calibration.ffcoef) * pid_throttle
+    else
+      -- Not a valid ctrl_type
+      delta_diff = 0
+      cs.old_diff_rear_wheel_speed_ms = 0
+      cs.leaky_err_wr = 0
+      log('E', logTag, 'Invalid ctrl_type in calibration: ' .. tostring(calibration.ctrl_type))
+    end
   else
     log('E', logTag, 'NN model is not loaded')
   end
 
   -- Apply computed controls
-  local roadwheel_angle = (common.cachedGtReading.wheelFR.angle + common.cachedGtReading.wheelFL.angle) / 2
-  local current_steering = roadwheel_angle / -0.5948683325943701
+  local roadwheel_angle = (g.wheelFR.angle + g.wheelFL.angle) / 2
+  local current_steering = roadwheel_angle / calibration.steeringToInput
   local err_steer = (desiredSteer - current_steering)
-  local alpha_integ = 0.9
-  cs.integ_steering_err = alpha_integ * cs.integ_steering_err + (1-alpha_integ) * err_steer
-  local inputSteer = desiredSteer + 0.0 * err_steer + 0.0 * cs.integ_steering_err
+  cs.integ_steering_err = calibration.steeringIntegAlpha * cs.integ_steering_err + err_steer
+  local inputSteer = desiredSteer + calibration.steeringKp * err_steer + calibration.steeringKi * cs.integ_steering_err
+  
   if calibration.controlMode == CONTROL_MODE.AUTO and newThrottle then
     -- Full autonomous mode - control both throttle and steering
     input.event('throttle', newThrottle, FILTER_AI)
@@ -430,7 +482,7 @@ local function applyTargets(dt)
     electrics.values.throttle_input = newThrottle
     input.event('steering', inputSteer, FILTER_AI)
     electrics.values.steering_input = inputSteer
-    electrics.values.steering = -4.71238898038469 * inputSteer
+    -- electrics.values.steering = -4.71238898038469 * inputSteer
     -- input.event('steering', cs.lastAppliedSteering, FILTER_AI)
     
   elseif calibration.controlMode == CONTROL_MODE.STEERING_AUTO then
@@ -458,7 +510,8 @@ local function applyTargets(dt)
       'I',
       logTag,
       string.format(
-        'SimTime=%.3f Idx=%d/%d t=%.2f s=%.2f wr_t=%.2f wr=%.2f wrDot=%.2f steer=%.2f FxR=%.2f Latency=%.1fms',
+        -- 'SimTime=%.3f Idx=%d/%d t=%.2f s=%.2f wr_t=%.2f wr=%.2f wrDot=%.2f steer=%.2f FxR=%.2f Latency=%.1fms',
+        'SimTime=%.3f Idx=%d/%d t=%.2f s=%.2f wr_t=%.2f wr=%.2f tor=%.2f steer=%.2f ffthr=%.2f thr=%.2f Latency=%.1fms',
         nowSim,
         idx1,
         cs.targetCount,
@@ -466,9 +519,12 @@ local function applyTargets(dt)
         idx_s,
         rear_wheel_speed_ms,
         desiredWheelSpeed,
-        desired_wr_dot * train_dt,
+        desired_torque,
+        -- desired_wr_dot * train_dt,
         desiredSteer-current_steering,
-        desiredFxr,
+        -- desiredFxr,
+        ffthrottle,
+        newThrottle or -1,
         common.performanceMetrics.avgLatency * 1000
       )
     )
@@ -504,8 +560,9 @@ function M.init(c)
   if gtStateController and gtStateController.registerCustomField then
     gtStateController.registerCustomField("target_wr", 0)
     gtStateController.registerCustomField("target_steer", 0)
-    gtStateController.registerCustomField("target_wr_dot", 0)
-    gtStateController.registerCustomField("target_Fxr", 0)
+    -- gtStateController.registerCustomField("target_wr_dot", 0)
+    -- gtStateController.registerCustomField("target_Fxr", 0)
+    gtStateController.registerCustomField("target_torque", 0)
     gtStateController.registerCustomField("mpc_mode", MPC_MODE.OFF)
     gtStateController.registerCustomField("mpc_dt", 0)
     -- gtStateController.registerCustomField("controller_mode", calibration.controlMode)
@@ -533,6 +590,9 @@ function M.init(c)
   end
   
   log('I', logTag, 'NN controller initialized with model: ' .. modelPath)
+
+  -- Initialize PID gains if provided.
+
   return true
 end
 
@@ -678,6 +738,53 @@ function M.calibrate(params)
     calibration.modelPath = 'lua/vehicle/controller/xlab/models/' .. params.modelName
     log('I', logTag, 'modelName = ' .. tostring(calibration.modelName))
   end
+
+  -- Make sure PID gains are numbers if provided
+  if params.steeringKi ~= nil then
+    calibration.steeringKi = tonumber(params.steeringKi) or calibration.steeringKi
+    log('I', logTag, 'steeringKi = ' .. tostring(calibration.steeringKi))
+  end
+
+  if params.TorqueKp ~= nil then
+    calibration.TorqueKp = tonumber(params.TorqueKp) or calibration.TorqueKp
+    log('I', logTag, 'TorqueKp = ' .. tostring(calibration.TorqueKp))
+  end
+
+  if params.TorqueKi ~= nil then
+    calibration.TorqueKi = tonumber(params.TorqueKi) or calibration.TorqueKi
+    log('I', logTag, 'TorqueKi = ' .. tostring(calibration.TorqueKi))
+  end
+
+  if params.TorqueKd ~= nil then
+    calibration.TorqueKd = tonumber(params.TorqueKd) or calibration.TorqueKd
+    log('I', logTag, 'TorqueKd = ' .. tostring(calibration.TorqueKd))
+  end
+
+  if params.steeringToInput ~= nil then
+    calibration.steeringToInput = tonumber(params.steeringToInput) or calibration.steeringToInput
+    log('I', logTag, 'steeringToInput = ' .. tostring(calibration.steeringToInput))
+  end
+
+  if params.steeringKp ~= nil then
+    calibration.steeringKp = tonumber(params.steeringKp) or calibration.steeringKp
+    log('I', logTag, 'steeringKp = ' .. tostring(calibration.steeringKp))
+  end
+
+  if params.steeringIntegAlpha ~= nil then
+    calibration.steeringIntegAlpha = tonumber(params.steeringIntegAlpha) or calibration.steeringIntegAlpha
+    log('I', logTag, 'steeringIntegAlpha = ' .. tostring(calibration.steeringIntegAlpha))
+  end
+
+  if params.ffcoef ~= nil then
+    calibration.ffcoef = tonumber(params.ffcoef) or calibration.ffcoef
+    log('I', logTag, 'ffcoef = ' .. tostring(calibration.ffcoef))
+  end
+
+  if params.ctrl_type ~= nil then
+    calibration.ctrl_type = tonumber(params.ctrl_type) or calibration.ctrl_type
+    log('I', logTag, 'ctrl_type = ' .. tostring(calibration.ctrl_type))
+  end
+
 end
 
 --[[
@@ -689,8 +796,8 @@ function M.reset()
     y = {},
     s = {},
     wr = {},
-    delta = {},
     steer = {},
+    desired_torque = {},
     currentIdx = 1,
     targetCount = 0,
     old_diff_rear_wheel_speed_ms = 0,

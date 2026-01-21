@@ -68,12 +68,17 @@ class ControllerInterface(Node):
         )
 
         # publisher to signal that BeamNG is up and sensors are all registered
-        self.sim_ready_pub = self.create_publisher(Bool, "simulation_ready", 1)
+        self.sim_ready_pub = self.create_publisher(Bool, "simulation_ready", 10)
 
         self.get_logger().info("Simulation ready — publishing readiness signal")
         ready_msg = Bool()
         ready_msg.data = True
         self.sim_ready_pub.publish(ready_msg)
+        # for _ in range(10):  # publish a few times to ensure reception
+        #     self.sim_ready_pub.publish(ready_msg)
+        #     # small sleep to allow message to be sent
+        #     rclpy.spin_once(self, timeout_sec=0.1)
+        # self.get_logger().info("Readiness signal published")
 
     def handle_execute_request(self, request, response):
         """

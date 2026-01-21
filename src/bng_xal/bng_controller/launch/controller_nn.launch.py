@@ -1,6 +1,8 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
+from launch.substitutions import PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -9,9 +11,8 @@ from os import path
 
 def generate_launch_description():
     pkg_share = get_package_share_directory("bng_simulator")
-    # default_cfg = path.join(pkg_share, "config", "basic_scenario.yaml")
-    default_cfg = path.join(pkg_share, "config", "throttle_sweep.yaml")
-
+    default_cfg = path.join(pkg_share, "config", "nn_mpc_scenario.yaml")
+    
     return LaunchDescription(
         [
             # common args
@@ -48,18 +49,7 @@ def generate_launch_description():
                     {"log_level": LaunchConfiguration("log_level")},
                 ],
             ),
-            # 2) High-level controller node
-            Node(
-                package="bng_controller",
-                executable="high_level_controller",
-                name="high_level_controller",
-                output="screen",
-                parameters=[
-                    {"config_path": LaunchConfiguration("config_path")},
-                    {"log_level": LaunchConfiguration("log_level")},
-                ],
-            ),
-            # 3) Optional path visualization adapter
+            # 2) Optional path visualization adapter
             Node(
                 package="bng_controller",
                 executable="path_viz",
@@ -70,5 +60,21 @@ def generate_launch_description():
                 ],
                 condition=IfCondition(LaunchConfiguration("enable_path_viz")),
             ),
+            # # 3) RViz Launch
+            # Node(
+            #     package="rviz2",
+            #     executable="rviz2",
+            #     name="rviz2",
+            #     output="screen",
+            #     arguments=[
+            #         "-d",
+            #         PathJoinSubstitution([
+            #             FindPackageShare("bng_simulator"),
+            #             "rviz",
+            #             "default_view.rviz",  # Replace with your actual RViz config filename
+            #         ])
+            #     ],
+            # ),
+
         ]
     )
