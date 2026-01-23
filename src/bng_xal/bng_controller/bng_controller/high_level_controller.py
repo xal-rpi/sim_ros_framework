@@ -46,7 +46,9 @@ class HighLevelController(Node):
     def __init__(self):
         super().__init__("high_level_controller")
         # --- parameters ---
-        self.declare_parameter("config_path", "")
+        self.declare_parameter("config", "")
+        self.declare_parameter("host", "127.0.0.1")
+        self.declare_parameter("port", 25252)
         self.declare_parameter("log_level", "INFO")
 
         # set log level
@@ -74,11 +76,21 @@ class HighLevelController(Node):
                 format=fmt,
             )
 
-        # pull parameters from config
-        cfg = self.get_parameter("config_path").value
+        # Get parameters
+        cfg = self.get_parameter("config").value
+        beamng_host = self.get_parameter("host").value
+        beamng_port = self.get_parameter("port").value
+
+        # Load configuration and override host/port
         self.config = ConfigManager.get_config(cfg)
         if self.config is None:
-            raise RuntimeError("Could not open config.")
+            raise RuntimeError(f"Failed to load config from {cfg}")
+        
+        # Override BeamNG host and port from launch parameters
+        if "beamng" not in self.config:
+            self.config["beamng"] = {}
+        self.config["beamng"]["host"] = beamng_host
+        self.config["beamng"]["port"] = beamng_port
 
         llc_cfg = self.config["vehicles"]["ego"]["controllers"]["LowLevelController"]
         self.listen_ip = llc_cfg.get("listenIp", "127.0.0.1")

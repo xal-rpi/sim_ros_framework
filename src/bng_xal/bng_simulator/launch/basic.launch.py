@@ -10,16 +10,24 @@ def generate_launch_description():
     # Get the package share directory
     pkg_share = get_package_share_directory("bng_simulator")
 
-    # Get default config path
-    default_config_path = path.join(pkg_share, "config", "etk_scenario.yaml")
-
     return LaunchDescription(
         [
             # Launch arguments
             DeclareLaunchArgument(
-                "config_path",
-                default_value=default_config_path,
-                description="Path to the simulation configuration file",
+                "config",
+                default_value="etk_scenario.yaml",
+                description="Simulation config file name or path (e.g., 'etk_scenario.yaml')",
+            ),
+            # BeamNG host and port
+            DeclareLaunchArgument(
+                "host",
+                default_value="127.0.0.1",
+                description="BeamNG simulator host IP address",
+            ),
+            DeclareLaunchArgument(
+                "port",
+                default_value="25252",
+                description="BeamNG simulator port number",
             ),
             # Better logging
             DeclareLaunchArgument(
@@ -42,7 +50,9 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "config_path": LaunchConfiguration("config_path"),
+                        "config": LaunchConfiguration("config"),
+                        "host": LaunchConfiguration("host"),
+                        "port": LaunchConfiguration("port"),
                         "log_level": LaunchConfiguration("log_level"),
                     }
                 ],

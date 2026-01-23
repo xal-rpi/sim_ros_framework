@@ -7,6 +7,7 @@ from bng_simulator.core.simulation_manager import SimulationManager
 from bng_msgs.srv import ExecuteRequest, StartLogger, StopLogger
 from bng_simulator.logger_process import LoggerProcess
 from bng_simulator.utils.io_dict_utils import convert_dict_to_str, convert_str_to_dict
+from bng_simulator.utils.config_manager import ConfigManager
 
 import logging
 
@@ -16,7 +17,9 @@ class ControllerInterface(Node):
         super().__init__("controller_interface")
 
         # parameters
-        self.declare_parameter("config_path", "")
+        self.declare_parameter("config", "")
+        self.declare_parameter("host", "127.0.0.1")
+        self.declare_parameter("port", 25252)
         self.declare_parameter("log_level", "INFO")
 
         # pull log_level
@@ -32,7 +35,10 @@ class ControllerInterface(Node):
         severity = level_map.get(self.log_level_str, rclpy.logging.LoggingSeverity.INFO)
         rclpy.logging.set_logger_level(self.get_logger().name, severity)
 
-        cfg = self.get_parameter("config_path").value
+        # Get parameters
+        cfg = self.get_parameter("config").value
+        beamng_host = self.get_parameter("host").value
+        beamng_port = self.get_parameter("port").value
 
         # Catch all debug from external modules
         if self.log_level_str == "FULL":
@@ -46,9 +52,20 @@ class ControllerInterface(Node):
                 format=fmt,
             )
 
-        # create SimulationManager & register ROS polling
-        self.sim_manager = SimulationManager.from_file(
-            config=cfg, logger=self.get_logger().get_child("SimulationManager")
+        # Load configuration and override host/port
+        config_dict = ConfigManager.get_config(cfg)
+        if config_dict is None:
+            raise RuntimeError(f"Failed to load config from {cfg}")
+        
+        # Override BeamNG host and port from launch parameters
+        if "beamng" not in config_dict:
+            config_dict["beamng"] = {}
+        config_dict["beamng"]["host"] = beamng_host
+        config_dict["beamng"]["port"] = beamng_port
+
+        # create SimulationManager with modified config
+        self.sim_manager = SimulationManager(
+            config_dict, self.get_logger().get_child("SimulationManager")
         )
         self.sim_manager.register_ros_polling(self)
 

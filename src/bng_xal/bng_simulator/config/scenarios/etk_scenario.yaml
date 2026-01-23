@@ -3,6 +3,7 @@
 # Simulator configuration
 beamng:
   host: 127.0.0.1
+  # host: 172.19.208.1
   port: 25252
   open_args:
     launch: False

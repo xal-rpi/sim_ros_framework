@@ -4,12 +4,15 @@
 Main function to run the Simulation Manager ROS Node
 """
 
+import os
 import rclpy
 from rclpy.node import Node
 from multiprocessing import Queue
+from ament_index_python.packages import get_package_share_directory
 
 from bng_simulator.core.simulation_manager import SimulationManager
 from bng_simulator.utils.io_dict_utils import convert_dict_to_str, convert_str_to_dict
+from bng_simulator.utils.config_manager import ConfigManager
 
 # Services imports
 from bng_msgs.srv import ExecuteRequest, StartLogger, StopLogger
@@ -21,17 +24,24 @@ class SimulationManagerNode(Node):
         super().__init__("sim_manager_node")
 
         # Declare parameters
-        self.declare_parameter("config_path", "basic_scenario.yaml")
+        self.declare_parameter("config", "etk_scenario.yaml")
+        self.declare_parameter("host", "127.0.0.1")
+        self.declare_parameter("port", 25252)
         self.declare_parameter("log_level", "INFO")
 
         self.logger = self.get_logger()
 
         # Get parameters
         if config_path is None:
-            self.config_path = self.get_parameter("config_path").value
+            config_name = self.get_parameter("config").value
+            self.config_path = self._resolve_config_path(config_name)
             self.logger.info(f"config: {self.config_path}")
         else:
             self.config_path = config_path
+
+        # Get host and port parameters
+        beamng_host = self.get_parameter("host").value
+        beamng_port = self.get_parameter("port").value
 
         # Set logger level
         log_level_str = self.get_parameter("log_level").value.upper()
@@ -60,11 +70,25 @@ class SimulationManagerNode(Node):
                 format=fmt,
             )
 
-        # Create simulation manager
-        self.sim_manager = SimulationManager.from_file(
-            self.config_path,
+        # Load configuration and override host/port BEFORE creating SimulationManager
+        config_dict = ConfigManager.get_config(self.config_path)
+        if config_dict is None:
+            raise RuntimeError(f"Failed to load config from {self.config_path}")
+        
+        # Override BeamNG host and port from launch parameters
+        if "beamng" not in config_dict:
+            config_dict["beamng"] = {}
+        config_dict["beamng"]["host"] = beamng_host
+        config_dict["beamng"]["port"] = beamng_port
+        
+        self.logger.info(f"BeamNG config: host={beamng_host}, port={beamng_port}")
+
+        # Create simulation manager with modified config
+        self.sim_manager = SimulationManager(
+            config_dict,
             self.logger.get_child("sim_manager"),
         )
+
         self.get_logger().info("Registering sensor publishers via SimulationManager")
         self.sim_manager.register_ros_polling(self)
 
@@ -85,6 +109,52 @@ class SimulationManagerNode(Node):
 
         # Logging that the node is initialized
         self.logger.info(f"Simulation Manager Node initialized.")
+
+    def _resolve_config_path(self, config_name):
+        """
+        Resolve config file path by name.
+        Supports absolute paths, relative paths, and simple filenames.
+        Searches standard config directories if only filename is provided.
+
+        Args:
+            config_name (str): Config file name or path (e.g., 'etk_scenario.yaml')
+
+        Returns:
+            str: Resolved absolute path to config file
+        """
+        # If it's already an absolute path, use it as-is
+        if os.path.isabs(config_name):
+            if os.path.isfile(config_name):
+                return config_name
+            raise FileNotFoundError(f"Config file not found: {config_name}")
+
+        # Try the path as-is (relative to current working directory)
+        if os.path.isfile(config_name):
+            return os.path.abspath(config_name)
+
+        # Get package share directory and search standard locations
+        try:
+            pkg_share = get_package_share_directory("bng_simulator")
+        except Exception:
+            raise FileNotFoundError(
+                f"Config file '{config_name}' not found and package share directory unavailable"
+            )
+
+        # Search in standard config directories
+        search_dirs = [
+            os.path.join(pkg_share, "config"),
+            os.path.join(pkg_share, "config", "scenarios"),
+            os.path.join(pkg_share, "config", "vehicles"),
+        ]
+
+        for search_dir in search_dirs:
+            candidate_path = os.path.join(search_dir, config_name)
+            if os.path.isfile(candidate_path):
+                return candidate_path
+
+        raise FileNotFoundError(
+            f"Config file '{config_name}' not found in standard directories: {search_dirs}"
+        )
 
     def handle_execute_request(self, request, response):
         """

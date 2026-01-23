@@ -10,16 +10,24 @@ from os import path
 
 
 def generate_launch_description():
-    pkg_share = get_package_share_directory("bng_simulator")
-    default_cfg = path.join(pkg_share, "config", "nn_mpc_scenario.yaml")
-    
     return LaunchDescription(
         [
             # common args
             DeclareLaunchArgument(
-                "config_path",
-                default_value=default_cfg,
-                description="Path to BeamNG simulation YAML",
+                "config",
+                default_value="nn_mpc_scenario.yaml",
+                description="Simulation config file name or path (e.g., 'nn_mpc_scenario.yaml')",
+            ),
+            # BeamNG host and port
+            DeclareLaunchArgument(
+                "host",
+                default_value="127.0.0.1",
+                description="BeamNG simulator host IP address",
+            ),
+            DeclareLaunchArgument(
+                "port",
+                default_value="25252",
+                description="BeamNG simulator port number",
             ),
             DeclareLaunchArgument(
                 "log_level",
@@ -45,7 +53,9 @@ def generate_launch_description():
                 output="screen",
                 emulate_tty=True,
                 parameters=[
-                    {"config_path": LaunchConfiguration("config_path")},
+                    {"config": LaunchConfiguration("config")},
+                    {"host": LaunchConfiguration("host")},
+                    {"port": LaunchConfiguration("port")},
                     {"log_level": LaunchConfiguration("log_level")},
                 ],
             ),
