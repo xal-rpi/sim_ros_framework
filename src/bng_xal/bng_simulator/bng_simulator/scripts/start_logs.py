@@ -453,7 +453,7 @@ def main(args=None):
     parser.add_argument(
         "--max_queue_size",
         type=int,
-        default=50,
+        default=5000,
         help="Maximum size for the logger queue (default: 50)",
     )
     parser.add_argument(
@@ -465,9 +465,9 @@ def main(args=None):
     parser.add_argument(
         "--record_topics",
         type=str,
-        default="default",
+        default="all",
         help="Topics to record with ROS bag: 'default' for predefined topics, 'all' for all topics, "
-             "or a comma-separated list of topics (default: 'default')",
+             "or a comma-separated list of topics (default: 'all')",
     )
     parser.add_argument(
         "--no_rosbag",

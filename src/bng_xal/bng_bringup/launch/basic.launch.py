@@ -1,22 +1,25 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
-from launch.substitutions import LaunchConfiguration
-from os import path
-from ament_index_python.packages import get_package_share_directory
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    # Get the package share directory
-    pkg_share = get_package_share_directory("bng_simulator")
+    config_name = LaunchConfiguration("config")
+
+    # Always produce an absolute path in the installed share space
+    config_path = PathJoinSubstitution(
+        [FindPackageShare("bng_bringup"), "config/scenarios", config_name]
+    )
 
     return LaunchDescription(
         [
             # Launch arguments
             DeclareLaunchArgument(
                 "config",
-                default_value="basic_scenario.yaml",
-                description="Simulation config file name or path (e.g., 'basic_scenario.yaml')",
+                default_value="etk_scenario.yaml",
+                description="Config filename under bng_bringup/config/",
             ),
             # BeamNG host and port
             DeclareLaunchArgument(
@@ -28,6 +31,18 @@ def generate_launch_description():
                 "port",
                 default_value="25252",
                 description="BeamNG simulator port number",
+            ),
+            # Scenario mode (NEW)
+            DeclareLaunchArgument(
+                "scenario_mode",
+                default_value="create",
+                description="Scenario mode: 'create' (default), 'attach', or 'auto'",
+            ),
+            # Attach fallback (NEW)
+            DeclareLaunchArgument(
+                "attach_fallback",
+                default_value="False",
+                description="If True, fallback to create mode when attach fails",
             ),
             # Better logging
             DeclareLaunchArgument(
@@ -50,10 +65,24 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "config": LaunchConfiguration("config"),
+                        "config": config_path,
                         "host": LaunchConfiguration("host"),
                         "port": LaunchConfiguration("port"),
+                        "scenario_mode": LaunchConfiguration("scenario_mode"),
+                        "attach_fallback": LaunchConfiguration("attach_fallback"),
                         "log_level": LaunchConfiguration("log_level"),
+                    }
+                ],
+            ),
+            Node(
+                package="bng_controller",
+                executable="gt_state_bridge",
+                name="gt_state_bridge",
+                output="screen",
+                parameters=[
+                    {
+                        "log_level": LaunchConfiguration("log_level"),
+                        "frame_id": "map",
                     }
                 ],
             ),

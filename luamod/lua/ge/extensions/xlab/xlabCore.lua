@@ -208,6 +208,28 @@ M.handleSetControllerGtState = function(request)
 end
 
 
+M.handleGetCurrentLevel = function(request)
+  -- Get the currently loaded level name
+  local levelIdentifier = getCurrentLevelIdentifier()
+  
+  if not levelIdentifier or levelIdentifier == '' then
+    log('W', logTag, 'No level currently loaded')
+    request:sendResponse({
+      type = 'GetCurrentLevel',
+      level = nil,
+      loaded = false
+    })
+    return
+  end
+  
+  log('D', logTag, 'Current level: ' .. levelIdentifier)
+  request:sendResponse({
+    type = 'GetCurrentLevel',
+    level = levelIdentifier,
+    loaded = true
+  })
+end
+
 M.handleStartLevel = function(request)
   local levelName = request['levelName']
   if not levelName then

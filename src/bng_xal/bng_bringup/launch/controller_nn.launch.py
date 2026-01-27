@@ -1,20 +1,26 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
-from os import path
 
 
 def generate_launch_description():
+    config_name = LaunchConfiguration("config")
+
+    # Always produce an absolute path in the installed share space
+    config_path = PathJoinSubstitution(
+        [FindPackageShare("bng_bringup"), "config", "scenarios", config_name]
+    )
+
     return LaunchDescription(
         [
             # common args
             DeclareLaunchArgument(
                 "config",
-                default_value="throttle_sweep.yaml",
-                description="Simulation config file name or path (e.g., 'throttle_sweep.yaml')",
+                default_value="nn_mpc_scenario.yaml",
+                description="Simulation config file name or path (e.g., 'nn_mpc_scenario.yaml')",
             ),
             # BeamNG host and port
             DeclareLaunchArgument(
@@ -26,6 +32,18 @@ def generate_launch_description():
                 "port",
                 default_value="25252",
                 description="BeamNG simulator port number",
+            ),
+            # Scenario mode
+            DeclareLaunchArgument(
+                "scenario_mode",
+                default_value="create",
+                description="Scenario mode: 'create' (default), 'attach', or 'auto'",
+            ),
+            # Attach fallback
+            DeclareLaunchArgument(
+                "attach_fallback",
+                default_value="False",
+                description="If True, fallback to create mode when attach fails",
             ),
             DeclareLaunchArgument(
                 "log_level",
@@ -43,34 +61,23 @@ def generate_launch_description():
                 "[{severity}] [{name}]: {message}",
             ),
             SetEnvironmentVariable("RCUTILS_COLORIZED_OUTPUT", "1"),
-            # 1) Controller interface node
+            # 1) Simulation manager node (from bng_simulator package)
             Node(
-                package="bng_controller",
-                executable="run_controller",
-                name="controller_interface",
+                package="bng_simulator",
+                executable="sim_manager_node",
+                name="sim_manager",
                 output="screen",
                 emulate_tty=True,
                 parameters=[
-                    {"config": LaunchConfiguration("config")},
+                    {"config": config_path},
                     {"host": LaunchConfiguration("host")},
                     {"port": LaunchConfiguration("port")},
+                    {"scenario_mode": LaunchConfiguration("scenario_mode")},
+                    {"attach_fallback": LaunchConfiguration("attach_fallback")},
                     {"log_level": LaunchConfiguration("log_level")},
                 ],
             ),
-            # 2) High-level controller node
-            Node(
-                package="bng_controller",
-                executable="high_level_controller",
-                name="high_level_controller",
-                output="screen",
-                parameters=[
-                    {"config": LaunchConfiguration("config")},
-                    {"host": LaunchConfiguration("host")},
-                    {"port": LaunchConfiguration("port")},
-                    {"log_level": LaunchConfiguration("log_level")},
-                ],
-            ),
-            # 3) Optional path visualization adapter
+            # 2) Optional path visualization adapter
             Node(
                 package="bng_controller",
                 executable="path_viz",
@@ -81,5 +88,21 @@ def generate_launch_description():
                 ],
                 condition=IfCondition(LaunchConfiguration("enable_path_viz")),
             ),
+            # # 3) RViz Launch
+            # Node(
+            #     package="rviz2",
+            #     executable="rviz2",
+            #     name="rviz2",
+            #     output="screen",
+            #     arguments=[
+            #         "-d",
+            #         PathJoinSubstitution([
+            #             FindPackageShare("bng_simulator"),
+            #             "rviz",
+            #             "default_view.rviz",  # Replace with your actual RViz config filename
+            #         ])
+            #     ],
+            # ),
+
         ]
     )

@@ -7,7 +7,7 @@
   <maintainer email="user@todo.todo">user</maintainer>
   <license>Apache-2.0</license>
 
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>ament_python</buildtool_depend>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
@@ -19,8 +19,5 @@
 
   <export>
     <build_type>ament_python</build_type>
-    <ros_python>
-      <depend>ament_cmake</depend>
-    </ros_python>
   </export>
 </package>

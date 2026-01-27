@@ -16,8 +16,7 @@ from rclpy.node import Node
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 
-from bng_simulator.utils.config_manager import ConfigManager
-from bng_simulator.utils.services_utils import convert_time_to_header
+from bng_simulator.utils.services_utils import convert_time_to_header, send_request
 from bng_msgs.msg import HLCMsg
 from bng_msgs.srv import OverrideTargets
 from rclpy.duration import Duration
@@ -46,10 +45,8 @@ class HighLevelController(Node):
     def __init__(self):
         super().__init__("high_level_controller")
         # --- parameters ---
-        self.declare_parameter("config", "")
-        self.declare_parameter("host", "127.0.0.1")
-        self.declare_parameter("port", 25252)
         self.declare_parameter("log_level", "INFO")
+        self.declare_parameter("vehicle_name", "ego")
 
         # set log level
         self.log_level_str = self.get_parameter("log_level").value.upper()
@@ -77,28 +74,22 @@ class HighLevelController(Node):
             )
 
         # Get parameters
-        cfg = self.get_parameter("config").value
-        beamng_host = self.get_parameter("host").value
-        beamng_port = self.get_parameter("port").value
+        self.vehicle_name = self.get_parameter("vehicle_name").value
 
-        # Load configuration and override host/port
-        self.config = ConfigManager.get_config(cfg)
-        if self.config is None:
-            raise RuntimeError(f"Failed to load config from {cfg}")
-        
-        # Override BeamNG host and port from launch parameters
-        if "beamng" not in self.config:
-            self.config["beamng"] = {}
-        self.config["beamng"]["host"] = beamng_host
-        self.config["beamng"]["port"] = beamng_port
+        # Wait for simulation readiness (send_request handles service client)
+        self._wait_for_sim_ready()
 
-        llc_cfg = self.config["vehicles"]["ego"]["controllers"]["LowLevelController"]
+        # Fetch vehicle config via service
+        vehicle_config = self._fetch_vehicle_config()
+        llc_cfg = vehicle_config.get("controllers", {}).get("LowLevelController", {})
         self.listen_ip = llc_cfg.get("listenIp", "127.0.0.1")
         self.listen_port = llc_cfg.get("listenPort", 0)
         self.send_ip = llc_cfg.get("sendIp", "127.0.0.1")
         self.send_port = llc_cfg.get("sendPort", 0)
 
-        hlc_cfg = self.config["high_level_controller"]
+        # Fetch full manager config for HLC settings
+        manager_config = self._fetch_manager_config()
+        hlc_cfg = manager_config.get("high_level_controller", {})
         self.control_full_path = hlc_cfg["control_fn"]
         self.control_rate = hlc_cfg["control_rate"]
 
@@ -210,8 +201,6 @@ class HighLevelController(Node):
         self.override_expiry_time = None  # Will store an rclpy.time.Time object
 
         # pubs & subs
-        # self._on_sim_ready(None)
-        self.create_subscription(Bool, "simulation_ready", self._on_sim_ready, 10)
         self.create_subscription(Twist, "cmd_vel", self._cmd_vel_callback, 1)
         self.target_pub = self.create_publisher(HLCMsg, "hlc_msg", 1)
 
@@ -229,7 +218,59 @@ class HighLevelController(Node):
         # control timer
         self.timer = self.create_timer(self.control_rate, self._control_callback)
 
-        self.get_logger().info("HLC initialized; waiting for simulation_ready")
+        # Start control loop with delay
+        self.get_logger().info(
+            f"HLC initialized; delaying start by {self.sim_start_delay}s"
+        )
+        threading.Timer(self.sim_start_delay, self._delayed_start).start()
+
+    def _wait_for_sim_ready(self, max_attempts: int = 60, retry_delay: float = 0.5):
+        """Poll is_sim_ready service until simulation is ready."""
+        self.get_logger().info("Waiting for simulation to be ready...")
+        for attempt in range(max_attempts):
+            try:
+                result = send_request(
+                    function_name="is_sim_ready",
+                    function_args={},
+                    timeout_sec=2.0,
+                    node_ros=self,
+                )
+                if result and result.get("ready", False):
+                    self.get_logger().info("Simulation is ready!")
+                    return
+            except Exception as e:
+                self.get_logger().debug(f"Error checking readiness: {e}")
+            
+            self.get_logger().debug(
+                f"Sim not ready, retrying ({attempt + 1}/{max_attempts})..."
+            )
+            time.sleep(retry_delay)
+        
+        raise RuntimeError("Simulation did not become ready in time")
+
+    def _fetch_vehicle_config(self) -> dict:
+        """Fetch vehicle config via execute_request service."""
+        result = send_request(
+            function_name="get_vehicle_config",
+            function_args={"vehicle_name": self.vehicle_name},
+            timeout_sec=5.0,
+            node_ros=self,
+        )
+        if result is None:
+            raise RuntimeError("Failed to fetch vehicle config")
+        return result.get("config", {})
+
+    def _fetch_manager_config(self) -> dict:
+        """Fetch full manager config via execute_request service."""
+        result = send_request(
+            function_name="get_manager_config",
+            function_args={},
+            timeout_sec=5.0,
+            node_ros=self,
+        )
+        if result is None:
+            raise RuntimeError("Failed to fetch manager config")
+        return result
 
     def _init_udp(self):
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -239,14 +280,6 @@ class HighLevelController(Node):
         )
         self.listen_socket.settimeout(0.2)
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    def _on_sim_ready(self, msg: Bool):
-        if not msg.data or self.running:
-            return
-        self.get_logger().info(
-            f"Received simulation_ready; delaying start by " f"{self.sim_start_delay}s"
-        )
-        threading.Timer(self.sim_start_delay, self._delayed_start).start()
 
     def _delayed_start(self):
         if self.running:

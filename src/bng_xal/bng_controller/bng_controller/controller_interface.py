@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+DEPRECATED: This module is deprecated and will be removed in a future release.
+
+Use bng_simulator.sim_manager_node instead, which provides the same functionality
+with better architecture and service-based configuration.
+
+All launch files have been updated to use sim_manager_node directly.
+"""
 from sys import exit, stderr
 from multiprocessing import Queue
 import rclpy
@@ -111,8 +120,10 @@ class ControllerInterface(Node):
         # Parse arguments from YAML string (use empty dict if string is empty)
         arguments = convert_str_to_dict(request.arguments) if request.arguments else {}
 
-        # Execute the request through simulation manager
-        result = self.sim_manager.execute_request(request.function_name, **arguments)
+        # Execute the request through the centralized request handler
+        result = self.sim_manager.request_handler.execute_request(
+            request.function_name, **arguments
+        )
 
         # Convert result to string for service response
         response.result = convert_dict_to_str(result)

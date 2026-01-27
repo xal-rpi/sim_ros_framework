@@ -2,6 +2,11 @@
 local M = {}
 local logTag = 'ControllerManager'
 
+-- math locals (small perf win; avoids global lookups)
+local atan2 = math.atan2
+local abs = math.abs
+local sqrt = math.sqrt
+
 -- A minimal circular‐buffer latency tracker
 local latency = {
   window = 100,
@@ -38,6 +43,35 @@ local common = {
   socketOut = nil,
   controllerRate = 0,
 
+  -- manager-owned reduced-gtState broadcaster
+  -- If gtStateSendRate > 0, the manager will periodically read gtState,
+  -- pack a reduced subset, store it in `reducedGtState`, and send it to sendIp:sendPort.
+  gtStateSendRate = 0,
+  gtStateSendAccum = 0,
+  reducedGtState = {
+    t = -1,
+    x = 0,
+    y = 0,
+    -- z = 0,
+    yaw = 0,
+    V = 0,
+    vx = 0,
+    vy = 0,
+    -- vz = 0,
+    beta = 0,
+    r = 0,
+    delta = 0,
+    wr = 0,
+    wf = 0,
+    we = 0,
+    pb = 0,
+    throttle = 0,
+    brake = 0,
+    accel_x = 0,
+    accel_y = 0,
+    -- accel_z = 0,
+  },
+
   performanceMetrics = {
     latency = nil,
     avgLatency = 0,
@@ -73,6 +107,88 @@ local common = {
 }
 
 local activeController = nil
+
+-- Reduced state packer (mirrors controller_nn_mpc.lua payload for MPC/planning)
+local function packReducedGtState(gtReading)
+  if not gtReading then
+    return { t = -1 }
+  end
+
+  -- Velocity (local frame)
+  local vel_x = gtReading.vel[1]
+  local vel_y = gtReading.vel[2]
+  local V = sqrt(vel_x * vel_x + vel_y * vel_y)
+
+  -- Yaw angle from quaternion
+  local qx = gtReading.quat[1]
+  local qy = gtReading.quat[2]
+  local qz = gtReading.quat[3]
+  local qw = gtReading.quat[4]
+  local yaw = atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+
+  -- Sideslip angle
+  local sideslip = 0
+  if abs(V) > 1.5 then
+    sideslip = atan2(vel_y, vel_x)
+  end
+
+  common.reducedGtState.t = gtReading.time
+  common.reducedGtState.x = gtReading.pos[1]
+  common.reducedGtState.y = gtReading.pos[2]
+  -- z = gtReading.pos[3]
+  common.reducedGtState.yaw = yaw
+  -- Phi = sideslip + yaw,
+
+  common.reducedGtState.V = V
+  common.reducedGtState.vx = gtReading.vel[1]
+  common.reducedGtState.vy = gtReading.vel[2]
+  -- common.reducedGtState.vz = gtReading.vel[3]
+
+  common.reducedGtState.beta = sideslip
+  common.reducedGtState.r = gtReading.angVel[3]
+  common.reducedGtState.delta = (gtReading.wheelFL.angle + gtReading.wheelFR.angle) / 2
+
+  common.reducedGtState.wr = (gtReading.wheelRR.speed + gtReading.wheelRL.speed) / 2
+  common.reducedGtState.wf = (gtReading.wheelFL.speed + gtReading.wheelFR.speed) / 2
+  common.reducedGtState.we = gtReading.RPM * common.constants.rpmToAV
+  common.reducedGtState.pb = gtReading.turboBoost
+  common.reducedGtState.throttle = gtReading.throttle
+  common.reducedGtState.brake = gtReading.brake
+  
+  common.reducedGtState.accel_x = gtReading.accel[1]
+  common.reducedGtState.accel_y = gtReading.accel[2]
+  -- accel_z = gtReading.accel[3]
+  -- Add torque estimates and more if needed
+end
+
+-- Manager-owned periodic sender of reduced gtState.
+-- Intentionally does not clear cachedGtReading; it only refreshes it.
+local function managerSendReducedGtState(dt)
+  if not common.isRunning then return end
+  if common.gtStateSendRate <= 0 then return end
+  -- if not common.socketOut or not common.sendIp or not common.sendPort then return end
+
+  common.gtStateSendAccum = common.gtStateSendAccum + dt
+  if common.gtStateSendAccum < common.gtStateSendRate then return end
+  -- keep accumulator bounded, avoid spiral if dt is large
+  common.gtStateSendAccum = common.gtStateSendAccum - common.gtStateSendRate
+
+  -- Read latest gtState directly
+  if common.gtStateManager and common.gtStateSensorId then
+    local mgr = common.gtStateManager
+    packReducedGtState(mgr.geGtStateReading(common.gtStateSensorId))
+  else
+    return
+  end
+
+  local ok, js = pcall(jsonEncode, common.reducedGtState)
+  if not ok then
+    log('E', logTag, 'Reduced-gtState JSON encode error: ' .. tostring(js))
+    return
+  end
+
+  common.socketOut:sendto(js, common.sendIp, common.sendPort)
+end
 
 local function makeTorqueLookup(curve, vsMaxTorque)
   -- collect & sort RPM keys
@@ -220,8 +336,19 @@ local function commonInit(data)
   common.sendIp = data.sendIp
   common.sendPort = data.sendPort
 
+  -- Optional: manager-level reduced-gtState send rate (seconds)
+  -- If not provided, defaults to 0 (disabled).
+  common.gtStateSendRate = tonumber(data.gtStateSendRate) or 0
+  common.gtStateSendAccum = 0
+
   -- Controller rate
   common.controllerRate = data.controllerRate
+
+  -- Ensure gtStateSendRate is not smaller than controllerRate (if enabled)
+  if common.gtStateSendRate > 0 and common.gtStateSendRate < common.controllerRate then
+    log('W', logTag, 'gtStateSendRate (' .. common.gtStateSendRate .. ') is smaller than controllerRate (' .. common.controllerRate .. '), using controllerRate')
+    common.gtStateSendRate = common.controllerRate
+  end
 
   -- init vehicle state
   initVehicleStaticValues()
@@ -302,7 +429,12 @@ function M.init(data)
 end
 
 function M.update(dt)
-  if common.isRunning and activeController and activeController.update then
+  if not common.isRunning then return end
+
+  -- Manager-owned reduced-gtState broadcaster (independent of controller)
+  managerSendReducedGtState(dt)
+
+  if activeController and activeController.update then
     activeController.update(dt, common)
   end
 end

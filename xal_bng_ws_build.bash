@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 # -------- config (edit if your package names differ) --------
 PKG_CPP="bng_msgs"                 # C/C++ package (messages)
+PKG_LAUNCH="bng_bringup"          # Launch package
 PKGS_PY=("bng_simulator" "bng_controller")  # Python packages
 # ------------------------------------------------------------
 
@@ -21,7 +22,7 @@ err()   { echo -e "${c_red}[ERR]${c_reset}  $*" >&2; }
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [-w WORKSPACE] [-r ROS_DISTRO] [-j JOBS] [--no-rosdep]
+Usage: $(basename "$0") [-w WORKSPACE] [-r ROS_DISTRO] [-j JOBS] [--no-rosdep] [--symlink]
 
 Options:
   -w, --workspace   Path to your colcon workspace (default: ~/ros2_ws)
@@ -29,10 +30,11 @@ Options:
                     uses \$ROS_DISTRO if already set in the environment.
   -j, --jobs        Parallel jobs passed to colcon (default: auto)
       --no-rosdep   Skip 'rosdep install' step
+      --symlink     Use --symlink-install for Python packages (for development)
 
 Examples:
   $(basename "$0")
-  $(basename "$0") -w ~/dev/ros2_ws -r humble -j 8
+  $(basename "$0") -w ~/dev/ros2_ws -r humble -j 8 --symlink
 EOF
 }
 
@@ -43,6 +45,7 @@ JOBS=""
 RUN_ROSDEP=1
 CLEAN_ALL=0
 CLEAN_PKGS=()
+USE_SYMLINK=0
 
 # parse args
 while [[ $# -gt 0 ]]; do
@@ -53,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     -r|--ros-distro) ROS_DISTRO="$2"; shift 2;;
     -j|--jobs) JOBS="$2"; shift 2;;
     --no-rosdep) RUN_ROSDEP=0; shift;;
+    --symlink) USE_SYMLINK=1; shift;;
     -h|--help) usage; exit 0;;
     *) err "Unknown arg: $1"; usage; exit 2;;
   esac
@@ -161,11 +165,17 @@ run "Build ${PKG_CPP}" \
 # shellcheck disable=SC1091
 run "Source workspace overlay" bash -c "source install/setup.bash"
 
-# 2) build Python packages with symlink-install
-# run "Build Python packages (${PKGS_PY[*]}) with --symlink-install" \
-#   colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --symlink-install --packages-select "${PKGS_PY[@]}"
-run "Build Python packages (${PKGS_PY[*]})" \
-  colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --packages-select "${PKGS_PY[@]}"
+# 2) build Python packages with optional symlink-install
+run "Build bng_bringup --symlink-install" \
+  colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --symlink-install --packages-select "${PKG_LAUNCH}"
+
+if [[ "$USE_SYMLINK" -eq 1 ]]; then
+  run "Build Python packages (${PKGS_PY[*]}) with --symlink-install" \
+    colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --symlink-install --packages-select "${PKGS_PY[@]}"
+else
+  run "Build Python packages (${PKGS_PY[*]})" \
+    colcon build ${COLCON_HANDLERS} "${COLCON_COMMON_ARGS[@]}" --packages-select "${PKGS_PY[@]}"
+fi
 
 # source final overlay
 # shellcheck disable=SC1091
@@ -195,6 +205,6 @@ done
 echo -e "${c_green}All done.${c_reset} Remember to source this overlay in new shells:"
 echo "  source \"${WORKSPACE}/install/setup.bash\""
 
-REQ="${WORKSPACE}/src/sim_ros_framework/requirements.txt"
-run "Install Python deps" python3 -m pip install -U pip
-run "Install Python deps" python3 -m pip install -r "$REQ"
+# REQ="${WORKSPACE}/src/sim_ros_framework/requirements.txt"
+# run "Install Python deps" python3 -m pip install -U pip
+# run "Install Python deps" python3 -m pip install -r "$REQ"

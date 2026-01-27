@@ -1,0 +1,38 @@
+# Minimal Attach Mode Configuration
+# Use this when BeamNG is already running with a vehicle named "ego"
+# This config attaches to the existing vehicle and adds sensors
+
+# BeamNG connection (required)
+beamng:
+  host: 127.0.0.1
+  port: 25252
+  open_args:
+    launch: False  # Don't launch BeamNG, attach to existing instance
+    debug: False
+    extensions:
+      - xlab/xlabCore
+  setup_funcs:
+    beamng.settings.set_deterministic:
+      # -1: Run 1000/fpslimit ms of physics per frame
+      # 0: Simulate physics time based on wallclock delta to the last frame
+      # n: Simulate n * 50ms of physics per frame (for any positive n)
+      steps_per_second: 0
+    beamng.ui.show_hud: {}
+
+# Attach mode (required)
+scenario_mode: attach
+
+# Vehicle configuration (match by name)
+vehicles:
+  "*":  # Must match vehicle ID in BeamNG
+    sensors:
+      basicStateTemp:
+        type: BasicState
+
+# ROS publishing configuration
+ros_poll_config:
+  "*":
+    basicStateTemp:
+      topic: /ego/basicState
+      poll_time: 0.05
+      publish: 1

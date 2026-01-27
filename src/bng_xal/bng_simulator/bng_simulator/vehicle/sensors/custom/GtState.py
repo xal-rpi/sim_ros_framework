@@ -130,8 +130,8 @@ class GtStateWrapper(CommBase):
         data["physicsUpdateTime"] = physics_update_time
         data["numPhysicsStepsForGfxSave"] = num_physics_steps_for_gfx_save
         data["pos"] = self.calculate_cog_pos(pos)
-        data["dir"] = self.vectorForward # self.vectorForward # dir # self.calculate_dir(dir)
-        data["left"] = self.vectorLeft # self.vectorLeft   # self.calculate_dir(left)
+        data["dir"] = self.calculate_dir(dir)
+        data["left"] = self.calculate_dir(left)
         data["isUsingGravity"] = is_using_gravity
         data["isAllowWheelNodes"] = is_allow_wheel_nodes
         data["isVisualised"] = is_visualised
@@ -288,7 +288,12 @@ class GtState(SensorBase):
         msg.vel.x, msg.vel.y, msg.vel.z = data["vel"]
         msg.accel.x, msg.accel.y, msg.accel.z = data["accel"]
         msg.ang_vel.x, msg.ang_vel.y, msg.ang_vel.z = data["angVel"]
-        msg.ang_accel.x, msg.ang_accel.y, msg.ang_accel.z = data["angAccel"]
+        # Raw quantities are present in the Lua sensor (accelRaw/angVelRaw/angAccelRaw).
+        # Keep the existing fields populated with best available data for compatibility.
+        msg.accel_raw.x, msg.accel_raw.y, msg.accel_raw.z = data.get("accelRaw", data["accel"])
+        msg.ang_vel_raw.x, msg.ang_vel_raw.y, msg.ang_vel_raw.z = data.get("angVelRaw", data["angVel"])
+        # msg.ang_accel.x, msg.ang_accel.y, msg.ang_accel.z = data.get("angAccel", data.get("angAccelRaw", (0.0, 0.0, 0.0)))
+        msg.ang_accel_raw.x, msg.ang_accel_raw.y, msg.ang_accel_raw.z = data["angAccelRaw"]
         msg.pos.x, msg.pos.y, msg.pos.z = data["pos"]
         msg.quat.x, msg.quat.y, msg.quat.z, msg.quat.w = data["quat"]
 
@@ -304,6 +309,8 @@ class GtState(SensorBase):
         msg.wheel_fr_brake_torque = wheelFR["brakeTorque"]
         msg.wheel_fr_prop_torque = wheelFR["propTorque"]
         msg.wheel_fr_angle = wheelFR["angle"]
+        msg.wheel_fr_angle_legacy = wheelFR.get("angleLegacy", wheelFR["angle"])
+        msg.wheel_fr_angle_atan2 = wheelFR.get("angleAtan2", wheelFR["angle"])
         msg.wheel_fr_downforce = wheelFR["downForce"]
 
         msg.wheel_fl_speed = wheelFL["speed"]
@@ -312,6 +319,8 @@ class GtState(SensorBase):
         msg.wheel_fl_brake_torque = wheelFL["brakeTorque"]
         msg.wheel_fl_prop_torque = wheelFL["propTorque"]
         msg.wheel_fl_angle = wheelFL["angle"]
+        msg.wheel_fl_angle_legacy = wheelFL.get("angleLegacy", wheelFL["angle"])
+        msg.wheel_fl_angle_atan2 = wheelFL.get("angleAtan2", wheelFL["angle"])
         msg.wheel_fl_downforce = wheelFL["downForce"]
 
         msg.wheel_rr_speed = wheelRR["speed"]
@@ -320,6 +329,8 @@ class GtState(SensorBase):
         msg.wheel_rr_brake_torque = wheelRR["brakeTorque"]
         msg.wheel_rr_prop_torque = wheelRR["propTorque"]
         msg.wheel_rr_angle = wheelRR["angle"]
+        msg.wheel_rr_angle_legacy = wheelRR.get("angleLegacy", wheelRR["angle"])
+        msg.wheel_rr_angle_atan2 = wheelRR.get("angleAtan2", wheelRR["angle"])
         msg.wheel_rr_downforce = wheelRR["downForce"]
 
         msg.wheel_rl_speed = wheelRL["speed"]
@@ -328,6 +339,8 @@ class GtState(SensorBase):
         msg.wheel_rl_brake_torque = wheelRL["brakeTorque"]
         msg.wheel_rl_prop_torque = wheelRL["propTorque"]
         msg.wheel_rl_angle = wheelRL["angle"]
+        msg.wheel_rl_angle_legacy = wheelRL.get("angleLegacy", wheelRL["angle"])
+        msg.wheel_rl_angle_atan2 = wheelRL.get("angleAtan2", wheelRL["angle"])
         msg.wheel_rl_downforce = wheelRL["downForce"]
 
         msg.steering = data["steering"]

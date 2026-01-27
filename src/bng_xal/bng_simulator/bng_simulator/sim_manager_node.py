@@ -27,6 +27,8 @@ class SimulationManagerNode(Node):
         self.declare_parameter("config", "etk_scenario.yaml")
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("port", 25252)
+        self.declare_parameter("scenario_mode", "create")
+        self.declare_parameter("attach_fallback", False)
         self.declare_parameter("log_level", "INFO")
 
         self.logger = self.get_logger()
@@ -42,6 +44,8 @@ class SimulationManagerNode(Node):
         # Get host and port parameters
         beamng_host = self.get_parameter("host").value
         beamng_port = self.get_parameter("port").value
+        scenario_mode = self.get_parameter("scenario_mode").value
+        attach_fallback = self.get_parameter("attach_fallback").value
 
         # Set logger level
         log_level_str = self.get_parameter("log_level").value.upper()
@@ -75,13 +79,37 @@ class SimulationManagerNode(Node):
         if config_dict is None:
             raise RuntimeError(f"Failed to load config from {self.config_path}")
         
-        # Override BeamNG host and port from launch parameters
+        # Override BeamNG host and port from launch parameters (only if not in YAML)
         if "beamng" not in config_dict:
             config_dict["beamng"] = {}
-        config_dict["beamng"]["host"] = beamng_host
-        config_dict["beamng"]["port"] = beamng_port
+        if "host" not in config_dict["beamng"]:
+            config_dict["beamng"]["host"] = beamng_host
+        if "port" not in config_dict["beamng"]:
+            config_dict["beamng"]["port"] = beamng_port
+        
+        # Update beamng_host/port to actual values for controller IP overrides
+        beamng_host = config_dict["beamng"]["host"]
+        beamng_port = config_dict["beamng"]["port"]
+        
+        # Override scenario_mode from launch parameter (if not in YAML)
+        if "scenario_mode" not in config_dict:
+            config_dict["scenario_mode"] = scenario_mode
+        
+        # Override attach_fallback from launch parameter (if not in YAML)
+        if "attach_fallback" not in config_dict:
+            config_dict["attach_fallback"] = attach_fallback
+        
+        # Automatically set listenIp and sendIp in vehicle controllers to match beamng host
+        if "vehicles" in config_dict:
+            for _, vehicle_config in config_dict["vehicles"].items():
+                if "controllers" in vehicle_config:
+                    for _, controller_config in vehicle_config["controllers"].items():
+                        controller_config["listenIp"] = beamng_host
+                        controller_config["sendIp"] = beamng_host
         
         self.logger.info(f"BeamNG config: host={beamng_host}, port={beamng_port}")
+        self.logger.info(f"Scenario mode: {config_dict['scenario_mode']}")
+        self.logger.info(f"Attach fallback: {config_dict.get('attach_fallback', False)}")
 
         # Create simulation manager with modified config
         self.sim_manager = SimulationManager(
@@ -123,38 +151,11 @@ class SimulationManagerNode(Node):
             str: Resolved absolute path to config file
         """
         # If it's already an absolute path, use it as-is
-        if os.path.isabs(config_name):
-            if os.path.isfile(config_name):
-                return config_name
-            raise FileNotFoundError(f"Config file not found: {config_name}")
-
-        # Try the path as-is (relative to current working directory)
-        if os.path.isfile(config_name):
-            return os.path.abspath(config_name)
-
-        # Get package share directory and search standard locations
-        try:
-            pkg_share = get_package_share_directory("bng_simulator")
-        except Exception:
+        if not os.path.isabs(config_name):
             raise FileNotFoundError(
-                f"Config file '{config_name}' not found and package share directory unavailable"
+                f"Config file '{config_name}' not found in standard directories."
             )
-
-        # Search in standard config directories
-        search_dirs = [
-            os.path.join(pkg_share, "config"),
-            os.path.join(pkg_share, "config", "scenarios"),
-            os.path.join(pkg_share, "config", "vehicles"),
-        ]
-
-        for search_dir in search_dirs:
-            candidate_path = os.path.join(search_dir, config_name)
-            if os.path.isfile(candidate_path):
-                return candidate_path
-
-        raise FileNotFoundError(
-            f"Config file '{config_name}' not found in standard directories: {search_dirs}"
-        )
+        return config_name
 
     def handle_execute_request(self, request, response):
         """
@@ -170,8 +171,10 @@ class SimulationManagerNode(Node):
         # Parse arguments from YAML string (use empty dict if string is empty)
         arguments = convert_str_to_dict(request.arguments) if request.arguments else {}
 
-        # Execute the request through simulation manager
-        result = self.sim_manager.execute_request(request.function_name, **arguments)
+        # Execute the request through the centralized request handler
+        result = self.sim_manager.request_handler.execute_request(
+            request.function_name, **arguments
+        )
 
         # Convert result to string for service response
         response.result = convert_dict_to_str(result)

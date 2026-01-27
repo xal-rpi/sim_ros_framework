@@ -8,7 +8,6 @@ from copy import deepcopy
 from beamngpy import Vehicle, BeamNGpy
 from bng_simulator.vehicle.sensors import SensorBase, SensorRegistry
 from bng_simulator.vehicle.controllers.base import ControllerRegistry
-from bng_simulator.utils.math_op import convert_euler_to_quaternion
 
 from rclpy.node import get_logger
 
@@ -34,6 +33,50 @@ class VehicleManager:
         self._logger = get_logger(__name__)
         self._vehicle: Vehicle = self.create_vehicle_instance()
         self._controllers = {}  # Dictionary to store controllers
+    
+    @classmethod
+    def from_existing_vehicle(cls, name: str, beamng: BeamNGpy,
+                              existing_vehicle: Vehicle, config: Dict[str, Any]):
+        """
+        Create VehicleManager from an existing BeamNG vehicle (attach mode).
+        
+        Args:
+            name: Internal name for this vehicle manager
+            beamng: BeamNG connection
+            existing_vehicle: Vehicle object from scenario.get_current(connect=True)
+            config: Partial YAML config (sensors, controllers only)
+        
+        Returns:
+            VehicleManager instance
+        """
+        logger = get_logger(__name__)
+        logger.info(f"Creating VehicleManager from existing vehicle: {name}")
+        
+        # Create instance manually (bypass normal __init__)
+        instance = cls.__new__(cls)
+        instance._name = name
+        instance._beamng = beamng
+        instance._config = deepcopy(config)
+        instance._sensors = {}
+        instance._controllers = {}
+        instance._logger = logger
+        
+        # Use existing vehicle instead of creating new one
+        instance._vehicle = existing_vehicle
+        logger.info(f"  Using existing vehicle object: {existing_vehicle.vid}")
+        logger.info(f"  Vehicle connected: {existing_vehicle.is_connected()}")
+        
+        # Extract sensor/controller configs (spawn args not used in attach mode)
+        # NOTE: Keep this explicit; attach mode must NOT try to reconstruct Vehicle() args.
+        instance._sensors_config = instance._config.pop("sensors", {})
+        instance._controllers_config = instance._config.pop("controllers", {})
+        instance._spawn_args = {}  # Not used in attach mode
+        
+        logger.info(f"  ✓ VehicleManager created for existing vehicle")
+        logger.info(f"  Sensors to attach: {list(instance._sensors_config.keys())}")
+        logger.info(f"  Controllers to attach: {list(instance._controllers_config.keys())}")
+        
+        return instance
 
     def create_vehicle_instance(self) -> Vehicle:
         """
@@ -42,49 +85,26 @@ class VehicleManager:
         Returns:
             Vehicle: The created vehicle instance
         """
-        # Let's extract the configuration for the sensors
+        # Extract sub-configs that are NOT part of the BeamNGpy Vehicle constructor.
+        # This is required so we can use VehicleManager in CREATE mode (scenario-based).
         self._sensors_config = self._config.pop("sensors", {})
+        self._controllers_config = self._config.pop("controllers", {})
+        self._spawn_args = self._config.pop("spawn", {})
 
-        # Let's extract scenario-based arguments
-        self._scenario_args = self._config.pop("scenario_args", {})
+        # Ensure xlab/xlabCore is always enabled for our custom sensors/controllers.
+        # If the user provided extensions, merge them rather than overwriting.
+        model_args = self._config["model_args"]
+        extensions = list(model_args.get("extensions", []) or [])
+        if "xlab/xlabCore" not in extensions:
+            extensions.append("xlab/xlabCore")
+        model_args["extensions"] = extensions
 
-        # Now log the remaining configuration
+        # Now log the remaining configuration (Vehicle args only)
         self._logger.debug(f"Vehicle --{self._name}-- configuration: \n{self._config}")
+        self._logger.debug(f"Vehicle --{self._name}-- extensions: {extensions}")
 
-        # Let's construct the vehicle instance
-        return Vehicle(self._name, **self._config, extensions=["xlab/xlabCore"])
-
-    def get_scenario_args(self):
-        """
-        Get scenario spawn parameters from vehicle config.
-
-        Returns:
-            Dict[str, Any]: Spawn arguments for Scenario.add_vehicle()
-            Example: {'pos': (x,y,z), 'rot_quat': (x,y,z,w), ...}
-        """
-        if "pos" not in self._scenario_args:
-            self._scenario_args["pos"] = [0, 0, 0]
-        if "rot_quat" not in self._scenario_args:
-            self._scenario_args["rot_quat"] = [0, 0, 0, 1]
-        if (
-            "yaw_angle" in self._scenario_args
-            or "pitch_angle" in self._scenario_args
-            or "roll_angle" in self._scenario_args
-        ):
-            yaw_rad = self._scenario_args.get("yaw_angle", 0) * (3.14159 / 180)
-            pitch_rad = self._scenario_args.get("pitch_angle", 0) * (3.14159 / 180)
-            roll_rad = self._scenario_args.get("roll_angle", 0) * (3.14159 / 180)
-            quat_vehicle = convert_euler_to_quaternion((roll_rad, pitch_rad, yaw_rad))
-            quat_vehicle = [float(q) for q in quat_vehicle]
-            self._scenario_args["rot_quat"] = quat_vehicle
-            # Pop the Euler angles
-            self._scenario_args.pop("yaw_angle", None)
-            self._scenario_args.pop("pitch_angle", None)
-            self._scenario_args.pop("roll_angle", None)
-        self._logger.info(
-            f"Scenario arguments for vehicle --{self._name}--: \n{self._scenario_args}"
-        )
-        return self._scenario_args
+        # Construct the BeamNGpy Vehicle instance
+        return Vehicle(self._name, **self._config["model_args"])
 
     @property
     def controllers(self) -> Dict:
@@ -195,7 +215,7 @@ class VehicleManager:
 
     def setup_controllers(self):
         """Set up controllers for the vehicle."""
-        controllers_config = self._config.get("controllers", {})
+        controllers_config = getattr(self, "_controllers_config", {})
         for controller_name, controller_config in controllers_config.items():
             self.setup_controller(controller_name, controller_config)
 

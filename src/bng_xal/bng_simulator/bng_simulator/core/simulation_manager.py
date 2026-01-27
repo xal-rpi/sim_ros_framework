@@ -1,5 +1,5 @@
 """
-Manages BeamNG simulation lifecycle, scenarios, and vehicles.
+Manages BeamNG simulation lifecycle, levels, and vehicles.
 """
 
 import traceback
@@ -11,19 +11,24 @@ from rclpy.impl.rcutils_logger import RcutilsLogger
 
 import beamngpy
 from beamngpy import BeamNGpy, Scenario
-from beamngpy.logging import BNGValueError
 
 from bng_simulator.vehicle.manager import VehicleManager
 from bng_simulator.vehicle.sensors import SensorBase
-from bng_simulator.utils.math_op import convert_euler_to_quaternion
-import bng_simulator.core.vehicle_properties as vehicle_queries
+from bng_simulator.core.attach_manager import AttachManager
+from bng_simulator.core.request_handler import SimulationRequestHandler
+from bng_simulator.core.scenario_builder import ScenarioBuilder
 from bng_simulator.utils.config_manager import ConfigManager
 
 
 class SimulationManager:
     """
-    Manages the entire lifecycle of a BeamNG simulation on a scenario
-    with multiple vehicles.
+    Manages the entire lifecycle of a BeamNG simulation with level-based architecture.
+    
+    Supports two modes:
+    - CREATE: Load level and spawn vehicles
+    - ATTACH: Attach to existing level and vehicles
+    
+    The xlab/xlabCore extension is required and automatically loaded.
     """
 
     def __init__(self, config: Dict[str, Any], logger: RcutilsLogger):
@@ -32,28 +37,42 @@ class SimulationManager:
 
         Args:
             config (Dict[str, Any]): Simulation configuration dictionary
-            logger: ROS logger instance (optional)
+            logger: ROS logger instance
         """
-        self._PI = 3.14159
-
         self.logger = logger
+        
         self.config = deepcopy(config)
 
         self.beamng: Optional[BeamNGpy] = None
+        self.level_name: Optional[str] = None
         self.scenario: Optional[Scenario] = None
 
         self.vehicles: Dict[str, VehicleManager] = {}
 
+        # Helpers for lifecycle, attach, and request routing
+        self.request_handler = SimulationRequestHandler(self)
+        self.attach_manager = AttachManager(self)
+        self.scenario_builder = ScenarioBuilder(self)
+
         # Connect to the BeamNG simulation
         self.connect()
 
-        # Check for existing scenario and close it if any
-        self.close_existing_scenario_if_any()
+        # Get scenario mode from config and initialize
+        scenario_mode = self.config.get("scenario_mode", "create").lower()
+        
+        self.logger.info("=" * 70)
+        self.logger.info(f"SCENARIO MODE: {scenario_mode}")
+        self.logger.info("=" * 70)
+        
+        if scenario_mode == "create":
+            self.scenario_builder.initialize_create_mode()
+        else:
+            self.attach_manager.initialize_by_mode(scenario_mode)
 
-        # Create the scenario
-        self.create_scenario()
+        # Setup sensors and controllers for all vehicles after initialization
+        self.setup_vehicle_runtime()
 
-        # Apply post scenario configuration
+        # Apply post-scenario configuration
         self.post_scenario_configuration()
 
     @classmethod
@@ -72,286 +91,61 @@ class SimulationManager:
             raise RuntimeError("Config manager returned an empty config")
 
         return cls(cfg, logger)
-
+    
     def connect(self):
         """Establish connection with BeamNG simulation."""
         beamng_info = deepcopy(self.config.get("beamng", {}))
         launch_info = beamng_info.pop("open_args", {})
         setup_funcs = beamng_info.pop("setup_funcs", {})
 
+        # ENSURE xlab/xlabCore extension is in extensions list
+        extensions = launch_info.get("extensions", [])
+        if "xlab/xlabCore" not in extensions:
+            extensions.append("xlab/xlabCore")
+            self.logger.info("Adding required xlab/xlabCore extension")
+        launch_info["extensions"] = extensions
+
         self.logger.info("Connecting to BeamNG")
         self.logger.debug(f"Connection parameters: \n{beamng_info}")
         self.logger.debug(f"Launch arguments: \n{launch_info}")
+        self.logger.debug(f"Extensions: {extensions}")
         self.logger.debug(f"Setup arguments: \n{setup_funcs}")
 
         self.beamng = BeamNGpy(**beamng_info)
         self.beamng.open(**launch_info)
         if self.beamng is None:
-            raise RuntimeError("Beamng instance didn't connect")
+            raise RuntimeError("BeamNG instance didn't connect")
+
+        # Verify xlab extension loaded
+        from bng_simulator.core.xlab_api import XlabApi
+        if not XlabApi.is_available(self.beamng):
+            raise RuntimeError(
+                "xlab/xlabCore extension failed to load! "
+                "This extension is required for the simulator to function."
+            )
+        self.logger.info("✓ xlab/xlabCore extension verified")
 
         # Apply simulator configuration functions
         for func_name, func_args in setup_funcs.items():
-            self.execute_request(func_name, **func_args)
+            self.request_handler.execute_request(func_name, **func_args)
 
-    def create_scenario(self):
+    def setup_vehicle_runtime(self,):
         """
-        Create and load the scenario based on configuration.
+        Set up sensors and controllers for a vehicle.
+        
+        Called by managers after vehicle creation/attachment.
         """
-        scenario_config = self.config.get("scenario", {})
-        scenario_config = deepcopy(scenario_config)
-        extra_objects = scenario_config.pop("extra_objects", {})
-        self.logger.info(f"Creating scenario: \n{scenario_config}")
-
-        # Create new scenario
-        self.scenario = Scenario(**scenario_config)
-
-        # Add vehicles
-        vehicles_config = self.config.get("vehicles", {})
-        for vehicle_name, vehicle_config in vehicles_config.items():
-            self.add_vehicle(vehicle_name, vehicle_config)
-            
-        # Let's add extra objects if any
-        self.add_scenario_objects(extra_objects)
-
-        # Make and load scenario
-        assert self.beamng is not None
-        self.scenario.make(self.beamng)
-        self.beamng.load_scenario(self.scenario)
-        self.beamng.scenario.start()
-
-        self.logger.info("Scenario created and loaded successfully")
-
-        # Intialize the sensors for each vehicle
-        for vehicle_name in self.vehicles:
-            vehicle_manager = self.vehicles[vehicle_name]
+        for vehicle_name, vehicle_manager in self.vehicles.items():
+            self.logger.info(f"Setting up sensors/controllers for: {vehicle_name}")
             vehicle_manager.setup_all_sensors()
             vehicle_manager.setup_controllers()
-        self.logger.debug("Finished loading sensors")
-
-    def add_scenario_objects(self, objects_config: Dict[str, Any]):
-        """
-        Add scenario objects to the current scenario.
-
-        Args:
-            objects_config (Dict[str, Any]): Configuration for scenario objects
-        """
-        if not objects_config:
-            return
-
-        # scenario_obj = beamngpy.ScenarioObject(
-        #     oid="roadblock",
-        #     name="sawhorse",
-        #     otype="BeamNGVehicle",
-        #     pos=(10, 0, 0),
-        #     rot_quat=(0, 0, 0, 1),
-        #     scale=(1, 1, 1),
-        #     JBeam="sawhorse",
-        #     datablock="default_vehicle",
-        # )
-        # print(scenario_obj.__dict__)
-        # self.scenario.add_object(scenario_obj)
-        
-        for obj_name, obj_cfg in objects_config.items():
-            obj_type = obj_cfg.pop("type", None)
-            if obj_type is None:
-                self.logger.error(f"Scenario object type not specified for {obj_name}")
-                continue
-            if not hasattr(beamngpy, obj_type):
-                self.logger.error(f"Scenario object type not found in beamngpy: {obj_type}")
-                continue
-            obj_class = getattr(beamngpy, obj_type)
-            rot_args = obj_cfg.pop("rot", {})
-            if "yaw_angle" in rot_args or "pitch_angle" in rot_args or "roll_angle" in rot_args:
-                yaw_rad = rot_args.get("yaw_angle", 0) * (self._PI / 180)
-                pitch_rad = rot_args.get("pitch_angle", 0) * (self._PI / 180)
-                roll_rad = rot_args.get("roll_angle", 0) * (self._PI / 180)
-                rot_quat = convert_euler_to_quaternion(
-                    (roll_rad, pitch_rad, yaw_rad)
-                )  # TODO : fix type mistmatch
-                rot_quat = tuple([float(q) for q in rot_quat])
-                obj_cfg["rot_quat"] = rot_quat
-            obj_cfg["name"] = obj_name
-            obj_cfg["pos"] = tuple(obj_cfg.get("pos", (0, 0, 0)))
-            obj_cfg["scale"] = tuple(obj_cfg.get("scale", (1, 1, 1)))
-            obj = obj_class(**obj_cfg)
-            self.logger.debug(f"Created scenario object: {obj.__dict__}")
-            self.scenario.add_object(obj)
-
-    def add_vehicle(self, vehicle_name: str, vehicle_config: Dict[str, Any]):
-        """
-        Add a vehicle to the scenario.
-
-        Args:
-            vehicle_name (str): Name of the vehicle
-            vehicle_config (Dict[str, Any]): Vehicle configuration
-        """
-        vehicle = VehicleManager(
-            vehicle_name,
-            self.beamng,
-            vehicle_config,
-        )
-        self.vehicles[vehicle_name] = vehicle
-        # Get scenario spawn parameters from vehicle config
-        spawn_args = vehicle.get_scenario_args()
-        assert self.scenario is not None
-        self.scenario.add_vehicle(vehicle.vehicle, **spawn_args)
-
-    def close_existing_scenario_if_any(self):
-        """Close any existing scenario if any."""
-        try:
-            assert self.beamng is not None
-            old_scenario = self.beamng.get_current_scenario()
-            if old_scenario:
-                self.logger.info("Stopping the existing scenario...")
-                data = dict(type="StopScenario")
-                self.beamng.scenario._send(data).ack("ScenarioStopped")
-                self.logger.info("Existing scenario stopped.")
-            else:
-                self.logger.info("No existing scenario found.")
-        except BNGValueError:
-            self.logger.info("No existing scenario found.")
-
-    def proxy_for_vehicle_properties(
-        self, property_name: str, vehicle_name: Optional[str] = None, **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Proxy for vehicle properties query functions.
-
-        Args:
-            vehicle_name (str): Name of the vehicle
-            property_name (str): Name of the property query function
-            **kwargs: Additional arguments for the query function
-
-        Returns:
-            Dict[str, Any]: Result of the query function
-        """
-        if vehicle_name is None:
-            vehicle_name = self.default_vehicle_name
-        vehicle = self.vehicles[vehicle_name].vehicle
-        query_func = getattr(vehicle_queries, property_name, None)
-
-        if query_func is None:
-            err_msg = f"Query function not found: {property_name}"
-            self.logger.error(err_msg)
-            return {"error": err_msg}
-
-        # Execute the query function, need to catch invalid keyword arguments
-        try:
-            self.logger.info(f"Attempting {property_name} for vehicle: {vehicle_name}")
-            query_output = query_func(vehicle, **kwargs)
-        except TypeError:
-            self.logger.error(f"Error executing query function: {property_name}")
-            err_msg = "Error:\n" + traceback.format_exc()
-            self.logger.error(err_msg)
-            return {"error": err_msg}
-        # log the query started and the output
-        self.logger.debug(f"Query output: \n{query_output}")
-        return query_output if query_output is not None else {}
-
-    def teleport_vehicle(
-        self,
-        vehicle_name: Optional[str] = None,
-        pos: Optional[List[float]] = None,
-        rot_quat: Optional[List[float]] = None,
-        reset: bool = True,
-        **kwargs,
-    ):
-        """
-        Teleport a vehicle to a new position and rotation.
-        """
-        if vehicle_name is None:
-            vehicle_name = self.default_vehicle_name
-        vehicle_manager = self.vehicles[vehicle_name]
-        vehicle = vehicle_manager.vehicle
-        scenario_args = vehicle_manager.get_scenario_args()
-        if pos is None:
-            pos = scenario_args.get("pos", [0, 0, 0])
-        if rot_quat is None:
-            rot_quat = scenario_args.get("rot_quat", [0, 0, 0, 1.0])
-        # Check if euler angles are provided
-        if "yaw_angle" in kwargs or "pitch_angle" in kwargs or "roll_angle" in kwargs:
-            yaw_rad = kwargs.get("yaw_angle", 0) * (self._PI / 180)
-            pitch_rad = kwargs.get("pitch_angle", 0) * (self._PI / 180)
-            roll_rad = kwargs.get("roll_angle", 0) * (self._PI / 180)
-            rot_quat = convert_euler_to_quaternion(
-                (roll_rad, pitch_rad, yaw_rad)
-            )  # TODO : fix type mistmatch
-            rot_quat = [float(q) for q in rot_quat]
-        # Teleport the vehicle
-        succeed = vehicle.teleport(pos, rot_quat, reset=reset)
-        return {"success": succeed}
+        self.logger.info(f"✓ {vehicle_name} setup complete")
 
     def post_scenario_configuration(self):
-        """
-        A set of function to apply after the scenario is created.
-        """
+        """Functions to apply after scenario is loaded/attached."""
         config = self.config.get("post_scenario", {})
         for func_name, func_args in config.items():
-            # Execute the request
-            self.execute_request(func_name, **func_args)
-
-    def execute_request(self, func_name: str, **func_args):
-        """
-        Execute a request on the simulation manager.
-        The function name could be either a method of the SimulationManager (other than execute_request).
-        Either a proxy_for_vehicle_properties or a method of the beamng instance starting with beamng.
-
-        Returns:
-            Any: The result of the function call. Mostly a dictionary.
-        """
-        # Check if the function is a method of the SimulationManager
-        # other than execute_request or proxy_for_vehicle_properties
-        if hasattr(self, func_name) and func_name not in [
-            "execute_request",
-            "proxy_for_vehicle_properties",
-        ]:
-            method = getattr(self, func_name)
-            out = method(**func_args)
-            out_mod = {} if out is None else out
-            return out_mod if isinstance(out_mod, dict) else {"result": out_mod}
-
-        # If a beamng method is requested
-        if func_name.startswith("beamng."):
-            path_components = func_name.split(".")
-            current_obj = self.beamng
-            for component in path_components[1:]:
-                current_obj = getattr(current_obj, component)
-            out = current_obj(**func_args)
-            out_mod = {} if out is None else out
-            return out_mod if isinstance(out_mod, dict) else {"result": out_mod}
-        
-        if func_name.startswith("vehicle."):
-            func_handle = func_name.split(".")[1]
-            return self.vehicle_api_request(func_handle, **func_args)
-
-        # We assume it is a proxy for vehicle properties
-        # this will return an error if the function is not found
-        return self.proxy_for_vehicle_properties(func_name, **func_args)
-
-    def vehicle_api_request(self, func_name, **func_args):
-        """
-        Handle vehicle API requests.
-
-        Args:
-            **func_args: Function arguments
-
-        Returns:
-            Dict[str, Any]: Result of the function call
-        """
-        vehicle_name = func_args.pop("vehicle_name", self.default_vehicle_name)
-        if vehicle_name not in self.vehicles:
-            raise ValueError(f"Vehicle {vehicle_name} not found in the scenario")
-        vehicle_manager = self.vehicles[vehicle_name]
-        vehicle = vehicle_manager.vehicle
-        assert hasattr(vehicle, func_name), f"Vehicle {vehicle_name} has no method {func_name}"
-        method = getattr(vehicle, func_name)
-        try:
-            out = method(**func_args)
-            out_mod = {} if out is None else out
-            return out_mod if isinstance(out_mod, dict) else {"result": out_mod}
-        except Exception as e:
-            self.logger.error(f"Error executing {func_name} on vehicle {vehicle_name}: {e}")
-            return {"error": str(e)}
+            self.request_handler.execute_request(func_name, **func_args)
     
     @property
     def default_vehicle_name(self) -> str:
@@ -374,46 +168,6 @@ class SimulationManager:
         """
         return list(self.vehicles.keys())
 
-    def get_vehicle_part_config(
-        self, vehicle_name: Optional[str] = None
-    ) -> Dict[str, str]:
-        """
-        Get the vehicle part configuration name.
-
-        Args:
-            vehicle_name (str): Name of the vehicle
-
-        Returns:
-            str: Vehicle part configuration name
-        """
-        if vehicle_name is None:
-            vehicle_name = self.default_vehicle_name
-        vehicle_manager = self.vehicles[vehicle_name]
-        vehicle = vehicle_manager.vehicle
-        return vehicle.get_part_config()
-
-    def get_sim_config(
-        self,
-    ) -> Dict[str, str]:
-        """
-        Get the simulation configuration.
-
-        Returns:
-            Dict[str, str]: Simulation configuration
-        """
-        _config = deepcopy(self.config)
-        # Let's get the part config for each vehicle
-        _config["vehicles_part"] = {}
-        for vehicle_name in self.vehicles:
-            part_config = self.get_vehicle_part_config(vehicle_name)
-            # This is of the form "vehicles/vehicleName/model_name.pc"
-            config_name = part_config["partConfigFilename"]
-            veh_model_name = config_name.split("/")[-2:]
-            veh_model_name = "_".join(veh_model_name)
-            veh_model_name = veh_model_name.replace(".pc", "")
-            _config["vehicles_part"][vehicle_name] = veh_model_name
-        return _config
-
     def poll_sensor(self, sensor_name: str, vehicle_name: Optional[str] = None):
         """
         Poll a sensor for the latest data.
@@ -426,24 +180,6 @@ class SimulationManager:
             vehicle_name = self.default_vehicle_name
         vehicle_manager = self.vehicles[vehicle_name]
         vehicle_manager.poll_sensor(sensor_name)
-
-    def extract_sensor_ros_msg_type(
-        self, sensor_name: str, vehicle_name: Optional[str] = None
-    ) -> Optional[Any]:
-        """
-        Extract the ROS message type for a sensor.
-
-        Args:
-            sensor_name (str): Name of the sensor
-            vehicle_name (str): Name of the vehicle
-
-        Returns:
-            Any: The ROS message type
-        """
-        if vehicle_name is None:
-            vehicle_name = self.default_vehicle_name
-        vehicle_manager = self.vehicles[vehicle_name]
-        return vehicle_manager.extract_sensor_ros_msg_type(sensor_name)
 
     # def control_vehicle(
     #     self,
@@ -470,24 +206,6 @@ class SimulationManager:
     #         gear=gear,
     #     )
     #     return {"success": True}
-
-    def extract_sensor_ros_msg(
-        self, sensor_name: str, vehicle_name: Optional[str] = None
-    ) -> Optional[Any]:
-        """
-        Extract the ROS message for a sensor.
-
-        Args:
-            sensor_name (str): Name of the sensor
-            vehicle_name (str): Name of the vehicle
-
-        Returns:
-            Any: The ROS message
-        """
-        if vehicle_name is None:
-            vehicle_name = self.default_vehicle_name
-        vehicle_manager = self.vehicles[vehicle_name]
-        return vehicle_manager.extract_sensor_ros_msg(sensor_name)
 
     def get_sensor(
         self, sensor_name: str, vehicle_name: Optional[str] = None
@@ -519,73 +237,314 @@ class SimulationManager:
         controllers = vehicle_config.get("controllers", {})
         return controllers.get(controller_name, {})
 
+    def replace_vehicle(
+        self, 
+        vehicle_manager: VehicleManager, 
+        connect: bool = True
+    ) -> bool:
+        """
+        Replace an existing vehicle (workaround for color spawn issue).
+        
+        BeamNGPy has an issue where vehicle colors don't apply correctly
+        on initial spawn under a Scenario. This method respawns the vehicle with
+        replace=True to ensure colors are rendered properly.
+        
+        Args:
+            vehicle_manager: VehicleManager instance to replace
+            connect: If True, reconnect the vehicle after replacement
+        
+        Returns:
+            True if replacement succeeded, False otherwise
+        
+        Notes:
+            - Disconnects vehicle before replacement
+            - Preserves all vehicle options and spawn arguments
+            - Converts color formats to BeamNG RGBA strings
+        """
+        from beamngpy.misc.colors import coerce_color, rgba_to_str
+        
+        vehicle = vehicle_manager.vehicle
+        cling = vehicle_manager._spawn_args.get("cling", True)
+        
+        # Build spawn data packet
+        data = dict(type="SpawnVehicle", cling=cling)
+        data.update(vehicle.options)
+        data["name"] = vehicle.vid
+        data["model"] = vehicle.options["model"]
+        data["replace"] = True  # Critical: replace existing instead of spawning new
+        
+        # Convert color formats to BeamNG RGBA string format
+        for color in ("color", "color2", "color3"):
+            if data.get(color) is not None:
+                data[color] = rgba_to_str(coerce_color(data[color]))
+
+        # Send replacement command and wait for confirmation
+        resp = self.beamng.vehicles._send(data).recv("VehicleSpawned")
+        
+        if resp["success"]:
+            # Disconnect old connection and optionally reconnect
+            if connect:
+                vehicle.disconnect()
+                vehicle.port = None
+                vehicle.connect(self.beamng)
+        
+        return resp["success"]
+
     @staticmethod
     def _poll_and_publish(
         node, vehicle_name, sensor_name, sensor, publisher, publish_type
     ):
-        """Helper: poll sensor and publish based on publish_type"""
+        """
+        Poll sensor and publish data to ROS topic.
+        
+        Args:
+            node: ROS node instance
+            vehicle_name: Name of the vehicle
+            sensor_name: Name of the sensor
+            sensor: Sensor device instance
+            publisher: ROS publisher (None if not publishing)
+            publish_type: 0=no publish, 1=publish aggregated, >1=publish each record
+        """
         try:
+            # Poll sensor for latest data
             sensor.poll()
             all_data = sensor.get_all_data()
 
-            if getattr(node, "logger_queue", None) is not None and all_data:
+            # Queue data for logging if logger is configured
+            logger_queue = getattr(node, "logger_queue", None)
+            if logger_queue and all_data:
                 try:
-                    node.logger_queue.put(
-                        {
-                            "vehicle_name": vehicle_name,
-                            "sensor_name": sensor_name,
-                            "data": all_data,
-                        }
-                    )
+                    logger_queue.put({
+                        "vehicle_name": vehicle_name,
+                        "sensor_name": sensor_name,
+                        "data": all_data,
+                    })
                 except Exception as e:
                     node.get_logger().error(
                         f"Failed to enqueue logger data for {sensor_name}: {e}"
                     )
 
+            # Publish to ROS topic if publisher exists
             if publisher:
                 if publish_type > 1:
-                    # publish each record separately
+                    # Publish each record as separate message (streaming mode)
                     for record in all_data:
                         msg = sensor.to_ros_msg(record)
                         if msg:
                             publisher.publish(msg)
                 else:
+                    # Publish only the latest message
                     msg = sensor.to_ros_msg()
                     if msg:
                         publisher.publish(msg)
+                        
         except KeyboardInterrupt:
             node.get_logger().warn("User interrupt.")
         except Exception as e:
-            node.get_logger().error(f"Error polling/publishing {sensor_name}: {e}")
+            node.get_logger().error(
+                f"Error polling/publishing {vehicle_name}/{sensor_name}: {e}"
+            )
+
+    def _validate_poll_time(
+        self, node: rclpy.node.Node, veh_name: str, sensor_name: str, poll_time: Any
+    ) -> float:
+        """
+        Validate and sanitize poll_time value.
+        
+        Args:
+            node: ROS node for logging
+            veh_name: Vehicle name (for error messages)
+            sensor_name: Sensor name (for error messages)
+            poll_time: Raw poll_time value from config
+            
+        Returns:
+            Valid poll_time as float (minimum 0.001s, default 0.2s)
+        """
+        try:
+            poll_time = float(poll_time)
+        except (ValueError, TypeError):
+            node.get_logger().warn(
+                f"Invalid poll_time for {veh_name}/{sensor_name} ({poll_time}); "
+                f"using default 0.2s"
+            )
+            return 0.2
+
+        if poll_time <= 0:
+            node.get_logger().warn(
+                f"Non-positive poll_time for {veh_name}/{sensor_name} ({poll_time}); "
+                f"using minimum 0.001s"
+            )
+            return 0.001
+
+        return poll_time
+
+    def _setup_sensors_for_vehicle(
+        self, node: rclpy.node.Node, veh_name: str, sensor_cfg: Dict[str, Any]
+    ):
+        """
+        Configure polling and publishing for all sensors of a specific vehicle.
+        
+        Args:
+            node: ROS node to attach publishers and timers to
+            veh_name: Vehicle name
+            sensor_cfg: Dict mapping sensor_name -> {topic, poll_time, publish}
+        """
+        # Validate sensor config format
+        if not isinstance(sensor_cfg, dict):
+            node.get_logger().error(
+                f"Invalid ros_poll_config for vehicle '{veh_name}': "
+                f"expected dict, got {type(sensor_cfg).__name__}"
+            )
+            return
+
+        # Get or create vehicle publisher dict
+        veh_pub = node.sensor_publishers.get(veh_name, {})
+
+        for sensor_name, sensor_info in sensor_cfg.items():
+            # Clean up existing handles before re-registering
+            if sensor_name in veh_pub:
+                self._destroy_ros_polling_handles(node, veh_name, sensor_name)
+
+            # Get sensor device instance
+            sensor_device = self.get_sensor(sensor_name, veh_name)
+            if sensor_device is None:
+                node.get_logger().error(
+                    f"Sensor '{sensor_name}' not found for vehicle '{veh_name}'"
+                )
+                continue
+
+            # Validate sensor info format
+            if not isinstance(sensor_info, dict):
+                node.get_logger().error(
+                    f"Invalid config for {veh_name}/{sensor_name}: "
+                    f"expected dict, got {type(sensor_info).__name__}"
+                )
+                continue
+
+            # Extract and validate polling configuration
+            topic = sensor_info.get("topic", f"/{veh_name}/{sensor_name}")
+            poll_time = self._validate_poll_time(
+                node, veh_name, sensor_name, sensor_info.get("poll_time", 0.2)
+            )
+            publish_mode = sensor_info.get("publish", 0)
+
+            # Create publisher if publishing is enabled
+            publisher = None
+            if publish_mode > 0:
+                msg_type = sensor_device.ros_msg_type()
+                if msg_type is None:
+                    node.get_logger().error(
+                        f"Sensor {veh_name}/{sensor_name} has no ros_msg_type(); "
+                        f"cannot create publisher for topic '{topic}'"
+                    )
+                else:
+                    publisher = node.create_publisher(msg_type, topic, 10)
+
+            # Create timer with callback using lambda closure to capture variables
+            timer = node.create_timer(
+                poll_time,
+                lambda v=veh_name, s=sensor_name, sd=sensor_device, 
+                       p=publisher, pm=publish_mode: 
+                    SimulationManager._poll_and_publish(node, v, s, sd, p, pm),
+            )
+
+            # Store handles for cleanup
+            veh_pub[sensor_name] = {"pub": publisher, "timer": timer}
+
+        # Update node's sensor publishers dict
+        if veh_pub:
+            node.sensor_publishers[veh_name] = veh_pub
+
+    def _destroy_ros_polling_handles(
+        self, node: rclpy.node.Node, veh_name: str, sensor_name: str
+    ) -> None:
+        """
+        Clean up timer and publisher resources for a sensor.
+        
+        Safely destroys ROS timer and publisher objects, removing them from tracking dict.
+        
+        Args:
+            node: ROS node containing the resources
+            veh_name: Vehicle name
+            sensor_name: Sensor name
+        """
+        sensor_publishers = getattr(node, "sensor_publishers", None)
+        if not sensor_publishers:
+            return
+
+        veh_pub = sensor_publishers.get(veh_name, {})
+        handles = veh_pub.get(sensor_name)
+        if not handles:
+            return
+
+        # Destroy timer (cancel first, then destroy if available)
+        timer = handles.get("timer")
+        if timer:
+            try:
+                timer.cancel()
+                node.destroy_timer(timer)  # May not exist in all rclpy versions
+            except (AttributeError, Exception):
+                pass  # Timer cancelled is sufficient
+
+        # Destroy publisher
+        publisher = handles.get("pub")
+        if publisher:
+            try:
+                node.destroy_publisher(publisher)
+            except Exception:
+                pass
+
+        # Remove from tracking dict
+        veh_pub.pop(sensor_name, None)
+        if not veh_pub:
+            sensor_publishers.pop(veh_name, None)
 
     def register_ros_polling(self, node: rclpy.node.Node):
-        """Set up publishers and timers on the given node based on ros_poll_config"""
-        node.get_logger().debug("Registering ros_poll_config publishers/timers")
+        """
+        Register ROS publishers and polling timers for all configured sensors.
+        
+        Reads 'ros_poll_config' from simulation config and sets up:
+        - ROS publishers for each sensor
+        - Timers to poll sensors at specified rates
+        - Optional data logging queue
+        
+        Config format:
+            ros_poll_config:
+                vehicle_name:  # or "*" for all vehicles
+                    sensor_name:
+                        topic: "/topic/name"  # optional, default: /{vehicle}/{sensor}
+                        poll_time: 0.1  # seconds between polls
+                        publish: 1  # 0=no publish, 1=batch, >1=streaming
+        
+        Args:
+            node: ROS node to attach publishers and timers to
+        """
+        node.get_logger().debug("Registering ROS polling for sensors")
+        
+        # Clean up existing resources to prevent leaks on re-registration
+        if getattr(node, "sensor_publishers", None):
+            for veh_name, veh_pub in list(node.sensor_publishers.items()):
+                if isinstance(veh_pub, dict):
+                    for sensor_name in list(veh_pub.keys()):
+                        self._destroy_ros_polling_handles(node, veh_name, sensor_name)
+        
+        # Initialize fresh tracking dict
         node.sensor_publishers = {}
+        
+        # Get polling configuration
         pub_config = self.config.get("ros_poll_config", {})
+        if not isinstance(pub_config, dict):
+            node.get_logger().error(
+                f"Invalid ros_poll_config: expected dict, got {type(pub_config).__name__}"
+            )
+            return
+        
+        # Setup sensors for each vehicle
         for veh_name, sensor_cfg in pub_config.items():
-            veh_pub = {}
-            for sensor_name, sensor_info in sensor_cfg.items():
-                sensor_device = self.get_sensor(sensor_name, veh_name)
-                if sensor_device is None:
-                    node.get_logger().error(
-                        f"Sensor {sensor_name} not found for vehicle {veh_name}"
-                    )
-                    continue
-                topic = sensor_info.get("topic", f"/{veh_name}/{sensor_name}")
-                msg_type = sensor_device.ros_msg_type()
-                poll_time = sensor_info.get("poll_time", 0.2)
-                publish = sensor_info.get("publish", 0)
-                publisher = None
-                if publish > 0:
-                    publisher = node.create_publisher(msg_type, topic, 10)
-                # timer uses default args to capture loop variables
-                timer = node.create_timer(
-                    poll_time,
-                    lambda v=veh_name, s=sensor_name, sd=sensor_device, p=publisher, pt=publish: SimulationManager._poll_and_publish(
-                        node, v, s, sd, p, pt
-                    ),
-                )
-                veh_pub[sensor_name] = {"pub": publisher, "timer": timer}
-            if veh_pub:
-                node.sensor_publishers[veh_name] = veh_pub
+            if veh_name == "*":
+                # Wildcard: apply configuration to all vehicles
+                for actual_veh_name in self.vehicles:
+                    self._setup_sensors_for_vehicle(node, actual_veh_name, sensor_cfg)
+            else:
+                # Specific vehicle
+                self._setup_sensors_for_vehicle(node, veh_name, sensor_cfg)

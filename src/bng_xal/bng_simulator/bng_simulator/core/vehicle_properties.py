@@ -270,6 +270,56 @@ def stop_safety_features(vehicle: Vehicle) -> dict:
     return veh_root._send(data).recv()["data"]
 
 
+def disable_safety_features(
+    vehicle: Vehicle,
+    abs: bool = True,
+    esc: bool = True,
+    stop_controllers: bool = True,
+) -> dict:
+    """Disable vehicle safety features in one call.
+
+    This is a convenience wrapper used by higher-level tooling.
+
+    Args:
+        vehicle: Target vehicle.
+        abs: If True, disable ABS (if supported).
+        esc: If True, disable ESC (if supported).
+        stop_controllers: If True, also call StopSafetyFeatures to unload safety controllers.
+
+    Returns:
+        dict: A summary of actions taken and best-effort status payloads.
+    """
+    out = {
+        "requested": {"abs": bool(abs), "esc": bool(esc), "stop_controllers": bool(stop_controllers)},
+        "abs": None,
+        "esc": None,
+        "stopped_controllers": None,
+        "errors": [],
+    }
+
+    if abs:
+        try:
+            set_ABS(vehicle, enabled=False)
+            out["abs"] = get_ABS(vehicle)
+        except Exception as e:
+            out["errors"].append(f"ABS disable failed: {e}")
+
+    if esc:
+        try:
+            set_ESC(vehicle, enabled=False)
+            out["esc"] = get_ESC(vehicle)
+        except Exception as e:
+            out["errors"].append(f"ESC disable failed: {e}")
+
+    if stop_controllers:
+        try:
+            out["stopped_controllers"] = stop_safety_features(vehicle)
+        except Exception as e:
+            out["errors"].append(f"StopSafetyFeatures failed: {e}")
+
+    return out
+
+
 def control_vehicle(
     vehicle: Vehicle,
     filter: str = "Direct",

@@ -33,3 +33,24 @@ def convert_euler_to_quaternion(
     z = sy * cp * cr - cy * sp * sr
 
     return [x, y, z, w]
+
+
+def process_euler_to_quat(args_dict: dict, deg_to_rad_factor: float = np.pi / 180) -> None:
+    """
+    Process Euler angles in args_dict and convert to quaternion in place.
+    
+    Modifies args_dict: sets 'rot_quat' and removes Euler angle keys.
+    
+    Args:
+        args_dict: Dictionary that may contain yaw_angle, pitch_angle, roll_angle
+        deg_to_rad_factor: Conversion factor from degrees to radians
+    """
+    if "yaw_angle" in args_dict or "pitch_angle" in args_dict or "roll_angle" in args_dict:
+        yaw_rad = args_dict.get("yaw_angle", 0) * deg_to_rad_factor
+        pitch_rad = args_dict.get("pitch_angle", 0) * deg_to_rad_factor
+        roll_rad = args_dict.get("roll_angle", 0) * deg_to_rad_factor
+        rot_quat = convert_euler_to_quaternion((roll_rad, pitch_rad, yaw_rad))
+        args_dict["rot_quat"] = tuple([float(q) for q in rot_quat])
+        args_dict.pop("yaw_angle", None)
+        args_dict.pop("pitch_angle", None)
+        args_dict.pop("roll_angle", None)
