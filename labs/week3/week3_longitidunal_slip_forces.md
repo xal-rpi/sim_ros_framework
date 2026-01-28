@@ -92,7 +92,7 @@ code .
 Then either:
 - create a new notebook in VS Code (Python kernel), or
 - open the provided sample notebook and follow/modify it:
-   - [labs/week3/prelab_load_and_plot.ipynb](labs/week3/prelab_load_and_plot.ipynb)
+   - [labs/week3/prelab_load_and_plot.ipynb](https://github.com/xal-rpi/sim_ros_framework/blob/hpa-s26/labs/week3/prelab_load_and_plot.ipynb)
 
 **Pre-lab deliverable:** load one run and produce at least one clean plot of $v_x(t)$, wheel linear speeds ($w_f(t)$ and $w_r(t)$ obtained by averaging left/right `wheelXX_speed`), and `rear_wheel_torque_est(t)` vs time from `/EGO/gtstate`. Save the plots (PNG) and include them in your report.
 
