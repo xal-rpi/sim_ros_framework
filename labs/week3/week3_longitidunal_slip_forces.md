@@ -20,6 +20,9 @@ In WSL, update the repo and rebuild the workspace overlay. From a terminal:
 cd ~/ros2_ws/src/sim_ros_framework
 git pull origin hpa-s26
 
+# Update the mod
+./luamod/build.bash --win --all
+
 # Rebuild (recommended to start this lab from a clean build)
 ./xal_bng_ws_build.bash -w ~/ros2_ws -r jazzy --clean
 
