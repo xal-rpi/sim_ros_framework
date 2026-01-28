@@ -33,3 +33,6 @@ float64 brake    # brake input [0-1]
 # Acceleration (body frame)
 float64 accel_x  # longitudinal acceleration [m/s^2]
 float64 accel_y  # lateral acceleration [m/s^2]
+
+# Torque estimation
+float64 rear_wheel_torque_est  # estimated rear wheel torque [Nm]

@@ -17,8 +17,8 @@ beamng:
 
 # Level configuration (new schema)
 scenario:
-  # level: derby  # Level to load in CREATE mode
-  level: smallgrid  # Level to load in CREATE mode
+  level: derby  # Level to load in CREATE mode
+  # level: smallgrid  # Level to load in CREATE mode
   name: basic  # Optional objects to spawn
 
 scenario_mode: create
@@ -31,14 +31,16 @@ extra_objects: {}  # Optional objects to spawn
 vehicles:
   EGO: # Name of the car
     model_args:
-      model: sunburst2 # bolide # utv # etk800 # utv # bolide, etk800, wild (utv)
-      part_config: /vehicles/sunburst2/drift_pro.pc
+      # model: sunburst2 # bolide # utv # etk800 # utv # bolide, etk800, wild (utv)
+      # part_config: /vehicles/sunburst2/drift_pro.pc
+      model: utv # bolide # utv # etk800 # utv # bolide, etk800, wild (utv)
+      part_config: /vehicles/utv/wild.pc
       # model: etk800 # bolide # utv # etk800 # utv # bolide, etk800, wild (utv)
       # part_config: vehicles/etk800/844_track_M.pc
       license: EGO
     spawn:  # Renamed from scenario_args
-      # pos: [44.05, 127.22, 79.3]
-      pos: [0, 0, 0]
+      pos: [44.05, 127.22, 79.3]
+      # pos: [0, 0, 0]
       yaw_angle: 0
       cling: True  # Ground snapping
     # All the sensors that the vehicle has
@@ -70,6 +72,10 @@ vehicles:
         gfx_update_time: 0.3
         physics_update_time: 0.005
         num_physics_steps_for_gfx_save: 5
+        torqueNN:
+          modelName: arata_torque_map.json   # resolves under lua/vehicle/controller/xlab/models/
+          outputScaling: 100.0               # ONLY scaling used by gtState
+          fieldName: rear_wheel_torque_est        # optional (default: estimated_torque)
         # pos: [0, 0, 3] # Position is relative to the center of mass of the vehicle
         # pos: cog # Position could be a string: 'cog, 'front', 'rear', 'left', 'right'.
         # is_pos_relative_to_cog: True
@@ -87,14 +93,25 @@ vehicles:
         sendPort: 64258
         gtStateName: gtstate
         gtStateSendRate: 0.01
-        # drivetrain:
-        #   mode: 1 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
-        #   startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
-        # calibration:
-        #   maxSteeringAngle : 0.69 # has to be obtained manually, rad
-        #   throttleP : 0.2
-        #   throttleI : 0.000
-        #   throttleD : 0.000
+        drivetrain:
+          mode: 2 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic
+          startGear: 2 # with cvt, 0 : neutral, 1 : park, 2 : drive
+        calibration:
+          controlMode : auto
+          # gtStateSendRate: 0.01
+          # modelName: wheel_speed_v4.json
+          # ctrl_type: 1 # 0 : wrdot,fxr; 1 : ff torque
+          # modelName: wheel_speed_wit_integ_v1.json
+          modelName: arata_torque_inverter.json
+          TorqueKp: -0.21040940284729004
+          TorqueKd: -0.000756041263230145
+          TorqueKi: -20.635147094726562
+          steeringKi: 0.1
+          steeringKp: 0.01
+          steeringToInput: -0.5948683325943701
+          steeringIntegAlpha: 0.9 # 0.9
+          commandTimeout: 1.0 # Timeout between two mpc solutions before giving back control
+          ffcoef: 0.8
 
 
 # high_level_controller:

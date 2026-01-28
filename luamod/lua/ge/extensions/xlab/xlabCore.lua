@@ -39,6 +39,7 @@ M.handleOpenGtState = function(request)
   args.isForceInsideTriangle = request['isForceInsideTriangle']
   args.isDirWorldSpace = request['isDirWorldSpace']
   args.isAllowWheelNodes = request['isAllowWheelNodes']
+  args.torqueNN = request['torqueNN']
 
   local name = request['name']
   local vid = scenetree.findObject(request['vid']):getID()

@@ -24,15 +24,15 @@ scenario_mode: attach
 
 # Vehicle configuration (match by name)
 vehicles:
-  "*":  # Must match vehicle ID in BeamNG
+  "thePlayer":  # Must match vehicle ID in BeamNG
     sensors:
       basicStateTemp:
         type: BasicState
 
 # ROS publishing configuration
 ros_poll_config:
-  "*":
+  "thePlayer":
     basicStateTemp:
-      topic: /ego/basicState
+      # topic: /ego/basicState
       poll_time: 0.05
       publish: 1

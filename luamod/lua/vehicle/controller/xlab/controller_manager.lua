@@ -70,6 +70,7 @@ local common = {
     accel_x = 0,
     accel_y = 0,
     -- accel_z = 0,
+    rear_wheel_torque_est = 0.0,
   },
 
   performanceMetrics = {
@@ -159,6 +160,7 @@ local function packReducedGtState(gtReading)
   common.reducedGtState.accel_y = gtReading.accel[2]
   -- accel_z = gtReading.accel[3]
   -- Add torque estimates and more if needed
+  common.reducedGtState.rear_wheel_torque_est = gtReading.rear_wheel_torque_est or 0.0
 end
 
 -- Manager-owned periodic sender of reduced gtState.

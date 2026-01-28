@@ -119,6 +119,7 @@ local function create(data)
     triangleSpaceLeft = decodedData.triangleSpaceLeft,
     isVisualised = decodedData.isVisualised,
     isUsingGravity = decodedData.isUsingGravity,
+    torqueNN = decodedData.torqueNN,
   }
 
   gtStates[decodedData.sensorId] = {

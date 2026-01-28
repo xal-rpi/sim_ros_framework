@@ -4,10 +4,15 @@ local common
 local logTag = 'controller_nn_torque'
 
 -- Import necessary math functions for performance
+local tanh = math.tanh
 local abs = math.abs
 local sqrt = math.sqrt
 local max = math.max
 local min = math.min
+
+-- Neural network handles
+local nn = nil
+local nn_model = nil
 
 local _ = nil -- avoid global warning
 
@@ -38,10 +43,12 @@ local controllerState = {
   targetTorque = nil,      -- Target wheel torque (Nm), nil means no command
   targetSteering = nil,    -- Target steering input [-1, 1], nil means no command
   targetBrake = nil,       -- Target brake input [0, 1], nil means no command
-  
-  -- PID state for torque control
-  torqueErrorIntegral = 0,
-  torqueErrorPrev = 0,
+  targetWheelSpeed = nil,  -- Target wheel speed (m/s), nil means no command
+  targetVehicleSpeed = nil, -- Target vehicle speed (m/s), nil means no command
+
+  -- NN control state
+  old_diff_rear_wheel_speed_ms = 0,  -- Previous wheel speed error for derivative
+  leaky_err_wr = 0,                  -- Leaky integrator for wheel speed error
   
   -- Tracking
   lastAppliedThrottle = 0,
@@ -53,23 +60,23 @@ local controllerState = {
 local calibration = {
   commandTimeout = 0.5,          -- Timeout in seconds before reverting to manual control
   
+  -- Neural network model settings
+  modelName = 'wheel_speed_v4.json',  -- NN model file name
+  modelPath = nil,                     -- Full model path (takes precedence if set)
+  
   -- Torque control PID gains
-  torqueKp = 1.0,
-  torqueKi = 0.2,
-  torqueKd = 0.05,
+  TorqueKp = 0.1,
+  TorqueKi = 0.05,
+  TorqueKd = 0.01,
+  
+  -- Feedforward coefficient: 1.0 = pure FF, 0.0 = pure PID
+  ffcoef = 0.7,
   
   -- Steering control gains
   steeringKp = 0.0,              -- Proportional gain for steering correction
   steeringKi = 0.0,              -- Integral gain for steering correction
   steeringIntegAlpha = 0.9,      -- Leaky integrator for steering
   steeringToInput = 0.5,         -- Conversion factor: road_wheel_angle = steering_input * steeringToInput
-  
-  -- Brake control
-  brakeDirectMode = true,        -- If true, apply brake directly; if false, use PID
-  
-  -- Static gain correction for torque (from linear regression)
-  torqueStaticGain = 1.10789884832988,
-  torqueFrictionOffset = 398.247968291034,
 }
 
 -- Reference to the gtState controller
@@ -78,12 +85,14 @@ local gtStateController = nil
 --[[
     Parse incoming JSON command message.
     Expected format: {
-      "torque": <number>,     -- Optional: target wheel torque in Nm
-      "steering": <number>,   -- Optional: target steering input [-1, 1]
-      "brake": <number>       -- Optional: target brake input [0, 1]
+      "torque": <number>,        -- Optional: target wheel torque in Nm
+      "steering": <number>,      -- Optional: target steering input [-1, 1]
+      "brake": <number>,         -- Optional: target brake input [0, 1]
+      "wheel_speed": <number>,   -- Optional: target wheel speed in m/s
+      "vehicle_speed": <number>  -- Optional: target vehicle speed in m/s
     }
     
-    Any field can be null/missing to leave that control to the user.
+    Any field can be null/missing - that field will be set to nil.
     
     Parameters:
         msg (string): JSON message string
@@ -104,10 +113,12 @@ local function parseMessage(msg)
     return false
   end
 
-  -- Extract target values (they can be nil/null)
+  -- Extract target values (they can be nil/null - if missing, variable becomes nil)
   controllerState.targetTorque = data.torque
   controllerState.targetSteering = data.steering
   controllerState.targetBrake = data.brake
+  controllerState.targetWheelSpeed = data.wheel_speed
+  controllerState.targetVehicleSpeed = data.vehicle_speed
 
   -- Update command timestamp
   lastCommandTime = nowSim
@@ -121,15 +132,85 @@ local function parseMessage(msg)
 end
 
 --[[
-    Apply torque control using PID + feedforward.
-    Converts wheel torque target to throttle input.
+    Apply torque control using NN feedforward + PID feedback.
+    Converts wheel torque or wheel speed target to throttle input.
     
     Parameters:
-        targetWheelTorque (number): Desired wheel torque in Nm
+        targetWheelTorque (number): Desired wheel torque in Nm (can be nil)
         dt (number): Time step in seconds
 ]]
-local function applyTorqueControl(targetWheelTorque, dt)
-  log('I', logTag, string.format('Applying torque control: target=%.3f Nm', targetWheelTorque))
+local function applyTorqueControl(dt)
+  local cs = controllerState
+  local vr = common.cachedGtReading
+  
+  if not vr then
+    log('E', logTag, 'Ground truth reading unavailable')
+    return
+  end
+  
+  -- Get current state
+  local rear_wheel_speed_ms = (vr.wheelRR.speed + vr.wheelRL.speed) / 2
+  local engine_speed_rad = vr.RPM * common.constants.rpmToAV
+  local boost_pressure = vr.turboBoost
+  local throttle = vr.throttle
+  
+  -- Training configuration parameters (should match NN training)
+  local train_dt = 0.01
+  local max_error_wr = 100
+  local tau_train = 0.01
+  
+  if not nn_model then
+    log('E', logTag, 'NN model not loaded')
+    return
+  end
+
+  -- Start with feedforward throttle from NN
+  local ffthrottle
+  if cs.targetTorque ~= nil then
+    -- Run NN to get feedforward throttle
+    local out = nn.run(nn_model, {
+        engine_speed_rad,
+        boost_pressure,
+        rear_wheel_speed_ms,
+        cs.targetTorque,
+    })
+    ffthrottle = out[1]
+  end
+
+  -- Compute wheel speed error
+  local pid_throttle
+  if cs.targetWheelSpeed ~= nil then
+    local diff_rear_wheel_speed_ms = rear_wheel_speed_ms - cs.targetWheelSpeed
+    local alpha = train_dt / (train_dt + tau_train)
+    local delta_diff = diff_rear_wheel_speed_ms - cs.old_diff_rear_wheel_speed_ms
+    cs.old_diff_rear_wheel_speed_ms = diff_rear_wheel_speed_ms
+    cs.leaky_err_wr = alpha * cs.leaky_err_wr + diff_rear_wheel_speed_ms * train_dt
+
+    -- Compute PID feedback correction
+    pid_throttle = calibration.TorqueKp * diff_rear_wheel_speed_ms 
+                        + calibration.TorqueKi * cs.leaky_err_wr 
+                        + calibration.TorqueKd * (delta_diff / train_dt)
+    pid_throttle = max(-1.0, min(1.0, pid_throttle))
+    pid_throttle = 0.5 * pid_throttle + 0.5  -- Map from [-1,1] to [0,1]
+    -- Smooth PID application
+    local pid_throttle_dot = (pid_throttle - throttle) / 1.0
+    pid_throttle = throttle + 0.005 * pid_throttle_dot
+  end
+
+  -- Blend feedforward and feedback
+  if pid_throttle == nil then pid_throttle = ffthrottle end
+  if ffthrottle == nil then ffthrottle = pid_throttle end
+  local newThrottle = calibration.ffcoef * ffthrottle + (1.0 - calibration.ffcoef) * pid_throttle
+  
+  -- Clamp throttle to valid range [0, 1]
+  newThrottle = max(0, min(1, newThrottle))
+  
+  -- Apply throttle
+  input.event('throttle', newThrottle, FILTER_AI)
+  electrics.values.throttle = newThrottle
+  electrics.values.throttle_input = newThrottle
+  
+  cs.lastAppliedThrottle = newThrottle
 end
 
 --[[
@@ -205,11 +286,13 @@ local function applyControls(dt)
       controllerMode = CONTROLLER_MODE.OFF
       
       -- Reset PID states
-      cs.torqueErrorIntegral = 0
-      cs.torqueErrorPrev = 0
+      cs.old_diff_rear_wheel_speed_ms = 0
+      cs.leaky_err_wr = 0
       cs.targetTorque = nil
       cs.targetSteering = nil
       cs.targetBrake = nil
+      cs.targetWheelSpeed = nil
+      cs.targetVehicleSpeed = nil
     end
     
     -- Do NOT apply any controls - user has full manual control
@@ -219,8 +302,8 @@ local function applyControls(dt)
   -- Controller is active - apply commanded controls
   
   -- Apply torque control if specified
-  if cs.targetTorque ~= nil then
-    applyTorqueControl(cs.targetTorque, dt)
+  if cs.targetTorque ~= nil or cs.targetWheelSpeed ~= nil then
+    applyTorqueControl(dt)
   end
   
   -- Apply steering control if specified
@@ -268,14 +351,37 @@ function M.init(c)
   if gtStateController and gtStateController.registerCustomField then
     gtStateController.registerCustomField("controller_mode", controllerMode)
     gtStateController.registerCustomField("target_torque", 0)
-    gtStateController.registerCustomField("target_steering", 0)
-    gtStateController.registerCustomField("target_brake", 0)
+    gtStateController.registerCustomField("target_wr", 0)
+    gtStateController.registerCustomField("target_v", 0)
+    -- gtStateController.registerCustomField("target_steering", 0)
+    -- gtStateController.registerCustomField("target_brake", 0)
     log('I', logTag, 'Registered custom fields with gtState')
   else
     log('W', logTag, 'Could not register custom fields with gtState')
   end
   
-  log('I', logTag, 'NN Torque controller initialized')
+  -- Initialize neural network library
+  nn = require('lua/vehicle/controller/xlab/lib/nn')
+  if not nn then
+    log('E', logTag, 'Failed to load nn.lua library')
+    return false
+  end
+  nn.init()
+  
+  -- Use model path from calibration if provided, otherwise build from model name
+  local modelPath = calibration.modelPath
+  if not modelPath then
+    local modelName = calibration.modelName
+    modelPath = 'lua/vehicle/controller/xlab/models/' .. modelName
+  end
+  
+  nn_model = nn.loadModel(modelPath)
+  if not nn_model then
+    log('E', logTag, 'Failed to load NN model from ' .. modelPath)
+    return false
+  end
+  
+  log('I', logTag, 'NN Torque controller initialized with model: ' .. modelPath)
   return true
 end
 
@@ -328,13 +434,15 @@ function M.update(dt)
   if gtStateController then
     gtStateController.setCustomField("controller_mode", controllerMode)
     gtStateController.setCustomField("target_torque", controllerState.targetTorque or 0)
-    gtStateController.setCustomField("target_steering", controllerState.targetSteering or 0)
-    gtStateController.setCustomField("target_brake", controllerState.targetBrake or 0)
+    gtStateController.setCustomField("target_wr", controllerState.targetWheelSpeed or 0)
+    gtStateController.setCustomField("target_v", controllerState.targetVehicleSpeed or 0)
+    -- gtStateController.setCustomField("target_steering", controllerState.targetSteering or 0)
+    -- gtStateController.setCustomField("target_brake", controllerState.targetBrake or 0)
   end
   
   -- Periodic logging (1 Hz)
   updatesSinceLog = updatesSinceLog + 1
-  if nowSim - lastLogSimTime >= 1.0 then
+  if nowSim - lastLogSimTime >= 5.0 then
     local nowRealTime = os.clock()
     local realElapsed = nowRealTime - lastLogRealTime
     local simElapsed = nowSim - lastLogSimTime
@@ -361,6 +469,10 @@ end
     Cleans up resources when controller is stopped.
 ]]
 function M.stop()
+  if nn_model then
+    nn.freeModel(nn_model)
+    nn_model = nil
+  end
   log('I', logTag, 'NN Torque controller cleanup')
 end
 
@@ -385,13 +497,29 @@ function M.calibrate(params)
   
   if not params then return end
   
-  -- Iterate through calibration parameters
-  for k, v in pairs(params) do
-    if calibration[k] ~= nil then
-      calibration[k] = v
-      log('I', logTag, '  ' .. k .. ' = ' .. tostring(v))
-    else
-      log('W', logTag, 'Unknown calibration parameter: ' .. k)
+  -- Handle model specification - prioritize full path over just name
+  if params.modelPath ~= nil then
+    calibration.modelPath = params.modelPath
+    -- Extract model name from path for compatibility
+    local _, filename = path.splitpath(params.modelPath)
+    calibration.modelName = filename
+    log('I', logTag, 'modelPath = ' .. tostring(calibration.modelPath))
+  elseif params.modelName ~= nil then
+    calibration.modelName = params.modelName
+    calibration.modelPath = 'lua/vehicle/controller/xlab/models/' .. params.modelName
+    log('I', logTag, 'modelName = ' .. tostring(calibration.modelName))
+  end
+  
+  -- Handle numeric parameters
+  local numericParams = {
+    'commandTimeout', 'ctrl_type', 'TorqueKp', 'TorqueKi', 'TorqueKd',
+    'ffcoef', 'steeringKp', 'steeringKi', 'steeringIntegAlpha', 'steeringToInput'
+  }
+  
+  for _, key in ipairs(numericParams) do
+    if params[key] ~= nil then
+      calibration[key] = tonumber(params[key]) or calibration[key]
+      log('I', logTag, key .. ' = ' .. tostring(calibration[key]))
     end
   end
 end
@@ -404,8 +532,10 @@ function M.reset()
     targetTorque = nil,
     targetSteering = nil,
     targetBrake = nil,
-    torqueErrorIntegral = 0,
-    torqueErrorPrev = 0,
+    targetWheelSpeed = nil,
+    targetVehicleSpeed = nil,
+    old_diff_rear_wheel_speed_ms = 0,
+    leaky_err_wr = 0,
     lastAppliedThrottle = 0,
     lastAppliedSteering = 0,
     lastAppliedBrake = 0,

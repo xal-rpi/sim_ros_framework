@@ -146,6 +146,8 @@ class VehicleGtReceiver:
         msg.accel_x = float(state.get('accel_x', 0.0))
         msg.accel_y = float(state.get('accel_y', 0.0))
         
+        msg.rear_wheel_torque_est = float(state.get('rear_wheel_torque_est', 0.0))
+        
         self.publisher.publish(msg)
 
 

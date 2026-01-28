@@ -54,6 +54,7 @@ class GtStateWrapper(CommBase):
         is_visualised: bool = True,
         is_snapping_desired: bool = False,
         is_force_inside_triangle: bool = False,
+        torqueNN: Optional[dict] = None,
     ):
         super().__init__(beamng, vehicle)
 
@@ -81,6 +82,7 @@ class GtStateWrapper(CommBase):
             is_visualised,
             is_snapping_desired,
             is_force_inside_triangle,
+            torqueNN
         )
 
         # Fetch the unique Id number (in the simulator)
@@ -122,6 +124,7 @@ class GtStateWrapper(CommBase):
         is_visualised: bool,
         is_snapping_desired: bool,
         is_force_inside_triangle: bool,
+        torqueNN: Optional[dict] = None,
     ) -> None:
         data: StrDict = dict()
         data["name"] = name
@@ -138,6 +141,8 @@ class GtStateWrapper(CommBase):
         data["isSnappingDesired"] = is_snapping_desired
         data["isForceInsideTriangle"] = is_force_inside_triangle
         data["isDirWorldSpace"] = True # True
+        if torqueNN is not None:
+            data["torqueNN"] = torqueNN
         args = {
             "type": "OpenGtState",
             "ack": "OpenedGtState",

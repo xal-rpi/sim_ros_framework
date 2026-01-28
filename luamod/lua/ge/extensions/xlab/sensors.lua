@@ -58,7 +58,30 @@ local function createGtState(vid, args)
     triangleSpaceForward = attachData['triangleSpaceForward'],
     triangleSpaceLeft = attachData['triangleSpaceUp'],
     isVisualised = args.isVisualised,
+    torqueNN = args.torqueNN,
   }
+
+  -- If torque NN is enabled, prepare the native NN shared lib path mailbox.
+  -- This mirrors the logic in ge/extensions/xlab/xlabCore.lua for nn_ controllers.
+  if args.torqueNN ~= nil then
+    assert(
+      not Engine.Sandbox.Lua.isEnabled(),
+      'Torque NN can only run when the Lua security sandbox is disabled. '
+        .. "You will have to restart BeamNG with the '-disable-sandbox' argument."
+    )
+
+    local mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.so'
+    local fs_libpath = 'tmp/libnn.so'
+    if jit and jit.os then
+      if jit.os == 'Windows' then
+        mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.dll'
+        fs_libpath = 'tmp/libnn.dll'
+      end
+    end
+    copyfile(mod_libpath, fs_libpath)
+    be:sendToMailbox('libnnPath', FS:virtual2Native(fs_libpath))
+    log('I', 'gtState', 'Torque NN enabled; using ' .. fs_libpath)
+  end
 
   -- Let's log node indices and barycentric coordinates.
   log(

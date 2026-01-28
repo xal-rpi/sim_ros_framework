@@ -388,7 +388,7 @@ def load_run_data(
                 for name, data in actual_data.items():
                     # Prefer (vehicle, sensor) tuple keys if available
                     if isinstance(name, (tuple, list)) and len(name) == 2:
-                        merged_name = f"{name[0]}/{name[1]}"
+                        merged_name = f"/{name[0]}/{name[1]}"
                         merged[merged_name] = data
                     else:
                         merged[name] = data

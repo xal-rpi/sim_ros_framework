@@ -25,6 +25,12 @@ local logTag = 'GtState'
 -- Will store custom fields added by controllers or other modules.
 local customFields = {}
 
+-- Optional NN torque estimator (enabled if init(data).torqueNN is provided).
+local nn = nil
+local torqueNNModel = nil
+local torqueNNOutputScaling = 1.0
+local torqueNNFieldName = 'estimated_torque'
+
 -- Reference to the global state manager extension
 local gtStateManager = nil
 
@@ -543,6 +549,24 @@ local function update(dtSim)
   latestReading.gearRatio = gearbox and gearbox.gearRatio or 0
   latestReading.gearIndex = elecVals.gearIndex
 
+  -- Optional: estimate torque from current state using NN.
+  -- Inputs are intentionally hardcoded (like controller_nn_*):
+  --   [engine_speed_rads, boost_pressure, throttle, rear_wheelspeed_ms]
+  if torqueNNModel and nn then
+    local rear_wheelspeed_ms = 0.5 * (wheelRRInfo.speed+ wheelRLInfo.speed)
+    local engine_speed_rads = latestReading.RPM * constants.rpmToAV
+    local boost_pressure = latestReading.turboBoost
+    local throttle = latestReading.throttle
+
+    local out = nn.run( torqueNNModel, {
+      engine_speed_rads,
+      boost_pressure,
+      throttle,
+      rear_wheelspeed_ms,
+    })
+    setCustomField(torqueNNFieldName, out[1] * torqueNNOutputScaling)
+  end
+
   -- Add the custom fields
   for fieldName, value in pairs(customFields) do
     latestReading[fieldName] = value
@@ -663,6 +687,51 @@ local function init(data)
   if engine == nil then log('E', logTag, 'Engine reference is nil') end
   if gearbox == nil then log('E', logTag, 'Gearbox reference is nil') end
 
+  -- Optional torque estimation NN setup.
+  torqueNNModel = nil
+  local torqueNNCfg = data.torqueNN
+  if torqueNNCfg ~= nil then
+    torqueNNFieldName = torqueNNCfg.fieldName or torqueNNCfg.outputFieldName or 'estimated_torque'
+    torqueNNOutputScaling = tonumber(torqueNNCfg.outputScaling or torqueNNCfg.output_scaling) or 1.0
+
+    if customFields[torqueNNFieldName] == nil then
+      registerCustomField(torqueNNFieldName, 0)
+    end
+
+    local okReq, nnLib = pcall(require, 'lua/vehicle/controller/xlab/lib/nn')
+    if not okReq or not nnLib then
+      log('E', logTag, 'Torque NN disabled: failed to require nn library')
+    else
+      nn = nnLib
+      local okInit, errInit = pcall(nn.init)
+      if not okInit then
+        log('E', logTag, 'Torque NN disabled: nn.init failed: ' .. tostring(errInit))
+      else
+        local modelPath = torqueNNCfg.modelPath
+        if not modelPath then
+          local modelName = torqueNNCfg.modelName or torqueNNCfg.model
+          if modelName then
+            modelPath = 'lua/vehicle/controller/xlab/models/' .. modelName
+          end
+        end
+
+        if not modelPath then
+          log('E', logTag, 'Torque NN disabled: no modelPath/modelName provided in torqueNN config')
+        else
+          local okLoad, modelOrErr = pcall(nn.loadModel, modelPath)
+          if not okLoad or not modelOrErr then
+            log('E', logTag, 'Torque NN disabled: failed to load model: ' .. tostring(modelOrErr))
+          else
+            torqueNNModel = modelOrErr
+            log('I', logTag, 'Torque NN enabled: model=' .. tostring(modelPath)
+              .. ' field=' .. tostring(torqueNNFieldName)
+              .. ' outputScaling=' .. tostring(torqueNNOutputScaling))
+          end
+        end
+      end
+    end
+  end
+
   -- Debug initialization
   log(
     'I',
@@ -694,6 +763,13 @@ local function reset()
   timeSinceLastPoll = timeSinceLastPoll % max(GFXUpdateTime, 1e-30)
 
   filterState.initialized = false
+end
+
+local function stop()
+  if nn and torqueNNModel then
+    pcall(nn.freeModel, torqueNNModel)
+  end
+  torqueNNModel = nil
 end
 
 --[[
@@ -743,6 +819,7 @@ local function incrementTimer(dtSim) timeSinceLastPoll = timeSinceLastPoll + dtS
 M.update = update
 M.init = init
 M.reset = reset
+M.stop = stop
 M.getSensorData = getSensorData
 M.getLatest = getLatest
 M.incrementTimer = incrementTimer
