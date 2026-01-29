@@ -101,7 +101,7 @@ Then either:
 
 ### Part A — Implement the experiment (straight line, torque schedule)
 
-First, download the [mods](https://www.modland.net/download/525506) that will provide access to the low-friction surface and copy it inside your BeamNG mods folder: `/mnt/c/Users/frmbo/AppData/Local/BeamNG/BeamNG.tech/current/mods`
+First, download the [mods](https://rpiexchange-my.sharepoint.com/:f:/g/personal/djeumf2_rpi_edu/IgAv_hacPcC5RLTxYfy0etWTARbbrZiBdPedUNouUxF4EV4?e=XNCYD8) that will provide access to the low-friction surface and copy it inside your BeamNG mods folder: `/mnt/c/Users/frmbo/AppData/Local/BeamNG/BeamNG.tech/current/mods`
 
 You will implement a straight-line scenario:
 - steering command stays at **0** throughout
