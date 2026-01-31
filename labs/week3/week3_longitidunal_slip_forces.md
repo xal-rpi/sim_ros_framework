@@ -226,9 +226,9 @@ At minimum, your log must contain time-synchronized samples of:
 - Commanded torque (from `/EGO/llc_cmd/torque`)
 
 Constants you will need (from config/docs):
-- vehicle mass `m` [kg]
-- wheel radius `R` [m]
-- wheel inertias `I_f`, `I_r` [kg·m²]
+- vehicle mass `m = 851.2` [kg]
+- wheel radius `R = 0.384` [m]
+- wheel inertias `I_f = I_r = 10.7` [kg·m²] ( Not a realistic value, but use it for this lab )
 
 ---
 
@@ -329,8 +329,10 @@ Compute smoothed derivatives:
 We model the vehicle and wheels in pure longitudinal motion (no lateral dynamics, no steering, no braking).
 
 $$m \dot{v}_x = F_{x,f} + F_{x,r}$$
-$$I_f \dot{\omega}_f = -R F_{x,f}$$
-$$I_r \dot{\omega}_r = T_{\mathrm{drive}} - R F_{x,r}$$
+$$I_f \dot{\omega}_f = -R^2 F_{x,f}$$
+$$I_r \dot{\omega}_r = (T_{\mathrm{drive}} - R F_{x,r}) R$$
+
+**Note that the wheel speed measurements are linear speeds and thus we multiplied the front and rear wheel dynamics equations by $R$ to convert angular velocity to linear velocity.**
 
 The **unknowns** are the longitudinal tire forces at the contact patches:
 
@@ -372,10 +374,10 @@ We have **3 equations** but only **2 unknowns** ($F_{x,f}$, $F_{x,r}$). This ove
 $m\dot{v}_x = F_{x,f} + F_{x,r}$
 
 **Equation 2 (front wheel dynamics):**  
-$-I_f\dot{\omega}_f = R F_{x,f}$
+$-I_f\dot{\omega}_f = R^2 F_{x,f}$
 
 **Equation 3 (rear wheel dynamics):**  
-$T_{drive} - I_r\dot{\omega}_r = R F_{x,r}$
+$R T_{drive} - I_r\dot{\omega}_r = R^2 F_{x,r}$
 
 In matrix form: $b = A x$ where:
 
@@ -383,13 +385,13 @@ $$
 b = \begin{bmatrix}
 m\dot{v}_x \\
 -I_f\dot{\omega}_f \\
-T_{drive} - I_r\dot{\omega}_r
+RT_{drive} - I_r\dot{\omega}_r
 \end{bmatrix},
 \quad
 A = \begin{bmatrix}
 1 & 1\\
-R & 0\\
-0 & R
+R^2 & 0\\
+0 & R^2
 \end{bmatrix},
 \quad
 x = \begin{bmatrix}
@@ -409,13 +411,13 @@ where $A^\dagger$ is the Moore–Penrose pseudoinverse.
 In Python (using NumPy), a pseudo code could look like:
 ```python
 A = np.array([[1, 1],
-              [R, 0],
-              [0, R]])
+              [R^2, 0],
+              [0, R^2]])
               
 for i in range(len(t)):
     b = np.array([m * dvx_dt[i],
                   -I_f * domega_f_dt[i],
-                  T_drive[i] - I_r * domega_r_dt[i]])
+                  R * T_drive[i] - I_r * domega_r_dt[i]])
     
     F_hat = np.linalg.lstsq(A, b, rcond=None)[0]
     F_xf[i] = F_hat[0]
@@ -430,11 +432,11 @@ The first equation says $m \dot{v}_x = F_{x,f} + F_{x,r}$. After solving, plot:
 
 They should track each other closely (though not perfectly due to model simplifications and noise).
 
-### What you need from config
+### What you need:
 
-- Vehicle mass: $m$ [kg]
-- Wheel radius: $R$ [m]  
-- Wheel inertias: $I_f$, $I_r$ [kg·m²] (front and rear axle lumped inertias)
+- vehicle mass `m = 851.2` [kg]
+- wheel radius `R = 0.384` [m]
+- wheel inertias `I_f = I_r = 10.7` [kg·m²] ( Not a realistic value, but use it for this lab )
 
 ---
 
