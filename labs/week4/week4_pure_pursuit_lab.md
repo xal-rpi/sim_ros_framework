@@ -6,6 +6,68 @@
 
 ---
 
+## Notes — Transport theorem + pure-rolling bicycle model (from lecture)
+
+### Transport theorem (rotating frame)
+
+For any vector $\mathbf{u}$ expressed in a body-fixed rotating frame $\{B\}$ with angular velocity $\boldsymbol{\omega}_{B/I}$ relative to an inertial frame $\{I\}$:
+
+$$\left(\frac{d\mathbf{u}}{dt}\right)_{I} = \left(\frac{d\mathbf{u}}{dt}\right)_{B} + \boldsymbol{\omega}_{B/I} \times \mathbf{u}$$
+
+Key special case (rigid body, point $P$ relative to point $O$ fixed in body):
+
+$$\mathbf{v}_P = \mathbf{v}_O + \boldsymbol{\omega} \times \mathbf{r}_{OP}$$
+
+Planar motion: $\boldsymbol{\omega} = r\,\mathbf{\hat z}$.
+
+### Bicycle model geometry + definitions
+
+- Body frame at CG: longitudinal $x_B$ forward, lateral $y_B$ left.
+- CG-to-front axle distance: $a$; CG-to-rear axle distance: $b$; wheelbase $L=a+b$.
+- States in body frame: $v_x, v_y$ (CG velocities), yaw rate $r$.
+- Steering: road-wheel angle $\delta$ at the front wheel.
+
+### Pure rolling / no lateral slip assumptions
+
+Rear wheel: no lateral velocity at rear contact point (wheel points along $x_B$):
+
+$$v_{Ry} = 0$$
+
+Front wheel: velocity at front contact point aligns with wheel heading $\delta$ (no lateral slip in wheel frame):
+
+$$\tan(\delta) = \frac{v_{Fy}}{v_{Fx}}$$
+
+### Velocities at rear/front axle points (via transport theorem)
+
+Using $\mathbf{v}_P = \mathbf{v}_{CG} + \boldsymbol{\omega}\times\mathbf{r}_{CG\to P}$:
+
+- Rear axle point ($\mathbf{r}_{CG\to R} = [-b,\ 0,\ 0]^T$):
+$$v_{Rx} = v_x, \qquad v_{Ry} = v_y - b r$$
+
+- Front axle point ($\mathbf{r}_{CG\to F} = [a,\ 0,\ 0]^T$):
+$$v_{Fx} = v_x, \qquad v_{Fy} = v_y + a r$$
+
+- Rear axle - front axle distance = wheelbase $L = a + b$ ($r_{R\to F} = [L,\ 0,\ 0]^T$):
+$$v_{Fx} = v_{Rx} = v_x, \qquad v_{Fy} = v_{Ry} + L r$$
+
+
+Apply the no-slip constraints:
+
+1) Rear no-slip $v_{Ry}=0$:
+$$v_y = b r$$
+
+2) Front no-slip direction $\tan\delta = v_{Fy}/v_{Fx}$ and $v_{Ry}$
+$$\tan(\delta) = \frac{L r}{v_x}$$
+
+Thus we get that:
+
+$$r = \frac{v_x}{a+b}\tan(\delta), \qquad v_y = b\,r$$
+
+And the “front point” identity often used for validation:
+
+$$v_y + a r \approx v_x\tan(\delta)$$
+
+
 ## Check — Update + rebuild pipeline (WSL)
 
 This is the same workflow as Week 3.
