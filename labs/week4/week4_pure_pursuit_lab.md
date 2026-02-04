@@ -6,7 +6,7 @@
 
 ---
 
-## Q1 — Update + rebuild pipeline (WSL)
+## Check — Update + rebuild pipeline (WSL)
 
 This is the same workflow as Week 3.
 
@@ -48,7 +48,7 @@ source ~/ros2_ws/install/setup.bash
 
 ---
 
-## Q2 — Launch the simulator (the `remote:=` fix)
+## Check — Launch the simulator (the `remote:=` fix)
 
 Last week’s most common failure mode was: **BeamNG was running, but data/control were flaky or missing** because the in-sim controller/telemetry tried to send UDP packets to the wrong IP.
 
@@ -167,7 +167,7 @@ $$r \approx \frac{v_x}{a+b}\tan(\delta)$$
 
 and the lateral-velocity relationships:
 
-$$v_y \approx b\,r$$
+$$v_y \approx b * r$$
 
 and (front-wheel point velocity):
 
@@ -286,7 +286,7 @@ ros2 launch bng_bringup basic.launch.py \
 
 ### What is given to you (conceptually)
 
-Assume you have a helper object (provided by the instructor tooling) that:
+Assume you have a helper object that:
 
 1) Loads a **reference trajectory** from a CSV file (example: `labs/week4/ref.csv`). The CSV contains at least `x,y` (and may include `s,yaw,curvature`).
 2) Subscribes to the live vehicle state and continuously computes a **lookahead target** on the reference path.
@@ -317,7 +317,7 @@ You must **experiment with different speed targets** (at least 2) and describe h
 
 ### Pseudocode (Python-shaped skeleton, algorithm masked)
 
-This is the *shape* of the script you should write (very close to the provided instructor tooling), but with the pure-pursuit math intentionally left as `TODO`.
+This is the *shape* of the script you should write, but with the pure-pursuit math intentionally left as `TODO`.
 
 ```python
 import time
@@ -326,7 +326,7 @@ import threading
 import numpy as np
 import rclpy
 
-# Provided helper (instructor tooling)
+# Provided helper
 from trajectory_ref_qt_streamer import TrajectoryStreamNode
 
 
@@ -382,7 +382,7 @@ def control_loop() -> None:
 		x_target, y_target = latest_state.x_target, latest_state.y_target
 
 		# -----------------------------------------
-		# TODO (student): Pure Pursuit from class
+		# TODO: Pure Pursuit from class
 		# -----------------------------------------
 		# Use the geometry between (x_curr,y_curr,yaw) and (x_target,y_target)
 		# to compute a road-wheel steering angle command delta_target [rad].
