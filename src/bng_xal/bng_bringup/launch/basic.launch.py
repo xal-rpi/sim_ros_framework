@@ -28,9 +28,24 @@ def generate_launch_description():
                 description="BeamNG simulator host IP address",
             ),
             DeclareLaunchArgument(
-                "port",
+                "remote",
+                default_value="",
+                description="Remote/WSL IP address for controller sendIp",
+            ),
+            DeclareLaunchArgument(
+                "beamng_port",
                 default_value="25252",
                 description="BeamNG simulator port number",
+            ),
+            DeclareLaunchArgument(
+                "bng_listen_port",
+                default_value="64257",
+                description="BeamNG controller listen port",
+            ),
+            DeclareLaunchArgument(
+                "bng_send_port",
+                default_value="64258",
+                description="BeamNG controller send port",
             ),
             # Scenario mode (NEW)
             DeclareLaunchArgument(
@@ -67,7 +82,10 @@ def generate_launch_description():
                     {
                         "config": config_path,
                         "host": LaunchConfiguration("host"),
-                        "port": LaunchConfiguration("port"),
+                        "remote": LaunchConfiguration("remote"),
+                        "beamng_port": LaunchConfiguration("beamng_port"),
+                        "bng_listen_port": LaunchConfiguration("bng_listen_port"),
+                        "bng_send_port": LaunchConfiguration("bng_send_port"),
                         "scenario_mode": LaunchConfiguration("scenario_mode"),
                         "attach_fallback": LaunchConfiguration("attach_fallback"),
                         "log_level": LaunchConfiguration("log_level"),

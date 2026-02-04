@@ -50,7 +50,7 @@ class VehicleGtReceiver:
             )
         except Exception as e:
             self.logger.error(
-                f"[{self.vehicle_name}] Failed to bind UDP socket: {e}"
+                f"[{self.vehicle_name}] Failed to bind UDP socket: {self.listen_ip}:{self.listen_port}\n{e}"
             )
             return False
         

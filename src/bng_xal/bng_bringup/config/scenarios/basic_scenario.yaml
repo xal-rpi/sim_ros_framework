@@ -82,10 +82,6 @@ vehicles:
       LowLevelController: # The python setup class used
         controllerType: default # The lua controller used (controller_{type}.lua)
         controllerRate: 0.005
-        listenIp: 127.0.0.1
-        listenPort: 64257
-        sendIp: 127.0.0.1
-        sendPort: 64258
         gtStateName: gtstate
         drivetrain:
           mode: 1 # 0 : realistic, 1 : realistic autoclutch, 2 : arcade, 3 : realistic automatic

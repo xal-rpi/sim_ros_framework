@@ -118,7 +118,7 @@ local function packReducedGtState(gtReading)
   -- Velocity (local frame)
   local vel_x = gtReading.vel[1]
   local vel_y = gtReading.vel[2]
-  local V = sqrt(vel_x * vel_x + vel_y * vel_y)
+  local vel = sqrt(vel_x * vel_x + vel_y * vel_y)
 
   -- Yaw angle from quaternion
   local qx = gtReading.quat[1]
@@ -129,7 +129,7 @@ local function packReducedGtState(gtReading)
 
   -- Sideslip angle
   local sideslip = 0
-  if abs(V) > 1.5 then
+  if abs(vel) > 1.5 then
     sideslip = atan2(vel_y, vel_x)
   end
 
@@ -140,7 +140,7 @@ local function packReducedGtState(gtReading)
   common.reducedGtState.yaw = yaw
   -- Phi = sideslip + yaw,
 
-  common.reducedGtState.V = V
+  common.reducedGtState.V = vel
   common.reducedGtState.vx = gtReading.vel[1]
   common.reducedGtState.vy = gtReading.vel[2]
   -- common.reducedGtState.vz = gtReading.vel[3]

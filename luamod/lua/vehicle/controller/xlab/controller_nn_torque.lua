@@ -77,6 +77,9 @@ local calibration = {
   steeringKi = 0.0,              -- Integral gain for steering correction
   steeringIntegAlpha = 0.9,      -- Leaky integrator for steering
   steeringToInput = 0.5,         -- Conversion factor: road_wheel_angle = steering_input * steeringToInput
+
+  -- Speed control scaling
+  vel_time_scale = 1.0,
 }
 
 -- Reference to the gtState controller
@@ -213,6 +216,13 @@ local function applyTorqueControl(dt)
   cs.lastAppliedThrottle = newThrottle
 end
 
+local function applySpeedControl(dt)
+  local cs = controllerState
+  if cs.targetVehicleSpeed == nil then return end
+  local desiredVelocity = obj:getDirectionVector() * cs.targetVehicleSpeed
+  thrusters.applyVelocity(desiredVelocity, calibration.vel_time_scale)
+end
+
 --[[
     Apply steering control.
     Optionally uses PID for correction if gains are non-zero.
@@ -221,31 +231,26 @@ end
         targetSteeringInput (number): Desired steering input [-1, 1]
 ]]
 local function applySteeringControl(targetSteeringInput)
-    log('I', logTag, string.format('Applying steering control: target=%.3f', targetSteeringInput))
---   local vr = common.cachedGtReading
+  -- local vr = common.cachedGtReading
   
---   -- Simple direct application (optional: add PID correction later)
---   local roadwheelAngle = (vr.wheelFR.angle + vr.wheelFL.angle) / 2
---   local currentSteeringInput = roadwheelAngle / (calibration.steeringToInput + 1e-6)
+  -- -- Simple direct application (optional: add PID correction later)
+  -- local roadwheelAngle = (vr.wheelFR.angleAtan2 + vr.wheelFL.angleAtan2) / 2
+  -- local currentSteeringInput = roadwheelAngle / (calibration.steeringToInput + 1e-6)
   
---   -- Optional PID correction (only if gains are non-zero)
---   local steeringCmd = targetSteeringInput
---   if calibration.steeringKp ~= 0 or calibration.steeringKi ~= 0 then
---     local err = targetSteeringInput - currentSteeringInput
---     -- Could add integral/derivative here if needed
---     steeringCmd = targetSteeringInput + calibration.steeringKp * err
---   end
+  -- -- Optional PID correction (only if gains are non-zero)
+  -- local steeringCmd = targetSteeringInput
+  -- if calibration.steeringKp ~= 0 or calibration.steeringKi ~= 0 then
+  --   local err = targetSteeringInput - currentSteeringInput
+  --   -- Could add integral/derivative here if needed
+  --   steeringCmd = targetSteeringInput + calibration.steeringKp * err
+  -- end
   
---   -- Clamp to [-1, 1]
---   steeringCmd = min(1, max(-1, steeringCmd))
+  -- Clamp to [-1, 1]
+  steeringCmd = min(1, max(-1, targetSteeringInput))
   
---   controllerState.lastAppliedSteering = steeringCmd
---   input.event('steering', steeringCmd, FILTER_AI)
-  
---   log('D', logTag, string.format(
---     'Steering control: target=%.3f, current=%.3f, applied=%.3f',
---     targetSteeringInput, currentSteeringInput, steeringCmd
---   ))
+  controllerState.lastAppliedSteering = steeringCmd
+  input.event('steering', steeringCmd, FILTER_AI)
+  electrics.values.steering_input = steeringCmd
 end
 
 --[[
@@ -304,6 +309,11 @@ local function applyControls(dt)
   -- Apply torque control if specified
   if cs.targetTorque ~= nil or cs.targetWheelSpeed ~= nil then
     applyTorqueControl(dt)
+  end
+
+  -- Apply speed control if specified
+  if cs.targetVehicleSpeed ~= nil then
+    applySpeedControl(dt)
   end
   
   -- Apply steering control if specified
@@ -513,7 +523,8 @@ function M.calibrate(params)
   -- Handle numeric parameters
   local numericParams = {
     'commandTimeout', 'ctrl_type', 'TorqueKp', 'TorqueKi', 'TorqueKd',
-    'ffcoef', 'steeringKp', 'steeringKi', 'steeringIntegAlpha', 'steeringToInput'
+    'ffcoef', 'steeringKp', 'steeringKi', 'steeringIntegAlpha', 'steeringToInput',
+    'vel_time_scale'
   }
   
   for _, key in ipairs(numericParams) do

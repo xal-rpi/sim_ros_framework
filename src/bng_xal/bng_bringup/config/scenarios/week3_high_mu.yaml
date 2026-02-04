@@ -51,8 +51,6 @@ vehicles:
       LowLevelController: # The python setup class used
         controllerType: nn_torque
         controllerRate: 0.01
-        listenPort: 64257
-        sendPort: 64258
         gtStateName: gtstate
         gtStateSendRate: 0.01
         drivetrain:

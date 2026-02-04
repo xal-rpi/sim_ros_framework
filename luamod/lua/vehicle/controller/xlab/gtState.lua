@@ -474,25 +474,25 @@ local function update(dtSim)
   fillWheelInfos(wheelFRInfo, wheel_fr)
   wheelFRInfo.angleLegacy = wheelAngleLegacyRad(wheel_fr.node1, wheel_fr.node2, signSteering)
   wheelFRInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_fr.node1, wheel_fr.node2)
-  wheelFRInfo.angle = wheelFRInfo.angleLegacy
+  wheelFRInfo.angle = wheelFRInfo.angleAtan2
 
   -- front left (note swapped order if needed)
   fillWheelInfos(wheelFLInfo, wheel_fl)
   wheelFLInfo.angleLegacy = wheelAngleLegacyRad(wheel_fl.node2, wheel_fl.node1, signSteering)
   wheelFLInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_fl.node2, wheel_fl.node1)
-  wheelFLInfo.angle = wheelFLInfo.angleLegacy
+  wheelFLInfo.angle = wheelFLInfo.angleAtan2
 
   -- rear right
   fillWheelInfos(wheelRRInfo, wheel_rr)
   wheelRRInfo.angleLegacy = wheelAngleLegacyRad(wheel_rr.node1, wheel_rr.node2, signSteering)
   wheelRRInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_rr.node1, wheel_rr.node2)
-  wheelRRInfo.angle = wheelRRInfo.angleLegacy
+  wheelRRInfo.angle = wheelRRInfo.angleAtan2
 
   -- rear left
   fillWheelInfos(wheelRLInfo, wheel_rl)
   wheelRLInfo.angleLegacy = wheelAngleLegacyRad(wheel_rl.node2, wheel_rl.node1, signSteering)
   wheelRLInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_rl.node2, wheel_rl.node1)
-  wheelRLInfo.angle = wheelRLInfo.angleLegacy
+  wheelRLInfo.angle = wheelRLInfo.angleAtan2
   --  -------------------------------------------------------
 
   -- These inputs are updated at a lower frequency than the physics steps.

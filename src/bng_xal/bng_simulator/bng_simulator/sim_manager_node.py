@@ -26,7 +26,10 @@ class SimulationManagerNode(Node):
         # Declare parameters
         self.declare_parameter("config", "etk_scenario.yaml")
         self.declare_parameter("host", "127.0.0.1")
-        self.declare_parameter("port", 25252)
+        self.declare_parameter("remote", "")
+        self.declare_parameter("beamng_port", 25252)
+        self.declare_parameter("bng_listen_port", 64257)
+        self.declare_parameter("bng_send_port", 64258)
         self.declare_parameter("scenario_mode", "create")
         self.declare_parameter("attach_fallback", False)
         self.declare_parameter("log_level", "INFO")
@@ -43,7 +46,10 @@ class SimulationManagerNode(Node):
 
         # Get host and port parameters
         beamng_host = self.get_parameter("host").value
-        beamng_port = self.get_parameter("port").value
+        remote_host = self.get_parameter("remote").value
+        beamng_port = self.get_parameter("beamng_port").value
+        bng_listen_port = self.get_parameter("bng_listen_port").value
+        bng_send_port = self.get_parameter("bng_send_port").value
         scenario_mode = self.get_parameter("scenario_mode").value
         attach_fallback = self.get_parameter("attach_fallback").value
 
@@ -104,8 +110,14 @@ class SimulationManagerNode(Node):
             for _, vehicle_config in config_dict["vehicles"].items():
                 if "controllers" in vehicle_config:
                     for _, controller_config in vehicle_config["controllers"].items():
-                        controller_config["listenIp"] = beamng_host
-                        controller_config["sendIp"] = beamng_host
+                        if "listenIp" not in controller_config:
+                            controller_config["listenIp"] = beamng_host
+                        if "sendIp" not in controller_config:
+                            controller_config["sendIp"] = remote_host or beamng_host
+                        if "listenPort" not in controller_config:
+                            controller_config["listenPort"] = bng_listen_port
+                        if "sendPort" not in controller_config:
+                            controller_config["sendPort"] = bng_send_port
         
         self.logger.info(f"BeamNG config: host={beamng_host}, port={beamng_port}")
         self.logger.info(f"Scenario mode: {config_dict['scenario_mode']}")

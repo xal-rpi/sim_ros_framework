@@ -311,7 +311,7 @@ class TorqueSpeedController(Node):
             if wheel_speed is not None:
                 self._cmd_pubs["wheel_speed"].publish(Float64(data=float(wheel_speed)))
             if vehicle_speed is not None:
-                self._cmd_pubs["vehicle_speed"].publish(Float64(data=float(vehicle_speed)))
+                self._cmd_pubs["wheel_speed"].publish(Float64(data=float(vehicle_speed)))
             if steering is not None:
                 self._cmd_pubs["steering"].publish(Float64(data=float(steering)))
             if brake is not None:

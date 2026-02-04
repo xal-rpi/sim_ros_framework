@@ -17,8 +17,8 @@ beamng:
 
 # Level configuration (new schema)
 scenario:
-  level: derby  # Level to load in CREATE mode
   # level: smallgrid  # Level to load in CREATE mode
+  level: derby  # Level to load in CREATE mode
   name: basic  # Optional objects to spawn
 
 scenario_mode: create
@@ -39,9 +39,10 @@ vehicles:
       # part_config: vehicles/etk800/844_track_M.pc
       license: EGO
     spawn:  # Renamed from scenario_args
-      pos: [44.05, 127.22, 79.3]
-      # pos: [0, 0, 0]
-      yaw_angle: 0
+      # # pos: [0, 0, 0]
+      # pos: [44.05, 127.22, 79.3]
+      pos: [-0.243, 148.0445, 79.3]
+      yaw_angle: -90.0
       cling: True  # Ground snapping
     # All the sensors that the vehicle has
     sensors:
@@ -108,8 +109,9 @@ vehicles:
           steeringKp: 0.01
           steeringToInput: -0.5948683325943701
           steeringIntegAlpha: 0.9 # 0.9
-          commandTimeout: 1.0 # Timeout between two mpc solutions before giving back control
+          commandTimeout: 3.0 # Timeout between two mpc solutions before giving back control
           ffcoef: 0.8
+          vel_time_scale: 0.1
 
 
 # high_level_controller:
