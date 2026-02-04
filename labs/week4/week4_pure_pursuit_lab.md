@@ -39,29 +39,34 @@ $$\tan(\delta) = \frac{v_{Fy}}{v_{Fx}}$$
 
 ### Velocities at rear/front axle points (via transport theorem)
 
-Using $$\mathbf{v}_P = \mathbf{v}_{CG} + \boldsymbol{\omega} \times \mathbf{r}_{CG\to P}$$
+Using
+$$\mathbf{v}_P = \mathbf{v}_{CG} + \boldsymbol{\omega} \times \mathbf{r}_{CG\to P}$$
 and applying to rear/front axle points:
 
 - Rear axle point ($r_{CG\to R} = [-b,\ 0,\ 0]^T$): $$v_{Rx} = v_x, \qquad v_{Ry} = v_y - b r$$
 
 - Front axle point ($r_{CG\to F} = [a,\ 0,\ 0]^T$):
+
 $$v_{Fx} = v_x, \qquad v_{Fy} = v_y + a r$$
 
 - Rear axle - front axle distance. wheelbase $L = a + b$:
+
 $$r_{R\to F} = [L,\ 0,\ 0]^T$$ $$v_{Fx} = v_{Rx} = v_x, \qquad v_{Fy} = v_{Ry} + L r$$
 
 
 Apply the no-slip constraints:
 
 1) Rear no-slip $v_{Ry}=0$:
+
 $$v_y = b r$$
 
-2) Front no-slip direction $\tan\delta = v_{Fy}/v_{Fx}$ and $v_{Ry}$
+2) Front no-slip direction $\tan\delta = v_{Fy}/v_{Fx}$ and $v_{Ry} = 0$. Thus:
+
 $$\tan(\delta) = \frac{L r}{v_x}$$
 
 Thus we get that:
 
-$$r = \frac{v_x}{a+b}\tan(\delta), \qquad v_y = b\,r$$
+$$r = \frac{v_x}{a+b}\tan(\delta), \qquad v_y = b r$$
 
 And the “front point” identity often used for validation:
 
@@ -166,7 +171,7 @@ Before you implement pure pursuit, you need a conversion between:
 
 You will estimate a simple linear model:
 
-$$\texttt{steeringInput} \approx m\,\delta + b$$
+$$\texttt{steeringInput} \approx m \delta + b$$
 
 and the inverse mapping:
 
@@ -233,7 +238,7 @@ $$v_y \approx b * r$$
 
 and (front-wheel point velocity):
 
-$$v_y + a\,r \approx v_x\tan(\delta)$$
+$$v_y + a r \approx v_x\tan(\delta)$$
 
 Your job is to generate a simple speed + steering excitation, log the data, and check how well these approximations hold.
 
@@ -313,11 +318,11 @@ Deliverable: state the file path + the values you used for $a$ and $b$.
 Now form the kinematic predictions:
 - $r_{est} = \frac{v_x}{a+b}\tan(\delta)$
 - $v_{y,est} = b*r$
-- $v_{fy,est} = v_x\tan(\delta)$ and compare it to $v_{fy} = v_y + a\,r$
+- $v_{fy,est} = v_x\tan(\delta)$ and compare it to $v_{fy} = v_y + a r$
 
 Deliverables for this part:
 - Plot 1: $r(t)$ and $r_{est}(t)$ over the same time axis
-- Plot 2: $v_y(t)$ and $b\,r(t)$ over the same time axis
+- Plot 2: $v_y(t)$ and $b r(t)$ over the same time axis
 - Plot 3 (optional but recommended): $(v_y + a r)(t)$ and $(v_x\tan\delta)(t)$
 - Repeat Plot 1 (or report a summary error metric) for **at least two different speed targets** (e.g., a “slow” run and a “faster” run) and briefly compare the mismatch.
 
