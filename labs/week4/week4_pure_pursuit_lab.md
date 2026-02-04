@@ -250,7 +250,7 @@ Deliverable: state the file path + the values you used for $a$ and $b$.
 
 Now form the kinematic predictions:
 - $r_{est} = \frac{v_x}{a+b}\tan(\delta)$
-- $v_{y,est} = -b*r$
+- $v_{y,est} = b*r$
 - $v_{fy,est} = v_x\tan(\delta)$ and compare it to $v_{fy} = v_y + a\,r$
 
 Deliverables for this part:
