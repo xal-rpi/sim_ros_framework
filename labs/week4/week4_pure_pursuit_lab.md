@@ -10,7 +10,7 @@
 
 ### Transport theorem (rotating frame)
 
-For any vector $\mathbf{u}$ expressed in a body-fixed rotating frame $\{B\}$ with angular velocity $\boldsymbol{\omega}_{B/I}$ relative to an inertial frame $\{I\}$:
+For any vector $u$ expressed in a body-fixed rotating frame $\{B\}$ with angular velocity $\boldsymbol{\omega}_{B/I}$ relative to an inertial frame $\{I\}$:
 
 $$\left(\frac{d\mathbf{u}}{dt}\right)_{I} = \left(\frac{d\mathbf{u}}{dt}\right)_{B} + \boldsymbol{\omega}_{B/I} \times \mathbf{u}$$
 
@@ -18,7 +18,7 @@ Key special case (rigid body, point $P$ relative to point $O$ fixed in body):
 
 $$\mathbf{v}_P = \mathbf{v}_O + \boldsymbol{\omega} \times \mathbf{r}_{OP}$$
 
-Planar motion: $\boldsymbol{\omega} = r\,\mathbf{\hat z}$.
+Planar motion: $\boldsymbol{\omega} = r \mathbf{\hat z}$.
 
 ### Bicycle model geometry + definitions
 
@@ -39,16 +39,16 @@ $$\tan(\delta) = \frac{v_{Fy}}{v_{Fx}}$$
 
 ### Velocities at rear/front axle points (via transport theorem)
 
-Using $\mathbf{v}_P = \mathbf{v}_{CG} + \boldsymbol{\omega}\times\mathbf{r}_{CG\to P}$:
+Using $$\mathbf{v}_P = \mathbf{v}_{CG} + \boldsymbol{\omega} \times \mathbf{r}_{CG\to P}$$
+and applying to rear/front axle points:
 
-- Rear axle point ($\mathbf{r}_{CG\to R} = [-b,\ 0,\ 0]^T$):
-$$v_{Rx} = v_x, \qquad v_{Ry} = v_y - b r$$
+- Rear axle point ($r_{CG\to R} = [-b,\ 0,\ 0]^T$): $$v_{Rx} = v_x, \qquad v_{Ry} = v_y - b r$$
 
-- Front axle point ($\mathbf{r}_{CG\to F} = [a,\ 0,\ 0]^T$):
+- Front axle point ($r_{CG\to F} = [a,\ 0,\ 0]^T$):
 $$v_{Fx} = v_x, \qquad v_{Fy} = v_y + a r$$
 
-- Rear axle - front axle distance = wheelbase $L = a + b$ ($r_{R\to F} = [L,\ 0,\ 0]^T$):
-$$v_{Fx} = v_{Rx} = v_x, \qquad v_{Fy} = v_{Ry} + L r$$
+- Rear axle - front axle distance. wheelbase $L = a + b$:
+$$r_{R\to F} = [L,\ 0,\ 0]^T$$ $$v_{Fx} = v_{Rx} = v_x, \qquad v_{Fy} = v_{Ry} + L r$$
 
 
 Apply the no-slip constraints:
