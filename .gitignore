@@ -55,3 +55,6 @@ Session.vim
 # Colcon custom files
 COLCON_IGNORE
 AMENT_IGNORE
+
+# luamod generated binaries
+*.dll
