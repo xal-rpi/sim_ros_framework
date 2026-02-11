@@ -196,9 +196,9 @@ The in-sim speed controller uses this feedforward form:
 
 $$\text{FF}(v_{ref}, a_{ref}) = c_0 + c_1 v_{ref} + c_2 v_{ref}^2 + c_3 a_{ref} + c_4 v_{ref} a_{ref}$$
 
-For **steady-state plateaus**, you can start with $a_{ref} \approx 0$ and identify only:
+<!-- For **steady-state plateaus**, you can start with $a_{ref} \approx 0$ and identify only:
 
-$$\text{throttle} \approx c_0 + c_1 v + c_2 v^2$$
+$$\text{throttle} \approx c_0 + c_1 v + c_2 v^2$$ -->
 
 Deliverables for this subsection:
 - A scatter plot of **measured steady-state** $(v,\text{throttle})$ points
@@ -208,7 +208,7 @@ Notes:
 - Use `/EGO/gtstate/vel_x` for speed and `/EGO/gtstate/throttle` for the applied throttle (not the target).
 - Pick data points where acceleration is not too high (you can use `/EGO/gtstate/accel_x`) when fitting.
 
-For this lab, fit the **full** feedforward model (including $c_3$ and $c_4$), like in `test_speed_controller.ipynb`.
+For this lab, fit the **full** feedforward model (including $c_3$ and $c_4$).
 
 #### Quick example: multiple runs + regime mask + fit
 
