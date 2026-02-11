@@ -386,6 +386,9 @@ Also analyze **what happens in a turn**:
 - Plot $v_x(t)$ and throttle during the turning segments.
 - Discuss whether the controller maintains speed in the turn; if not, explain why (e.g., throttle saturation, traction limits, tire slip, or the fact that longitudinal and lateral dynamics are coupled).
 
+Below is a not-so-good controller behavior to get you thinking about the tuning:
+![tuning](terrible_control.png)
+
 ### G (Graduate track only). Implement the controller in Python (send throttle)
 
 In the graduate track, you implement:
@@ -547,7 +550,6 @@ Practical notes:
     - `inertia.zz` ($I_z$)
     - `cogToFrontAxle` ($a$)
     - `cogToRearAxle` ($b$)
-    See: [src/bng_xal/bng_bringup/config/vehicles/](../../src/bng_xal/bng_bringup/config/vehicles/)
 - If you want to stay fully within `/EGO/gtstate`, compute
     $$a_y = \dot{v}_y + v_x\,r$$
     numerically from `vel_y`, `vel_x`, `angVel_z`.
