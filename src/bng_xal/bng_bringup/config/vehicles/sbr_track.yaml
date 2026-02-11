@@ -1,0 +1,205 @@
+cogPosDynamicRel:
+- 0.334
+- 1.19
+- 0.308
+cogToFrontAxle: 1.524
+cogToLeftWheelAxle: 0.891
+cogToRearAxle: 0.976
+cogToRightWheelAxle: 0.896
+distFR: 2.501
+distLR: 1.785
+inertia:
+  xx: 511.676
+  xy: 0.969
+  xz: -18.805
+  yy: 2277.168
+  yz: 1.059
+  zz: 2591.115
+refNodePos:
+- -0.0
+- -0.0
+- 0.0
+totalMass: 1411.235
+vectorForward:
+- -0.0
+- -1.0
+- -0.015
+vectorLeft:
+- 1.0
+- -0.0
+- -0.001
+vectorUp:
+- 0.001
+- -0.015
+- 1.0
+vehHeight: 1.257
+vehLength: 4.217
+vehWidth: 2.0
+wheel_fl:
+  inertia: 0.884
+  mass: 14.72
+  pos:
+  - 0.889
+  - -1.523
+  - -0.117
+  radius: 0.32
+  width: 0.3
+wheel_fr:
+  inertia: 0.884
+  mass: 14.72
+  pos:
+  - -0.896
+  - -1.523
+  - -0.117
+  radius: 0.32
+  width: 0.3
+wheel_rl:
+  inertia: 0.884
+  mass: 14.72
+  pos:
+  - 0.891
+  - 0.978
+  - -0.121
+  radius: 0.32
+  width: 0.3
+wheel_rr:
+  inertia: 0.884
+  mass: 14.72
+  pos:
+  - -0.897
+  - 0.978
+  - -0.121
+  radius: 0.32
+  width: 0.3
+engine:
+  fuelCapacity: 50.0
+  fuelVolume: 49.976
+  idleRPM: 1050.0
+  maxRPM: 7750.0
+  superchargerBoostMax: -1.0
+  turboBoostMax: 19.0
+gearbox:
+  -1.0:
+    index: -1
+    mode_index: 0.0
+    gear_ratio: -2.95
+    mode: ''
+    indexCmd: -1
+  0.0:
+    index: 0
+    mode_index: 0.0
+    gear_ratio: 0.0
+    mode: ''
+    indexCmd: 0
+  1.0:
+    index: 1
+    mode_index: 0.0
+    gear_ratio: 3.91
+    mode: ''
+    indexCmd: 1
+  2.0:
+    index: 2
+    mode_index: 0.0
+    gear_ratio: 2.3200000000000003
+    mode: ''
+    indexCmd: 2
+  3.0:
+    index: 3
+    mode_index: 0.0
+    gear_ratio: 1.61
+    mode: ''
+    indexCmd: 3
+  4.0:
+    index: 4
+    mode_index: 0.0
+    gear_ratio: 1.28
+    mode: ''
+    indexCmd: 4
+  5.0:
+    index: 5
+    mode_index: 0.0
+    gear_ratio: 1.05
+    mode: ''
+    indexCmd: 5
+  6.0:
+    index: 6
+    mode_index: 0.0
+    gear_ratio: 0.8400000000000001
+    mode: ''
+    indexCmd: 6
+powertrain:
+  mainEngine:
+    type: combustionEngine
+    clutch:
+      type: frictionClutch
+      gearRatio: 1.0
+      gearbox:
+        type: sequentialGearbox
+        gearRatio: 0.84
+        gearRatios:
+          -1.0: -2.95
+          0.0: 0.0
+          1.0: 3.91
+          2.0: 2.32
+          3.0: 1.61
+          4.0: 1.28
+          5.0: 1.05
+          6.0: 0.84
+        transfercase:
+          type: shaft
+          gearRatio: 1.0
+          availableModes:
+          - connected
+          differential_R:
+            type: differential
+            gearRatio: 3.44
+            availableModes:
+            - lsd
+            diffTorqueSplit: 0.5
+            wheelaxleRL:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+              spindleRL:
+                type: shaft
+                gearRatio: 1.0
+                availableModes:
+                - connected
+            wheelaxleRR:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+              spindleRR:
+                type: shaft
+                gearRatio: 1.0
+                availableModes:
+                - connected
+  spindleFL:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+  spindleFR:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+controllers:
+  adaptiveBrakeLights: braking/adaptiveBrakeLights
+  analogOdometer: gauges/analogOdometer
+  door_L_coupler: advancedCouplerControl
+  door_R_coupler: advancedCouplerControl
+  driveModes: driveModes
+  gtState3: xlab/gtState
+  hoodCatchCoupler: advancedCouplerControl
+  hoodLatchCoupler: advancedCouplerControl
+  postCrashBrake: braking/postCrashBrake
+  sbr_navi: beamNavigator
+  sequentialLever: propAnimation/sequentialLever
+  shiftLights: shiftLights
+  tailgateCoupler: advancedCouplerControl
+  twoStepLaunch: twoStepLaunch
+  vehicleController: vehicleController/vehicleController
+  xlabControllerManager: xlab/controller_manager

@@ -58,6 +58,12 @@ local function createGtState(vid, args)
     triangleSpaceForward = attachData['triangleSpaceForward'],
     triangleSpaceLeft = attachData['triangleSpaceUp'],
     isVisualised = args.isVisualised,
+    accel_tau_s = args.accel_tau_s,
+    gyro_tau_s = args.gyro_tau_s,
+    vel_tau_s = args.vel_tau_s,
+    wheel_angvel_tau_s = args.wheel_angvel_tau_s,
+    kf_predict_gain = args.kf_predict_gain,
+    debug_raw = args.debug_raw,
     torqueNN = args.torqueNN,
   }
 
@@ -88,7 +94,7 @@ local function createGtState(vid, args)
     'I',
     'gtState',
     string.format(
-      'Attaching GtState sensor %d to vehicle %d with nodes (%d, %d, %d) and barycentric coords (u=%.3f, v=%.3f), signedProjDist=%.3f',
+      'Attaching GtState sensor %d to vehicle %d with nodes (%d, %d, %d) and barycentric coords (u=%.3f, v=%.3f), signedProjDist=%.3f, numPhysicsStepsForGFXSave=%d',
       sensorId,
       vid,
       attachData['nodeIndex1'],
@@ -96,7 +102,8 @@ local function createGtState(vid, args)
       attachData['nodeIndex3'],
       attachData['u'],
       attachData['v'],
-      attachData['signedProjDist']
+      attachData['signedProjDist'],
+      args.numPhysicsStepsForGFXSave
     )
   )
 

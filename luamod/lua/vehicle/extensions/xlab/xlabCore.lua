@@ -1010,5 +1010,6 @@ end
 
 M.onInit = onInit
 M.onSocketMessage = onSocketMessage
+M.stopSafetyFeatures = stopSafetyFeatures
 
 return M

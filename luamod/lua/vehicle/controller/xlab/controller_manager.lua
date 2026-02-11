@@ -379,6 +379,15 @@ local function commonInit(data)
       drivetrain.shiftToGear(drtr.startGear)
       log('I', logTag, 'Set gear to ' .. drtr.startGear)
     end
+    -- Disable all safety features if enabled
+    if drtr.disableSafety then
+      if extensions.xlab_xlabCore and extensions.xlab_xlabCore.stopSafetyFeatures then
+        extensions.xlab_xlabCore.stopSafetyFeatures()
+        log('I', logTag, 'Disabled safety features')
+      else
+        log('W', logTag, 'xlabCore extension not found; cannot disable safety features')
+      end
+    end
   end
 
   -- Torque RPM lookup

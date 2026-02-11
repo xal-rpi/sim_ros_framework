@@ -112,6 +112,19 @@ vehicles:
           commandTimeout: 3.0 # Timeout between two mpc solutions before giving back control
           ffcoef: 0.8
           vel_time_scale: 0.1
+          # Speed controller parameters
+          speed_c0: -0.004077
+          speed_c1: 0.010189
+          speed_c2: 0.00018873
+          speed_c3: 0.054548
+          speed_c4: 0.00316463
+          # speed_c0: 0.036694
+          # speed_c1: 0.009011
+          # speed_c2: 0.00009064
+          # speed_c3: 0.024316
+          # speed_c4: 0.00566627
+          speedKp: 0.1
+          speedKi: 0.2
 
 
 # high_level_controller:

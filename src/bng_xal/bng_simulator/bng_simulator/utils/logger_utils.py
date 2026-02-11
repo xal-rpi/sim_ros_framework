@@ -24,7 +24,7 @@ import re
 from pathlib import Path
 from collections.abc import Mapping, Sequence
 from numbers import Number
-from typing import Any, Dict, Mapping, Optional, Tuple, Union, List, Iterable
+from typing import Any, Dict, Optional, Tuple, Union, List, Iterable
 
 from bng_simulator.utils.io_dict_utils import load_yaml
 
@@ -125,6 +125,49 @@ def _is_sequence(x: Any) -> bool:
     # Avoid expanding strings/bytes as sequences
     return isinstance(x, Sequence) and not isinstance(x, (str, bytes, bytearray))
 
+
+def _message_to_builtin(obj: Any) -> Any:
+    """Best-effort conversion of decoded ROS messages to built-in Python types.
+
+    This enables downstream flattening to work even when deserialization returns
+    dataclasses or message-like objects.
+    """
+
+    if obj is None or isinstance(obj, (str, bytes, bytearray, int, float, bool)):
+        return obj
+
+    if isinstance(obj, Mapping):
+        return {str(k): _message_to_builtin(v) for k, v in obj.items()}
+
+    if _is_sequence(obj):
+        return [_message_to_builtin(v) for v in obj]
+
+    # dataclasses
+    try:
+        import dataclasses
+
+        if dataclasses.is_dataclass(obj):
+            return {k: _message_to_builtin(v) for k, v in dataclasses.asdict(obj).items()}
+    except Exception:
+        pass
+
+    # slots-based objects
+    slots = getattr(obj, "__slots__", None)
+    if slots:
+        out: Dict[str, Any] = {}
+        for k in slots:
+            if isinstance(k, str) and not k.startswith("_") and hasattr(obj, k):
+                out[k] = _message_to_builtin(getattr(obj, k))
+        if out:
+            return out
+
+    # plain objects
+    d = getattr(obj, "__dict__", None)
+    if isinstance(d, dict) and d:
+        return {k: _message_to_builtin(v) for k, v in d.items() if not str(k).startswith("_")}
+
+    return obj
+
 def flatten_record(
     obj: Any,
     prefix: str = "",
@@ -156,7 +199,11 @@ def flatten_record(
         return out
 
     # Leaf: scalar or other object (we keep as-is)
-    out[prefix] = obj
+    # If the root object is a scalar (e.g. std_msgs/* with a single primitive
+    # field, or undecoded raw bytes), `prefix` can be empty. Use a stable
+    # default key instead of producing an empty-string key.
+    key = prefix if prefix else "value"
+    out[key] = obj
     return out
 
 def _infer_fixed_keys(sample_msg: Mapping[str, Any], sep: str = "_") -> List[str]:
@@ -176,7 +223,7 @@ def _flatten_rosbag_messages(
     fill_value: Any = None,
     keys: Optional[List[str]] = None,
     strict: bool = True,
-) -> Tuple[Dict[str, List[Any]], List[str]]:
+) -> Dict[str, List[Any]]:
     """
     Flatten an iterable of fixed-schema messages into columns: key -> list(values).
 
@@ -187,10 +234,8 @@ def _flatten_rosbag_messages(
       keys: optionally provide the flattened key list (avoids inferring from first message)
       strict: if True, raises if any message introduces NEW keys not in 'keys'
 
-    Returns:
-      (cols, keys)
-        cols: dict mapping flattened key -> list of values (aligned by message index)
-        keys: the key order used
+        Returns:
+            cols: dict mapping flattened key -> list of values (aligned by message index)
     """
     it = iter(messages)
 
@@ -200,7 +245,7 @@ def _flatten_rosbag_messages(
         try:
             first_msg = next(it)
         except StopIteration:
-            return {}, []
+            return {}
         keys = _infer_fixed_keys(first_msg, sep=sep)
 
     # Initialize columns
@@ -253,12 +298,101 @@ def _try_load_rosbag_messages(
         topic_filter: Optional callable to filter topics (default: None = load all topics)
     """
 
+    # Prefer schema-based decoding (no ROS2 msg packages required) via `rosbags`, if available.
+    try:
+        from rosbags.rosbag2 import Reader as RosbagsReader  # type: ignore
+        from rosbags.typesys import Stores, get_typestore  # type: ignore
+
+        out: Dict[str, Dict[str, Any]] = {}
+        counts: Dict[str, int] = {}
+
+        with RosbagsReader(str(bag_dir)) as reader:
+            # Many rosbags versions provide a typestore populated from the bag.
+            typestore = getattr(reader, "typestore", None)
+            if typestore is None:
+                typestore = get_typestore(Stores.ROS2_HUMBLE)
+
+            # rosbags API compatibility:
+            # - Older rosbags exported `deserialize_cdr` from `rosbags.serde`.
+            # - rosbags==0.11.0 uses generator-based CDR (de)serializers under `rosbags.serde.cdr`.
+            deser_cache: Dict[str, Any] = {}
+
+            def _get_fields_for_msgtype(msgtype: str) -> Any:
+                get_msgdef = getattr(typestore, "get_msgdef", None)
+                if callable(get_msgdef):
+                    msgdef = get_msgdef(msgtype)
+                    fields = getattr(msgdef, "fields", None)
+                    if fields is not None:
+                        return fields
+                    if isinstance(msgdef, tuple) and msgdef:
+                        return msgdef[0]
+                    return msgdef
+                raise KeyError(f"Typestore cannot provide msg definition for: {msgtype}")
+
+            try:
+                from rosbags.serde import deserialize_cdr  # type: ignore
+
+                def _deserialize_raw(raw: bytes, msgtype: str) -> Any:
+                    return deserialize_cdr(raw, msgtype, typestore=typestore)
+
+            except ImportError:  # rosbags>=0.11
+                from rosbags.serde.cdr import generate_deserialize_cdr  # type: ignore
+
+                def _deserialize_raw(raw: bytes, msgtype: str) -> Any:
+                    fn = deser_cache.get(msgtype)
+                    if fn is None:
+                        fields = _get_fields_for_msgtype(msgtype)
+                        # ROS 2 bags are CDR little-endian in practice.
+                        fn = generate_deserialize_cdr(fields, typestore, "little")
+                        deser_cache[msgtype] = fn
+                    return fn(raw)
+
+            connections = list(reader.connections)
+            for conn, ts_ns, raw in reader.messages(connections=connections):
+                topic = conn.topic
+
+                if topic_filter is not None and not topic_filter(topic):
+                    continue
+
+                if max_messages_per_topic is not None:
+                    if counts.get(topic, 0) >= max_messages_per_topic:
+                        continue
+
+                if topic not in out:
+                    out[topic] = {
+                        "type": getattr(conn, "msgtype", None),
+                        "timestamps_ns": [],
+                        "messages": [],
+                    }
+
+                out[topic]["timestamps_ns"].append(int(ts_ns))
+
+                if decode_messages:
+                    try:
+                        msg = _deserialize_raw(raw, conn.msgtype)
+                        out[topic]["messages"].append(_message_to_builtin(msg))
+                    except Exception:
+                        # Keep raw bytes if something goes wrong.
+                        out[topic]["messages"].append(raw)
+                else:
+                    out[topic]["messages"].append(raw)
+
+                counts[topic] = counts.get(topic, 0) + 1
+
+        return out
+
+    except Exception as e:  # pragma: no cover
+        import traceback
+        print(f"rosbags failed to read rosbag with error: {e}\n{traceback.format_exc()}")
+        print("rosbags not available or failed to read rosbag; falling back to rosbag2_py (ROS2 stack) for rosbag reading")
+        pass
+
     # Lazy imports so this module still works without ROS2 installed.
     try:
         from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions  # type: ignore
     except Exception as e:  # pragma: no cover
         raise RuntimeError(
-            "rosbag2_py is not available; cannot decode MCAP rosbag topics"
+            "Neither 'rosbags' (schema-based) nor 'rosbag2_py' is available; cannot read MCAP rosbag topics"
         ) from e
 
     if decode_messages:
@@ -267,7 +401,7 @@ def _try_load_rosbag_messages(
             from rosidl_runtime_py.utilities import get_message  # type: ignore
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
-                "rclpy/rosidl_runtime_py not available; cannot deserialize rosbag messages"
+                "rclpy/rosidl_runtime_py not available; cannot deserialize rosbag messages with rosbag2_py"
             ) from e
 
         try:

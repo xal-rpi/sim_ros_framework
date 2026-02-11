@@ -475,7 +475,13 @@ class SimulationController:
         # extract the pc part
         vehicle_part = vehicle_part.split("/")[-1].replace(".pc", "")
         out_name = f"{vehicle_model_name}_{vehicle_part}.yaml"
-        output_path = "../config/vehicles/" + out_name
+        if output_path is not None:
+            if os.path.isdir(output_path):
+                output_path = os.path.join(output_path, out_name)
+            else:
+                output_path = output_path
+        else:
+            output_path = "../config/vehicles/" + out_name
         
         if output_path:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)

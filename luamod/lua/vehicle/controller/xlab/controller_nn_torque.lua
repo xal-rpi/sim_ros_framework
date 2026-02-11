@@ -45,10 +45,16 @@ local controllerState = {
   targetBrake = nil,       -- Target brake input [0, 1], nil means no command
   targetWheelSpeed = nil,  -- Target wheel speed (m/s), nil means no command
   targetVehicleSpeed = nil, -- Target vehicle speed (m/s), nil means no command
+  targetVehicleAccel = nil, -- Target vehicle acceleration (m/s^2), nil means auto-estimate
+  targetThrottle = nil,     -- Target throttle input [0, 1], nil means no command
 
   -- NN control state
   old_diff_rear_wheel_speed_ms = 0,  -- Previous wheel speed error for derivative
   leaky_err_wr = 0,                  -- Leaky integrator for wheel speed error
+
+  -- Speed controller state (vehicle speed -> throttle)
+  speedErrInt = 0,
+  prevTargetVehicleSpeed = nil,
   
   -- Tracking
   lastAppliedThrottle = 0,
@@ -80,6 +86,19 @@ local calibration = {
 
   -- Speed control scaling
   vel_time_scale = 1.0,
+
+  -- Vehicle speed feedforward + PI throttle control
+  speed_c0 = 0.0,
+  speed_c1 = 0.0,
+  speed_c2 = 0.0,
+  speed_c3 = 0.0,
+  speed_c4 = 0.0,
+  speedKp = 0.0,
+  speedKi = 0.0,
+  speedIntegAlpha = 0.995,
+  speedErrClamp = 20.0,
+  speedIntegClamp = 10.0,
+  speedAccelRefClamp = 10.0,
 }
 
 -- Reference to the gtState controller
@@ -92,7 +111,8 @@ local gtStateController = nil
       "steering": <number>,      -- Optional: target steering input [-1, 1]
       "brake": <number>,         -- Optional: target brake input [0, 1]
       "wheel_speed": <number>,   -- Optional: target wheel speed in m/s
-      "vehicle_speed": <number>  -- Optional: target vehicle speed in m/s
+      "vehicle_speed": <number>, -- Optional: target vehicle speed in m/s
+      "vehicle_accel": <number>  -- Optional: target vehicle acceleration in m/s^2
     }
     
     Any field can be null/missing - that field will be set to nil.
@@ -116,12 +136,70 @@ local function parseMessage(msg)
     return false
   end
 
+  -- Runtime speed-controller tuning-only message handling.
+  -- If message contains no control targets but contains ALL speed tuning params,
+  -- update calibration and DO NOT treat it as a control command.
+  local hasControlTarget = (
+    data.torque ~= nil
+    or data.steering ~= nil
+    or data.brake ~= nil
+    or data.wheel_speed ~= nil
+    or data.vehicle_speed ~= nil
+    or data.vehicle_accel ~= nil
+    or data.throttle ~= nil
+  )
+
+  if not hasControlTarget then
+    local speedKeys = {
+      'speed_c0', 'speed_c1', 'speed_c2', 'speed_c3', 'speed_c4',
+      'speedKp', 'speedKi'
+    }
+
+    local hasAllSpeedKeys = true
+    for _, key in ipairs(speedKeys) do
+      if data[key] == nil then
+        hasAllSpeedKeys = false
+        break
+      end
+    end
+
+    if hasAllSpeedKeys then
+      for _, key in ipairs(speedKeys) do
+        local v = tonumber(data[key])
+        if v == nil then
+          log('W', logTag, 'Ignoring tuning-only message: non-numeric ' .. key)
+          return false
+        end
+        calibration[key] = v
+      end
+
+      log('I', logTag, string.format(
+        'Updated speed tuning via UDP: c0=%.4f c1=%.4f c2=%.4f c3=%.4f c4=%.4f Kp=%.4f Ki=%.4f',
+        calibration.speed_c0,
+        calibration.speed_c1,
+        calibration.speed_c2,
+        calibration.speed_c3,
+        calibration.speed_c4,
+        calibration.speedKp,
+        calibration.speedKi
+      ))
+
+      -- Not a command message: do not update command timestamp/counters/mode.
+      return true
+    end
+
+    -- Message has no control targets and is not a complete speed tuning packet.
+    return false
+  end
+
   -- Extract target values (they can be nil/null - if missing, variable becomes nil)
   controllerState.targetTorque = data.torque
   controllerState.targetSteering = data.steering
   controllerState.targetBrake = data.brake
   controllerState.targetWheelSpeed = data.wheel_speed
   controllerState.targetVehicleSpeed = data.vehicle_speed
+  controllerState.targetVehicleAccel = data.vehicle_accel
+  controllerState.targetThrottle = data.throttle
 
   -- Update command timestamp
   lastCommandTime = nowSim
@@ -219,8 +297,48 @@ end
 local function applySpeedControl(dt)
   local cs = controllerState
   if cs.targetVehicleSpeed == nil then return end
-  local desiredVelocity = obj:getDirectionVector() * cs.targetVehicleSpeed
-  thrusters.applyVelocity(desiredVelocity, calibration.vel_time_scale)
+  local vr = common.cachedGtReading
+  if not vr or not vr.vel then
+    log('E', logTag, 'Ground truth reading unavailable for speed control')
+    return
+  end
+  local measuredSpeed = sqrt(vr.vel[1]*vr.vel[1] + vr.vel[2]*vr.vel[2])
+  local vRef = cs.targetVehicleSpeed
+
+  -- Reference acceleration can be commanded directly, or inferred from target speed slew
+  local aRef = cs.targetVehicleAccel
+  if aRef == nil then
+    if cs.prevTargetVehicleSpeed ~= nil and dt > 1e-6 then
+      aRef = (vRef - cs.prevTargetVehicleSpeed) / dt
+    else
+      aRef = 0.0
+    end
+  end
+  aRef = max(-calibration.speedAccelRefClamp, min(calibration.speedAccelRefClamp, aRef))
+
+  -- Feedforward throttle model: c0 + c1*v + c2*v^2 + c3*a + c4*v*a
+  local ffThrottle = calibration.speed_c0
+      + calibration.speed_c1 * vRef
+      + calibration.speed_c2 * vRef * vRef
+      + calibration.speed_c3 * aRef
+      + calibration.speed_c4 * vRef * aRef
+
+  -- PI feedback on speed error
+  local err = vRef - measuredSpeed
+  err = max(-calibration.speedErrClamp, min(calibration.speedErrClamp, err))
+
+  cs.speedErrInt = calibration.speedIntegAlpha * cs.speedErrInt + err * dt
+  cs.speedErrInt = max(-calibration.speedIntegClamp, min(calibration.speedIntegClamp, cs.speedErrInt))
+
+  local fbThrottle = calibration.speedKp * err + calibration.speedKi * cs.speedErrInt
+  local newThrottle = ffThrottle + fbThrottle
+  newThrottle = max(0, min(1, newThrottle))
+
+  input.event('throttle', newThrottle, FILTER_AI)
+  electrics.values.throttle = newThrottle
+  electrics.values.throttle_input = newThrottle
+  cs.lastAppliedThrottle = newThrottle
+  cs.prevTargetVehicleSpeed = vRef
 end
 
 --[[
@@ -246,7 +364,7 @@ local function applySteeringControl(targetSteeringInput)
   -- end
   
   -- Clamp to [-1, 1]
-  steeringCmd = min(1, max(-1, targetSteeringInput))
+  local steeringCmd = min(1, max(-1, targetSteeringInput))
   
   controllerState.lastAppliedSteering = steeringCmd
   input.event('steering', steeringCmd, FILTER_AI)
@@ -298,6 +416,10 @@ local function applyControls(dt)
       cs.targetBrake = nil
       cs.targetWheelSpeed = nil
       cs.targetVehicleSpeed = nil
+      cs.targetVehicleAccel = nil
+      cs.targetThrottle = nil
+      cs.speedErrInt = 0
+      cs.prevTargetVehicleSpeed = nil
     end
     
     -- Do NOT apply any controls - user has full manual control
@@ -324,6 +446,16 @@ local function applyControls(dt)
   -- Apply brake control if specified
   if cs.targetBrake ~= nil then
     applyBrakeControl(cs.targetBrake)
+  end
+
+  -- Apply throttle control if specified (overrides torque control)
+  if cs.targetThrottle ~= nil then
+    local elecValues = electrics.values
+    local newThrottle = max(0, min(1, cs.targetThrottle))
+    input.event('throttle', newThrottle, FILTER_AI)
+    elecValues.throttle = newThrottle
+    elecValues.throttle_input = newThrottle
+    cs.lastAppliedThrottle = newThrottle
   end
   
   -- Update latency metrics
@@ -458,13 +590,15 @@ function M.update(dt)
     local simElapsed = nowSim - lastLogSimTime
     local actualRate = updatesSinceLog / realElapsed
     log('I', logTag, string.format(
-      'Update rate: %.1f Hz | Mode: %s | Commands: %d | Sim/Real: %.3f | Latency: avg=%.1fms max=%.1fms',
+      'Update rate: %.1f Hz | Mode: %s | Commands: %d | Sim/Real: %.3f | Latency: avg=%.1fms max=%.1fms | Thr: %.3f | Delta: %.3f',
       actualRate,
       controllerMode == CONTROLLER_MODE.ACTIVE and 'ACTIVE' or 'OFF',
       messageCounter,
       simElapsed / realElapsed,
       common.performanceMetrics.avgLatency * 1000,
-      common.performanceMetrics.maxLatency * 1000
+      common.performanceMetrics.maxLatency * 1000,
+      controllerState.lastAppliedThrottle or 0,
+      controllerState.lastAppliedSteering or 0
     ))
     lastLogRealTime = nowRealTime
     lastLogSimTime = nowSim
@@ -524,7 +658,10 @@ function M.calibrate(params)
   local numericParams = {
     'commandTimeout', 'ctrl_type', 'TorqueKp', 'TorqueKi', 'TorqueKd',
     'ffcoef', 'steeringKp', 'steeringKi', 'steeringIntegAlpha', 'steeringToInput',
-    'vel_time_scale'
+    'vel_time_scale',
+    'speed_c0', 'speed_c1', 'speed_c2', 'speed_c3', 'speed_c4',
+    'speedKp', 'speedKi', 'speedIntegAlpha', 'speedErrClamp', 'speedIntegClamp',
+    'speedAccelRefClamp'
   }
   
   for _, key in ipairs(numericParams) do
@@ -545,8 +682,12 @@ function M.reset()
     targetBrake = nil,
     targetWheelSpeed = nil,
     targetVehicleSpeed = nil,
+    targetVehicleAccel = nil,
+    targetThrottle = nil,
     old_diff_rear_wheel_speed_ms = 0,
     leaky_err_wr = 0,
+    speedErrInt = 0,
+    prevTargetVehicleSpeed = nil,
     lastAppliedThrottle = 0,
     lastAppliedSteering = 0,
     lastAppliedBrake = 0,

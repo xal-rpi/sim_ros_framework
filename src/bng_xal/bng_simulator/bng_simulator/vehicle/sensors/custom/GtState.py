@@ -54,6 +54,12 @@ class GtStateWrapper(CommBase):
         is_visualised: bool = True,
         is_snapping_desired: bool = False,
         is_force_inside_triangle: bool = False,
+        accel_tau_s: Optional[float] = None,
+        gyro_tau_s: Optional[float] = None,
+        vel_tau_s: Optional[float] = None,
+        wheel_angvel_tau_s: Optional[float] = None,
+        kf_predict_gain: Optional[float] = None,
+        debug_raw: Optional[bool] = None,
         torqueNN: Optional[dict] = None,
     ):
         super().__init__(beamng, vehicle)
@@ -82,6 +88,12 @@ class GtStateWrapper(CommBase):
             is_visualised,
             is_snapping_desired,
             is_force_inside_triangle,
+            accel_tau_s,
+            gyro_tau_s,
+            vel_tau_s,
+            wheel_angvel_tau_s,
+            kf_predict_gain,
+            debug_raw,
             torqueNN
         )
 
@@ -124,6 +136,12 @@ class GtStateWrapper(CommBase):
         is_visualised: bool,
         is_snapping_desired: bool,
         is_force_inside_triangle: bool,
+        accel_tau_s: Optional[float] = None,
+        gyro_tau_s: Optional[float] = None,
+        vel_tau_s: Optional[float] = None,
+        wheel_angvel_tau_s: Optional[float] = None,
+        kf_predict_gain: Optional[float] = None,
+        debug_raw: Optional[bool] = None,
         torqueNN: Optional[dict] = None,
     ) -> None:
         data: StrDict = dict()
@@ -131,7 +149,7 @@ class GtStateWrapper(CommBase):
         data["vid"] = vehicle.vid
         data["GFXUpdateTime"] = gfx_update_time
         data["physicsUpdateTime"] = physics_update_time
-        data["numPhysicsStepsForGfxSave"] = num_physics_steps_for_gfx_save
+        data["numPhysicsStepsForGFXSave"] = num_physics_steps_for_gfx_save
         data["pos"] = self.calculate_cog_pos(pos)
         data["dir"] = self.calculate_dir(dir)
         data["left"] = self.calculate_dir(left)
@@ -141,6 +159,18 @@ class GtStateWrapper(CommBase):
         data["isSnappingDesired"] = is_snapping_desired
         data["isForceInsideTriangle"] = is_force_inside_triangle
         data["isDirWorldSpace"] = True # True
+        if accel_tau_s is not None:
+            data["accel_tau_s"] = accel_tau_s
+        if gyro_tau_s is not None:
+            data["gyro_tau_s"] = gyro_tau_s
+        if vel_tau_s is not None:
+            data["vel_tau_s"] = vel_tau_s
+        if wheel_angvel_tau_s is not None:
+            data["wheel_angvel_tau_s"] = wheel_angvel_tau_s
+        if kf_predict_gain is not None:
+            data["kf_predict_gain"] = kf_predict_gain
+        if debug_raw is not None:
+            data["debug_raw"] = debug_raw
         if torqueNN is not None:
             data["torqueNN"] = torqueNN
         args = {
@@ -293,12 +323,7 @@ class GtState(SensorBase):
         msg.vel.x, msg.vel.y, msg.vel.z = data["vel"]
         msg.accel.x, msg.accel.y, msg.accel.z = data["accel"]
         msg.ang_vel.x, msg.ang_vel.y, msg.ang_vel.z = data["angVel"]
-        # Raw quantities are present in the Lua sensor (accelRaw/angVelRaw/angAccelRaw).
-        # Keep the existing fields populated with best available data for compatibility.
-        msg.accel_raw.x, msg.accel_raw.y, msg.accel_raw.z = data.get("accelRaw", data["accel"])
-        msg.ang_vel_raw.x, msg.ang_vel_raw.y, msg.ang_vel_raw.z = data.get("angVelRaw", data["angVel"])
-        # msg.ang_accel.x, msg.ang_accel.y, msg.ang_accel.z = data.get("angAccel", data.get("angAccelRaw", (0.0, 0.0, 0.0)))
-        msg.ang_accel_raw.x, msg.ang_accel_raw.y, msg.ang_accel_raw.z = data["angAccelRaw"]
+        msg.ang_accel.x, msg.ang_accel.y, msg.ang_accel.z = data["angAccel"]
         msg.pos.x, msg.pos.y, msg.pos.z = data["pos"]
         msg.quat.x, msg.quat.y, msg.quat.z, msg.quat.w = data["quat"]
 
@@ -309,43 +334,31 @@ class GtState(SensorBase):
         wheelRL = data["wheelRL"]
 
         msg.wheel_fr_speed = wheelFR["speed"]
-        msg.wheel_fr_ang_vel_b = wheelFR["angVelB"]
         msg.wheel_fr_ang_vel = wheelFR["angVel"]
         msg.wheel_fr_brake_torque = wheelFR["brakeTorque"]
         msg.wheel_fr_prop_torque = wheelFR["propTorque"]
         msg.wheel_fr_angle = wheelFR["angle"]
-        msg.wheel_fr_angle_legacy = wheelFR.get("angleLegacy", wheelFR["angle"])
-        msg.wheel_fr_angle_atan2 = wheelFR.get("angleAtan2", wheelFR["angle"])
         msg.wheel_fr_downforce = wheelFR["downForce"]
 
         msg.wheel_fl_speed = wheelFL["speed"]
-        msg.wheel_fl_ang_vel_b = wheelFL["angVelB"]
         msg.wheel_fl_ang_vel = wheelFL["angVel"]
         msg.wheel_fl_brake_torque = wheelFL["brakeTorque"]
         msg.wheel_fl_prop_torque = wheelFL["propTorque"]
         msg.wheel_fl_angle = wheelFL["angle"]
-        msg.wheel_fl_angle_legacy = wheelFL.get("angleLegacy", wheelFL["angle"])
-        msg.wheel_fl_angle_atan2 = wheelFL.get("angleAtan2", wheelFL["angle"])
         msg.wheel_fl_downforce = wheelFL["downForce"]
 
         msg.wheel_rr_speed = wheelRR["speed"]
-        msg.wheel_rr_ang_vel_b = wheelRR["angVelB"]
         msg.wheel_rr_ang_vel = wheelRR["angVel"]
         msg.wheel_rr_brake_torque = wheelRR["brakeTorque"]
         msg.wheel_rr_prop_torque = wheelRR["propTorque"]
         msg.wheel_rr_angle = wheelRR["angle"]
-        msg.wheel_rr_angle_legacy = wheelRR.get("angleLegacy", wheelRR["angle"])
-        msg.wheel_rr_angle_atan2 = wheelRR.get("angleAtan2", wheelRR["angle"])
         msg.wheel_rr_downforce = wheelRR["downForce"]
 
         msg.wheel_rl_speed = wheelRL["speed"]
-        msg.wheel_rl_ang_vel_b = wheelRL["angVelB"]
         msg.wheel_rl_ang_vel = wheelRL["angVel"]
         msg.wheel_rl_brake_torque = wheelRL["brakeTorque"]
         msg.wheel_rl_prop_torque = wheelRL["propTorque"]
         msg.wheel_rl_angle = wheelRL["angle"]
-        msg.wheel_rl_angle_legacy = wheelRL.get("angleLegacy", wheelRL["angle"])
-        msg.wheel_rl_angle_atan2 = wheelRL.get("angleAtan2", wheelRL["angle"])
         msg.wheel_rl_downforce = wheelRL["downForce"]
 
         msg.steering = data["steering"]

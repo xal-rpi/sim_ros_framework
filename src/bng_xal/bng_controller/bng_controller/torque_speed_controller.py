@@ -18,6 +18,7 @@ Lua command JSON format (see `controller_nn_torque.lua`):
   "vehicle_speed": <number>,# vehicle speed target (m/s)
   "steering": <number>,     # steering input [-1, 1]
   "brake": <number>         # brake [0, 1]
+  "throttle": <number>      # throttle [0, 1] (optional, overrides torque/wheel_speed if set)
 }
 
 Important:
@@ -55,13 +56,12 @@ import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 
-from std_msgs.msg import Float64
-
-from bng_simulator.utils.services_utils import send_request
+from bng_simulator.utils.services_utils import convert_time_to_header, send_request
 
 try:
-    from bng_msgs.msg import ReducedGtStateMsg
+    from bng_msgs.msg import LowLevelCommandMsg, ReducedGtStateMsg
 except Exception:  # pragma: no cover
+    LowLevelCommandMsg = None  # type: ignore
     ReducedGtStateMsg = None  # type: ignore
 
 
@@ -81,6 +81,13 @@ class LowLevelControllerEndpoints:
 
 class TorqueSpeedController(Node):
     """Send torque/speed commands to BeamNG LLC and keep latest state."""
+
+    CMD_VALID_TORQUE = 0x01
+    CMD_VALID_WHEEL_SPEED = 0x02
+    CMD_VALID_VEHICLE_SPEED = 0x04
+    CMD_VALID_STEERING = 0x08
+    CMD_VALID_BRAKE = 0x10
+    CMD_VALID_THROTTLE = 0x20
 
     def __init__(
         self,
@@ -107,28 +114,21 @@ class TorqueSpeedController(Node):
         self._last_command_wall_time: float = 0.0
         self._last_command_payload: Dict[str, Any] = {}
 
-        # Optional ROS publishing of commanded targets (useful for PlotJuggler)
+        # Optional ROS publishing of merged commanded targets (useful for PlotJuggler)
         self._publish_commands = bool(publish_commands)
         self._command_topic_prefix = command_topic_prefix or f"/{vehicle_name}/llc_cmd"
-        self._cmd_pubs: Dict[str, Any] = {}
+        self._cmd_pub = None
         if self._publish_commands:
-            self._cmd_pubs = {
-                "torque": self.create_publisher(
-                    Float64, f"{self._command_topic_prefix}/torque", 10
-                ),
-                "wheel_speed": self.create_publisher(
-                    Float64, f"{self._command_topic_prefix}/wheel_speed", 10
-                ),
-                "vehicle_speed": self.create_publisher(
-                    Float64, f"{self._command_topic_prefix}/vehicle_speed", 10
-                ),
-                "steering": self.create_publisher(
-                    Float64, f"{self._command_topic_prefix}/steering", 10
-                ),
-                "brake": self.create_publisher(
-                    Float64, f"{self._command_topic_prefix}/brake", 10
-                ),
-            }
+            if LowLevelCommandMsg is None:
+                raise RuntimeError(
+                    "LowLevelCommandMsg is not importable; "
+                    "did you source the workspace / build bng_msgs?"
+                )
+            self._cmd_pub = self.create_publisher(
+                LowLevelCommandMsg,
+                self._command_topic_prefix,
+                5,
+            )
 
         # Latest state cache (ROS subscription)
         self._latest_state_msg = None
@@ -147,7 +147,7 @@ class TorqueSpeedController(Node):
                 ReducedGtStateMsg,
                 self._state_topic,
                 self._on_reduced_state,
-                10,
+                2,
             )
             self.get_logger().info(f"Subscribed to {self._state_topic}")
 
@@ -239,32 +239,36 @@ class TorqueSpeedController(Node):
 
         # Keep this explicit (stable) rather than `msg.__dict__`.
         return {
-            "t": float(getattr(msg, "time", 0.0)),
-            "x": float(getattr(msg, "x", 0.0)),
-            "y": float(getattr(msg, "y", 0.0)),
-            "yaw": float(getattr(msg, "yaw", 0.0)),
-            "V": float(getattr(msg, "vel_mag", 0.0)),
-            "vx": float(getattr(msg, "vx", 0.0)),
-            "vy": float(getattr(msg, "vy", 0.0)),
-            "beta": float(getattr(msg, "beta", 0.0)),
-            "r": float(getattr(msg, "r", 0.0)),
-            "delta": float(getattr(msg, "delta", 0.0)),
-            "wr": float(getattr(msg, "wr", 0.0)),
-            "wf": float(getattr(msg, "wf", 0.0)),
-            "we": float(getattr(msg, "we", 0.0)),
-            "pb": float(getattr(msg, "pb", 0.0)),
-            "throttle": float(getattr(msg, "throttle", 0.0)),
-            "brake": float(getattr(msg, "brake", 0.0)),
-            "accel_x": float(getattr(msg, "accel_x", 0.0)),
-            "accel_y": float(getattr(msg, "accel_y", 0.0)),
+            "t": float(msg.time),
+            "x": float(msg.x),
+            "y": float(msg.y),
+            "yaw": float(msg.yaw),
+            "V": float(msg.vel_mag),
+            "vx": float(msg.vx),
+            "vy": float(msg.vy),
+            "beta": float(msg.beta),
+            "r": float(msg.r),
+            "delta": float(msg.delta),
+            "wr": float(msg.wr),
+            "wf": float(msg.wf),
+            "we": float(msg.we),
+            "pb": float(msg.pb),
+            "throttle": float(msg.throttle),
+            "brake": float(msg.brake),
+            "accel_x": float(msg.accel_x),
+            "accel_y": float(msg.accel_y),
         }
+
+    def _get_command_sim_time(self) -> float:
+        """Use latest reduced-state simulation time when available."""
+        return self._latest_state_msg.time
 
     def get_state_age_sec(self) -> Optional[float]:
         """Age (wall time) of the latest received reduced_state."""
 
         with self._lock:
             if self._latest_state_wall_time <= 0:
-                return None
+                return 0
             return time.time() - self._latest_state_wall_time
 
     # ------------
@@ -279,6 +283,7 @@ class TorqueSpeedController(Node):
         vehicle_speed: Optional[float] = None,
         steering: Optional[float] = None,
         brake: Optional[float] = None,
+        throttle: Optional[float] = None,
     ) -> None:
         """Send a JSON command over UDP.
 
@@ -297,6 +302,8 @@ class TorqueSpeedController(Node):
             payload["steering"] = float(steering)
         if brake is not None:
             payload["brake"] = float(brake)
+        if throttle is not None:
+            payload["throttle"] = float(throttle)            
 
         data = json.dumps(payload).encode("utf-8")
         self._cmd_sock.sendto(data, self._endpoints.command_addr)
@@ -304,18 +311,38 @@ class TorqueSpeedController(Node):
         self._last_command_wall_time = time.time()
         self._last_command_payload = payload
 
-        if self._publish_commands and self._cmd_pubs:
-            # Publish only the values the caller set (None means "leave unchanged").
+        if self._publish_commands and self._cmd_pub:
+            cmd_sim_time = self._get_command_sim_time()
+            cmd_sim_time = cmd_sim_time + self.get_state_age_sec()
+            cmd_msg = LowLevelCommandMsg()
+            cmd_msg.header = convert_time_to_header(
+                cmd_sim_time,
+                frame_id="map",
+            )
+            cmd_msg.time = cmd_sim_time
+
+            valid_fields = 0
             if torque is not None:
-                self._cmd_pubs["torque"].publish(Float64(data=float(torque)))
+                cmd_msg.torque = float(torque)
+                valid_fields |= self.CMD_VALID_TORQUE
             if wheel_speed is not None:
-                self._cmd_pubs["wheel_speed"].publish(Float64(data=float(wheel_speed)))
+                cmd_msg.wheel_speed = float(wheel_speed)
+                valid_fields |= self.CMD_VALID_WHEEL_SPEED
             if vehicle_speed is not None:
-                self._cmd_pubs["wheel_speed"].publish(Float64(data=float(vehicle_speed)))
+                cmd_msg.vehicle_speed = float(vehicle_speed)
+                valid_fields |= self.CMD_VALID_VEHICLE_SPEED
             if steering is not None:
-                self._cmd_pubs["steering"].publish(Float64(data=float(steering)))
+                cmd_msg.steering = float(steering)
+                valid_fields |= self.CMD_VALID_STEERING
             if brake is not None:
-                self._cmd_pubs["brake"].publish(Float64(data=float(brake)))
+                cmd_msg.brake = float(brake)
+                valid_fields |= self.CMD_VALID_BRAKE
+            if throttle is not None:
+                cmd_msg.throttle = float(throttle)
+                valid_fields |= self.CMD_VALID_THROTTLE
+
+            cmd_msg.valid_fields = int(valid_fields)
+            self._cmd_pub.publish(cmd_msg)
 
     def command_torque(self, torque_nm: float, *, steering: Optional[float] = None, brake: Optional[float] = None) -> None:
         self.send_command(torque=float(torque_nm), steering=steering, brake=brake)
@@ -325,6 +352,42 @@ class TorqueSpeedController(Node):
 
     def command_vehicle_speed(self, vehicle_speed_ms: float, *, steering: Optional[float] = None, brake: Optional[float] = None) -> None:
         self.send_command(vehicle_speed=float(vehicle_speed_ms), steering=steering, brake=brake)
+
+    def send_calibration(
+        self,
+        *,
+        speed_c0: float,
+        speed_c1: float,
+        speed_c2: float,
+        speed_c3: float,
+        speed_c4: float,
+        speedKp: float,
+        speedKi: float,
+    ) -> None:
+        """Send speed-controller calibration payload over UDP.
+
+        This sends a tuning-only packet expected by `controller_nn_torque.lua`:
+        {
+          "speed_c0": ..., "speed_c1": ..., "speed_c2": ..., "speed_c3": ...,
+          "speed_c4": ..., "speedKp": ..., "speedKi": ...
+        }
+
+        The Lua side treats this as calibration update (not a driving command),
+        as long as no target fields are included.
+        """
+
+        payload: Dict[str, Any] = {
+            "speed_c0": float(speed_c0),
+            "speed_c1": float(speed_c1),
+            "speed_c2": float(speed_c2),
+            "speed_c3": float(speed_c3),
+            "speed_c4": float(speed_c4),
+            "speedKp": float(speedKp),
+            "speedKi": float(speedKi),
+        }
+
+        data = json.dumps(payload).encode("utf-8")
+        self._cmd_sock.sendto(data, self._endpoints.command_addr)
 
     def clear_targets(self) -> None:
         """Clear all controller targets by sending `{}`."""

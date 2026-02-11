@@ -22,6 +22,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BasicStateMsg.msg"
   "msg/GtStateMsg.msg"
   "msg/HLCMsg.msg"
+  "msg/LowLevelCommandMsg.msg"
   "msg/MPCSolution.msg"
   "msg/ReducedGtStateMsg.msg"
   "srv/ExecuteRequest.srv"

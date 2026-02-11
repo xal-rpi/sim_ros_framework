@@ -17,7 +17,8 @@ beamng:
 
 # Level configuration (new schema)
 scenario:
-  level: smallgrid  # Level to load in CREATE mode
+  # level: smallgrid  # Level to load in CREATE mode
+  level: tech_ground  # Level to load in CREATE mode
   # level: derby  # Level to load in CREATE mode
   name: basic  # Optional objects to spawn
 
@@ -73,7 +74,14 @@ vehicles:
         type: GtState
         gfx_update_time: 0.3
         physics_update_time: 0.005
-        num_physics_steps_for_gfx_save: 5
+        num_physics_steps_for_gfx_save: 1
+        # Filter parameters for the estimator
+        kf_predict_gain: 0.85
+        accel_tau_s: 0.04
+        gyro_tau_s: 0.005
+        vel_tau_s: 0.005
+        wheel_angvel_tau_s: 0.005
+        debug_raw: True
         torqueNN:
           modelName: arata_torque_map.json   # resolves under lua/vehicle/controller/xlab/models/
           outputScaling: 100.0               # ONLY scaling used by gtState
@@ -113,6 +121,20 @@ vehicles:
           commandTimeout: 3.0 # Timeout between two mpc solutions before giving back control
           ffcoef: 0.8
           vel_time_scale: 1.5
+          # Speed controller parameters
+          speed_c0: -0.004077
+          speed_c1: 0.010189
+          speed_c2: 0.00018873
+          speed_c3: 0.054548
+          speed_c4: 0.00316463
+          # speed_c0: 0.036694
+          # speed_c1: 0.009011
+          # speed_c2: 0.00009064
+          # speed_c3: 0.024316
+          # speed_c4: 0.00566627
+          speedKp: 0.1
+          speedKi: 0.2
+
 
 
 # high_level_controller:

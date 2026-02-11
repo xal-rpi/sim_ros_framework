@@ -4,6 +4,9 @@ PyYAML
 numpy
 tqdm
 
+# Optional: schema-based rosbag2 (MCAP) decoding without ROS msg packages
+rosbags
+
 # Build-time deps when colcon uses a venv python
 empy
 catkin_pkg
