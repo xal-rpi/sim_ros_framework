@@ -428,7 +428,7 @@ class SimulationController:
         
         # Kinematics properties
         print("  - Kinematics properties")
-        kin_args = {"world_space": False}
+        kin_args = {"world_space": True}
         if vehicle_name:
             kin_args["vehicle_name"] = vehicle_name
         kin_props = send_request("get_vehicle_properties", kin_args, 
@@ -475,6 +475,11 @@ class SimulationController:
         # extract the pc part
         vehicle_part = vehicle_part.split("/")[-1].replace(".pc", "")
         out_name = f"{vehicle_model_name}_{vehicle_part}.yaml"
+        
+        if output_path is None or output_path.lower() == "" or len(output_path.strip()) == 0:
+            print("\nNo output path provided, returning config as dictionary.")
+            return final_config
+        
         if output_path is not None:
             if os.path.isdir(output_path):
                 output_path = os.path.join(output_path, out_name)
@@ -664,7 +669,8 @@ Examples:
     )
     veh_config.add_argument('--vehicle', type=str, help='Vehicle name')
     veh_config.add_argument(
-        '--output', 
+        '--output',
+        default="",
         type=str,
         help='Output file path or directory (default: prints to stdout)'
     )

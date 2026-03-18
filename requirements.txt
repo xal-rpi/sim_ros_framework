@@ -2,6 +2,7 @@
 beamngpy
 PyYAML
 numpy
+scipy
 tqdm
 
 # Optional: schema-based rosbag2 (MCAP) decoding without ROS msg packages

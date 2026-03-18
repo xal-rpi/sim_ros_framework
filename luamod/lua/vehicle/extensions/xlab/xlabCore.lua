@@ -393,7 +393,7 @@ local function getVehicleProperties(props)
   local useWorldSpace = props and props.worldSpace or true
 
   -- Dynamic COG from BeamNG physics engine (runtime, global coords)
-  -- local cogDynamicGlobal = obj:calcCenterOfGravity(false)
+  local cogDynamicGlobal = obj:calcCenterOfGravity(false)
   -- local refNodeGlobalPos = obj:getPosition()
   
   -- Static COG calculated from node masses
@@ -460,15 +460,17 @@ local function getVehicleProperties(props)
   -- Calculate COG to wheel vectors for axle distances
   local cogToFrontRight = wheelPositions.FR - cogInSelectedFrame
   local cogToRearLeft = wheelPositions.RL - cogInSelectedFrame
-
+  local cogPostionGlobal = obj:getPosition() + cogInSelectedFrame -- COG in global coordinates
+  local coGHeight = wheelInfo.fr.radius + math.abs(wheelInfo.fr.pos[3])
   -- Return vehicle properties in FLU (Front-Left-Up) frame
   return {
     vehLength = vehLength,
     vehWidth = vehWidth,
     vehHeight = vehHeight,
-    -- cogPosDynamic = cogDynamicGlobal:toTable(),      -- Runtime COG in global coords
+    coGHeight = coGHeight,
+    cogPosDynamic = cogDynamicGlobal:toTable(),      -- Runtime COG in global coords
     cogPosDynamicRel = cogInSelectedFrame:toTable(), -- COG in selected frame
-    refNodePos = obj:getNodePosition(nodeRef.cid):toTable(),         -- RefNode position in global coords
+    cogPos = cogPostionGlobal:toTable(),             -- CoG position in the body frame centered on the ground
     distFR = obj:nodeLength(wheelsData.FR.node1, wheelsData.RR.node1),  -- Front-rear wheelbase
     distLR = obj:nodeLength(wheelsData.FR.node1, wheelsData.FL.node1),  -- Left-right track width
     totalMass = totalMass,
@@ -575,19 +577,43 @@ local function getControllerInfos()
   return controllerTypes
 end
 
+local function buildControllerWhitelistLookup(whitelist)
+  local lookup = {}
+  if type(whitelist) ~= 'table' then return lookup end
+
+  for key, value in pairs(whitelist) do
+    if type(key) == 'string' then lookup[key] = true end
+
+    if type(value) == 'string' then
+      lookup[value] = true
+    elseif type(value) == 'table' then
+      if type(value.name) == 'string' then lookup[value.name] = true end
+      if type(value.typeName) == 'string' then lookup[value.typeName] = true end
+    end
+  end
+
+  return lookup
+end
+
 --[[
     Local function to disale all safety modules. Typically, ABS, ESC,
-    and additional modules from drivingDynamics controller
+    and additional modules from drivingDynamics controller.
+    @param whitelist: table|nil - Controllers to preserve, keyed or listed by name/type
+    @return: table - Removed controllers indexed by controller name
 ]]
-local function stopSafetyFeatures()
+local function stopSafetyFeatures(whitelist)
   -- Get all the controllers
   local allControllers = controller.getAllControllers()
   local ctrlToRemove = {}
+  local whitelistLookup = buildControllerWhitelistLookup(whitelist)
   log('I', logTag, '\n-- Stopping safety features --')
   for ctrlName, ctrlObj in pairs(allControllers) do
     local ctrlType = ctrlObj.typeName
     -- Check if drivingDyanmics is a subset of the controller type
     if string.find(ctrlType, 'drivingDynamics') then
+      if whitelistLookup[ctrlName] or whitelistLookup[ctrlType] then
+        log('I', logTag, 'Keeping whitelisted controller: ' .. ctrlName .. ' (' .. ctrlType .. ')')
+      else
       ctrlToRemove[ctrlName] = ctrlType
       log('I', logTag, 'Attempting to remove controller: ' .. ctrlName)
       if ctrlObj.shutdown then
@@ -598,6 +624,7 @@ local function stopSafetyFeatures()
         if ctrlObj.updateGFX then ctrlObj.updateGFX = nil end
         if ctrlObj.isActive then ctrlObj.isActive = nil end
         log('I', logTag, 'Controller ' .. ctrlName .. ' uppdate, updateGFX set to nil')
+      end
       end
     end
   end
@@ -931,11 +958,11 @@ end
 
 --[[
     Handler for stopping safety features
-    @param request: table - Request parameters
+    @param request: table - Request parameters, optionally containing a whitelist table
     @return: nil
 ]]
 function M.handleStopSafetyFeatures(request)
-  local data = stopSafetyFeatures()
+  local data = stopSafetyFeatures(request and request.whitelist)
   request:sendResponse({
     type = 'StopSafetyFeatures',
     data = data,

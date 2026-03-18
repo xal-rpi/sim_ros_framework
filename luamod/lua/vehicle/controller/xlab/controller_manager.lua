@@ -381,8 +381,9 @@ local function commonInit(data)
     end
     -- Disable all safety features if enabled
     if drtr.disableSafety then
+      local safetyWhitelist = drtr.disableWhiteList or drtr.disableWhitelist
       if extensions.xlab_xlabCore and extensions.xlab_xlabCore.stopSafetyFeatures then
-        extensions.xlab_xlabCore.stopSafetyFeatures()
+        extensions.xlab_xlabCore.stopSafetyFeatures(safetyWhitelist)
         log('I', logTag, 'Disabled safety features')
       else
         log('W', logTag, 'xlabCore extension not found; cannot disable safety features')
