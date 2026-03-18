@@ -604,7 +604,7 @@ $$
 8. Compute heading from the tangent direction:
 
 $$
-\psi(s) = \operatorname{atan2}\left(\frac{dy}{ds}, \frac{dx}{ds}\right)
+\psi(s) = atan2 \left(\frac{dy}{ds}, \frac{dx}{ds}\right)
 $$
 
 9. Compute curvature from the spline approximation using (general formula without assuming unit speed):
