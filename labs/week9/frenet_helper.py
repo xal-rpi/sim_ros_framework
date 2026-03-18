@@ -9,7 +9,6 @@ It provides:
 - extraction of a planar pose from /<vehicle>/reduced_state
 - a ROS 2 helper node for PlotJuggler publishing and live state access
 
-It does NOT compute the Frenet error formulas for the student.
 """
 
 from __future__ import annotations
