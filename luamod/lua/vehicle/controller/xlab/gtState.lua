@@ -6,7 +6,8 @@
 local M = {}
 
 -- Import necessary math functions for performance
-local sqrt, abs, acos, atan2, max, min = math.sqrt, math.abs, math.acos, math.atan2, math.max, math.min
+local sqrt, abs, acos, ceil = math.sqrt, math.abs, math.acos, math.ceil
+local atan2, max, min = math.atan2, math.max, math.min
 local exp = math.exp
 local pi = math.pi
 local constants = { rpmToAV = 0.104719755, avToRPM = 9.549296596425384 }
@@ -34,10 +35,51 @@ local torqueNNFieldName = 'estimated_torque'
 -- Reference to the global state manager extension
 local gtStateManager = nil
 
--- Filtering (dt-aware). Only applied to accel and angular velocity.
--- Tune these to match your expected sensor bandwidth/latency.
-local accelTauS = 0.01 -- seconds
-local gyroTauS = 0.005 -- seconds
+-- Filtering (dt-aware) configuration and state.
+-- This is intentionally structured for extensibility: to add a new filter later,
+-- add one module under filters.modules and one state under filters.state.
+local filters = {
+  params = {
+    accelTauS = 0.03, -- force-based world acceleration smoothing (inside predictor-corrector)
+    gyroTauS = 0.01, -- angular velocity smoothing (local frame)
+    velTauS = 0.01, -- world velocity smoothing (used as measurement for predictor-corrector)
+    wheelAngVelTauS = 0.01, -- only wheel*.angVel is filtered (in-place)
+    kfPredictGain = 0.90, -- near 1.0 trusts prediction more (smaller correction)
+    debugRaw = true, -- if true, publish additional world-frame raw/filtered fields
+  },
+  cache = {
+    nominalDt = 0.0,
+    nominalDtInv = 0.0,
+    nominalAlpha = {},
+    corrScaleNominal = 0.0,
+    epsDt = 1e-4,
+  },
+  state = {
+    velWorld = { 
+      initialized = false, 
+      raw = vec3(), v = vec3() 
+    },
+    gyroLocal = {
+      initialized = false, 
+      raw = vec3(), p1 = vec3(), p2 = vec3() 
+    },
+    accelWorldKf = {
+      initialized = false,
+      raw = vec3(),
+      aF1 = vec3(),
+      aF2 = vec3(),
+      vPred = vec3(),
+      corr = vec3(),
+      aOut = vec3(),
+    },
+    wheelsAngVel = {
+      initialized = false,
+      rawFr = 0.0, rawFl = 0.0, rawRr = 0.0, rawRl = 0.0,
+      fr = 0.0, fl = 0.0, rr = 0.0, rl = 0.0 
+    },
+  },
+  modules = {},
+}
 
 local function alphaFromTau(dt, tau)
   if tau <= 0 then return 1 end
@@ -51,12 +93,141 @@ local function emaVec3Step(prev, raw, alpha)
   return prev
 end
 
-local filterState = {
-  initialized = false,
-  acc1 = vec3(),
-  acc2 = vec3(),
-  gyro1 = vec3(),
-  gyro2 = vec3(),
+local function emaScalarStep(prev, raw, alpha)
+  return prev + (raw - prev) * alpha
+end
+
+local function clamp01(x)
+  return clamp(x, 0, 1)
+end
+
+function filters.isNominalDt(dt)
+  return abs(dt - filters.cache.nominalDt) <= filters.cache.epsDt
+end
+
+function filters.rebuildCache(dt)
+  if filters.isNominalDt(dt) then return end
+
+  log('W', logTag, string.format("Rebuilding filter cache for nominalDt=%.6f (was %.6f)", dt, filters.cache.nominalDt))
+  
+  filters.cache.nominalDt = dt
+  filters.cache.nominalDtInv = 1.0 / max(dt, 1e-30)
+
+  filters.cache.nominalAlpha.accel = alphaFromTau(dt, filters.params.accelTauS)
+  filters.cache.nominalAlpha.gyro = alphaFromTau(dt, filters.params.gyroTauS)
+  filters.cache.nominalAlpha.vel = alphaFromTau(dt, filters.params.velTauS)
+  filters.cache.nominalAlpha.wheelAngVel = alphaFromTau(dt, filters.params.wheelAngVelTauS)
+
+  -- Used for scaling the velocity error correction in the accelWorldKf module. 
+  -- Higher gain or smaller dt means more trust in the prediction and less correction.
+  filters.cache.corrScaleNominal = (1.0 - filters.params.kfPredictGain) * filters.cache.nominalDtInv
+end
+
+
+function filters.resetAll()
+  filters.state.velWorld.initialized = false
+  filters.state.gyroLocal.initialized = false
+  filters.state.accelWorldKf.initialized = false
+  filters.state.wheelsAngVel.initialized = false
+end
+
+filters.modules.velWorld = {
+  step = function(dt, vWorldRaw)
+    local st = filters.state.velWorld
+    st.raw:set(vWorldRaw)
+    if not st.initialized then
+      st.v:set(vWorldRaw)
+      st.initialized = true
+      return st.v
+    end
+    return emaVec3Step(st.v, vWorldRaw, filters.cache.nominalAlpha.vel)
+  end,
+}
+
+filters.modules.gyroLocal = {
+  step = function(dt, wLocalRaw)
+    local st = filters.state.gyroLocal
+    st.raw:set(wLocalRaw)
+    if not st.initialized then
+      st.p1:set(wLocalRaw)
+      st.p2:set(wLocalRaw)
+      st.initialized = true
+      return st.p2
+    end
+
+    local pass1 = emaVec3Step(st.p1, wLocalRaw, filters.cache.nominalAlpha.gyro)
+    return emaVec3Step(st.p2, pass1, filters.cache.nominalAlpha.gyro)
+  end,
+}
+
+filters.modules.accelWorldKf = {
+  step = function(dt, accelWorldRaw, velWorldMeas)
+    local st = filters.state.accelWorldKf
+    st.raw:set(accelWorldRaw)
+    if not st.initialized then
+      st.aF1:set(accelWorldRaw)
+      st.aF2:set(accelWorldRaw)
+      st.vPred:set(velWorldMeas)
+      st.corr:set(0, 0, 0)
+      st.aOut:set(accelWorldRaw)
+      st.initialized = true
+      return st.aOut
+    end
+
+    -- st.aF2 holds force-filtered accel
+    local pass1 = emaVec3Step(st.aF1, accelWorldRaw, filters.cache.nominalAlpha.accel)
+    local aForce = emaVec3Step(st.aF2, pass1, filters.cache.nominalAlpha.accel)
+
+    -- vPred += aForce * dt (explicit component updates to avoid allocations)
+    st.vPred.x = st.vPred.x + aForce.x * dt
+    st.vPred.y = st.vPred.y + aForce.y * dt
+    st.vPred.z = st.vPred.z + aForce.z * dt
+
+    -- corr = (velMeas - vPred) * corrScale
+    local corrScale = filters.cache.corrScaleNominal
+    st.corr.x = (velWorldMeas.x - st.vPred.x) * corrScale
+    st.corr.y = (velWorldMeas.y - st.vPred.y) * corrScale
+    st.corr.z = (velWorldMeas.z - st.vPred.z) * corrScale
+
+    -- vPred += corr * dt
+    st.vPred.x = st.vPred.x + st.corr.x * dt
+    st.vPred.y = st.vPred.y + st.corr.y * dt
+    st.vPred.z = st.vPred.z + st.corr.z * dt
+
+    -- aOut = aForce + corr
+    st.aOut.x = aForce.x + st.corr.x
+    st.aOut.y = aForce.y + st.corr.y
+    st.aOut.z = aForce.z + st.corr.z
+    return st.aOut
+  end,
+}
+
+filters.modules.wheelsAngVel = {
+  step = function(dt, frInfo, flInfo, rrInfo, rlInfo)
+    local st = filters.state.wheelsAngVel
+    st.rawFr = frInfo.angVel
+    st.rawFl = flInfo.angVel
+    st.rawRr = rrInfo.angVel
+    st.rawRl = rlInfo.angVel
+    if not st.initialized then
+      st.fr = frInfo.angVel
+      st.fl = flInfo.angVel
+      st.rr = rrInfo.angVel
+      st.rl = rlInfo.angVel
+      st.initialized = true
+    else
+      local alpha = filters.cache.nominalAlpha.wheelAngVel
+      st.fr = emaScalarStep(st.fr, frInfo.angVel, alpha)
+      st.fl = emaScalarStep(st.fl, flInfo.angVel, alpha)
+      st.rr = emaScalarStep(st.rr, rrInfo.angVel, alpha)
+      st.rl = emaScalarStep(st.rl, rlInfo.angVel, alpha)
+    end
+
+    frInfo.angVel = st.fr
+    flInfo.angVel = st.fl
+    rrInfo.angVel = st.rr
+    rlInfo.angVel = st.rl
+  end,
 }
 
 local function writeVec3Table(dst, v)
@@ -72,12 +243,25 @@ local function writeQuatTable(dst, q)
   dst[4] = q[4]
 end
 
-local function cloneVec3Table(src)
-  return { src[1], src[2], src[3] }
+local function writeWheelInfoTable(dst, src)
+  dst.speed = src.speed
+  dst.angVel = src.angVel
+  dst.brakeTorque = src.brakeTorque
+  dst.propTorque = src.propTorque
+  dst.downForce = src.downForce
+  dst.angle = src.angle
 end
 
-local function cloneQuatTable(src)
-  return { src[1], src[2], src[3], src[4] }
+local function writeDriveStatusTable(dst, src)
+  dst.esc = src.esc
+  dst.abs = src.abs
+  dst.tcs = src.tcs
+  dst.engineRunning = src.engineRunning
+  dst.isRealisticDrive = src.isRealisticDrive
+  dst.mode4WD = src.mode4WD
+  dst.modeRangeBox = src.modeRangeBox
+  dst.isFrontDiffLocked = src.isFrontDiffLocked
+  dst.isRearDiffLocked = src.isRearDiffLocked
 end
 
 --[[
@@ -86,17 +270,21 @@ Sensor Core Properties
 These variables define the sensor's unique identification, positioning,
 update timings, and operational flags.
 ]]
-local sensorId -- Unique identifier for the sensor
-local GFXUpdateTime -- Time interval (seconds) between graphics updates
-local nodeIndex1, nodeIndex2, nodeIndex3 -- Indices of the three nodes forming the sensor's triangle
-local b1, b2, b3 -- Barycentric coordinates relative to the triangle
-local w1, w2, w3 -- Non-negative interpolation weights based on barycentric coordinates
-local signedProjDist -- Signed distance from the sensor to the triangle plane
-local triangleSpaceForward -- Forward direction vector in triangle space
-local triangleSpaceLeft -- Left direction vector in triangle space
-local isVisualised = true -- Flag to indicate if sensor visualization is enabled
-local isUsingGravity = false -- Flag to include gravity in acceleration calculations
-local m1, m2, m3 = 0, 0, 0 -- TODO: Assume static mass for now
+-- Group sensor configuration to reduce upvalues
+local sensorConfig = {
+  id = nil, -- Unique identifier for the sensor
+  gfxUpdateTime = nil, -- Time interval (seconds) between graphics updates
+  nodeIndex1 = nil, nodeIndex2 = nil, nodeIndex3 = nil, -- Indices of the three nodes forming the sensor's triangle
+  b1 = nil, b2 = nil, b3 = nil, -- Barycentric coordinates relative to the triangle
+  w1 = nil, w2 = nil, w3 = nil, -- Non-negative interpolation weights based on barycentric coordinates
+  signedProjDist = nil, -- Signed distance from the sensor to the triangle plane
+  triangleSpaceForward = nil, -- Forward direction vector in triangle space
+  triangleSpaceLeft = nil, -- Left direction vector in triangle space
+  isUsingGravity = false, -- Flag to include gravity in acceleration calculations
+  m1 = 0, m2 = 0, m3 = 0, -- TODO: Assume static mass for now
+  inv_m1 = 0, inv_m2 = 0, inv_m3 = 0, -- Inverse masses for the nodes (precomputed for efficiency)
+  oneThird = 1.0 / 3.0, -- Constant for averaging over three nodes
+}
 
 --[[
 Timing and Buffering Variables
@@ -104,73 +292,113 @@ Timing and Buffering Variables
 These variables manage the timing of physics and graphics updates,
 as well as buffering of sensor readings for graphical representation.
 ]]
-local timeSinceLastPoll = 0.0 -- Time since the last graphics poll/update
-local numPhysicsStepsForGFXSave = 1 -- Number of physics steps before saving data for graphics
-local counterPhysicsSteps = 0 -- Counter for physics steps
-
--- Physics step parameters
-local physicsTimer -- Timer to track physics update intervals
-local physicsUpdateTime -- Time interval (seconds) between physics updates
+-- Group ring buffer and timing state to reduce upvalues
+local ringBuffer = {
+  numPhysicsStepsForGFXSave = 1, -- Number of physics steps before saving data for graphics
+  physicsTimer = nil, -- Timer to track physics update intervals
+  physicsUpdateTime = nil, -- Time interval (seconds) between physics updates
+  readings = {}, -- Circular buffer to store raw sensor readings
+  ringSize = 0, -- Number of preallocated reading slots
+  writeIdx = 0, -- Circular write index [1..ringSize]
+  writeSeq = 0, -- Monotonic sequence incremented every physics write
+  readSeq = 0, -- Last sequence consumed by GFX polling
+  ringInitialized = false, -- True once slots are bootstrapped from first full reading
+  latestReading = nil, -- Alias to readings[writeIdx]
+}
 
 -- Wheels information
 -- Assuming 'wheels' is a global table accessible within this module
 local wheelRotators, wheelIds = wheels.wheelRotators, wheels.wheelRotatorIDs -- References to wheel rotators and their IDs
 local wheel_fr, wheel_fl, wheel_rr, wheel_rl = {}, {}, {}, {} -- Tables to store individual wheel data
 
--- Readings data
-local readings = {} -- Circular buffer to store raw sensor readings
-local readingIndex = 1 -- Current index in the readings buffer
-local latestReading = { -- Table to store the latest sensor reading
-  time = 0.0,
-  dirX = { 0, 0, 0 },
-  dirY = { 0, 0, 0 },
-  dirZ = { 0, 0, 0 },
-  accelRaw = { 0, 0, 0 },
-  accel = { 0, 0, 0 },
-  angVelRaw = { 0, 0, 0 },
-  angVel = { 0, 0, 0 },
-  angAccelRaw = { 0, 0, 0 },
-  pos = { 0, 0, 0 },
-  vel = { 0, 0, 0 },
-  quat = { 0, 0, 0, 1 },
-  wheelFR = {},
-  wheelFL = {},
-  wheelRR = {},
-  wheelRL = {},
-  steering = 0.0,
-  throttle = 0.0,
-  brake = 0.0,
-  clutch = 0.0,
-  pbrake = 0.0,
-  steering_des = 0.0,
-  throttle_des = 0.0,
-  brake_des = 0.0,
-  clutch_des = 0.0,
-  pbrake_des = 0.0,
-  -- TODO: More to add here
-  -- driveStatus = nil  -- Added to store drive mode status
+
+local function deepCopyTable(src)
+  if type(src) ~= 'table' then return src end
+  local dst = {}
+  for k, v in pairs(src) do
+    dst[k] = deepCopyTable(v)
+  end
+  return dst
+end
+
+
+local function ensureDebugFields(dst)
+  -- World-frame filtered/raw fields.
+  dst.velRaw = { 0, 0, 0 }
+  dst.accelRaw = { 0, 0, 0 }
+  dst.angVelRaw = { 0, 0, 0 }
+
+  -- Wheel-angle debug fields.
+  dst.wheelFR_angleLegacy = 0.0
+  dst.wheelFL_angleLegacy = 0.0
+  dst.wheelRR_angleLegacy = 0.0
+  dst.wheelRL_angleLegacy = 0.0
+
+  -- Wheel angular velocity raw fields (unfiltered, for debugging).
+  dst.wheelFR_angVelRaw = 0.0
+  dst.wheelFL_angVelRaw = 0.0
+  dst.wheelRR_angVelRaw = 0.0
+  dst.wheelRL_angVelRaw = 0.0
+end
+
+local function ensureLatestReadingTables()
+  ringBuffer.latestReading = ringBuffer.latestReading or {}
+  ringBuffer.latestReading.dirX = { 0, 0, 0 }
+  ringBuffer.latestReading.dirY = { 0, 0, 0 }
+  ringBuffer.latestReading.accel = { 0, 0, 0 }
+  ringBuffer.latestReading.angVel = { 0, 0, 0 }
+  ringBuffer.latestReading.angAccel = { 0, 0, 0 }
+  ringBuffer.latestReading.pos = { 0, 0, 0 }
+  ringBuffer.latestReading.vel = { 0, 0, 0 }
+  ringBuffer.latestReading.quat = { 0, 0, 0, 1 }
+  ringBuffer.latestReading.wheelFR = {}
+  ringBuffer.latestReading.wheelFL = {}
+  ringBuffer.latestReading.wheelRR = {}
+  ringBuffer.latestReading.wheelRL = {}
+  ringBuffer.latestReading.driveStatus = {}
+
+  -- Add custom fields with default values.
+  if filters.params.debugRaw then
+    ensureDebugFields(ringBuffer.latestReading)
+  end
+
+end
+
+-- Group vehicle state references to reduce upvalues
+local vehicleState = {
+  currVeh = nil,
+  engine = nil,
+  gearbox = nil,
 }
 
--- Extra variables for vehicle state sensor
-local currVeh = nil
-local sensorPos = vec3(0, 0, 0)
-local currentDir = vec3(0, 0, 0)
-local worldLeft = vec3(0, 0, 0)
-local worldThird = vec3(0, 0, 0)
+-- Group all temporary vectors to reduce upvalues
+local tmpVectors = {
+  sensorPos = vec3(0, 0, 0),
+  currentDir = vec3(0, 0, 0),
+  worldLeft = vec3(0, 0, 0),
+  worldThird = vec3(0, 0, 0),
+  angVelLocalRaw = vec3(0, 0, 0),
+  vec1 = vec3(0, 0, 0), vec2 = vec3(0, 0, 0), vec3 = vec3(0, 0, 0),
+  aCenter = vec3(0, 0, 0), vCenter = vec3(0, 0, 0), baryCenter = vec3(0, 0, 0),
+  r = vec3(0, 0, 0), curlAcc = vec3(0, 0, 0), curlVel = vec3(0, 0, 0),
+  accelWorld = vec3(0, 0, 0), angVel = vec3(0, 0, 0), angAccel = vec3(0, 0, 0),
+  edge1 = vec3(0, 0, 0), edge2 = vec3(0, 0, 0),
+  edge1Norm = vec3(0, 0, 0), edge2Norm = vec3(0, 0, 0),
+  normal = vec3(0, 0, 0), triangleThird = vec3(0, 0, 0),
+  accel1 = vec3(0, 0, 0), accel2 = vec3(0, 0, 0), accel3 = vec3(0, 0, 0),
+  steeringRoll = vec3(0, 0, 0),
+}
 
--- Store the engine and gearbox for more accurate data
-local engine = nil
-local gearbox = nil
-
--- Reused wheel info tables (avoid per-physics-step allocations)
-local wheelFRInfo = { speed = 0, angVelB = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0, angleLegacy = 0, angleAtan2 = 0 }
-local wheelFLInfo = { speed = 0, angVelB = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0, angleLegacy = 0, angleAtan2 = 0 }
-local wheelRRInfo = { speed = 0, angVelB = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0, angleLegacy = 0, angleAtan2 = 0 }
-local wheelRLInfo = { speed = 0, angVelB = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0, angleLegacy = 0, angleAtan2 = 0 }
+-- Group wheel info tables to reduce upvalues
+local wheelInfoTables = {
+  fr = { speed = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0},
+  fl = { speed = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0},
+  rr = { speed = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0},
+  rl = { speed = 0, angVel = 0, brakeTorque = 0, propTorque = 0, downForce = 0, angle = 0},
+}
 
 local function fillWheelInfos(dst, mWheel)
   dst.speed = mWheel.wheelSpeed
-  dst.angVelB = mWheel.angularVelocityBrakeCouple * mWheel.wheelDir
   dst.angVel = mWheel.angularVelocity * mWheel.wheelDir
   dst.brakeTorque = abs(mWheel.coreData.brakeTorqueApplied) - mWheel.frictionTorque
   dst.propTorque = mWheel.propulsionTorque * mWheel.wheelDir
@@ -187,6 +415,10 @@ end
 -- Signed wheel heading angle via atan2, independent of steering input.
 -- Computed in the sensor's local plane (currentDir/worldLeft), using worldThird as plane normal.
 local function wheelAngleAtan2Rad(nodeA, nodeB)
+  -- Cache for performance
+  local vs = vehicleState
+  local tv = tmpVectors
+  
   -- local axis = currVeh:getNodePosition(nodeB) - currVeh:getNodePosition(nodeA)
   -- axis = axis - worldThird * axis:dot(worldThird) -- ignore camber vs sensor plane
   -- if axis:squaredLength() < 1e-18 then return 0 end
@@ -199,71 +431,94 @@ local function wheelAngleAtan2Rad(nodeA, nodeB)
 
   -- if roll:dot(currentDir) < 0 then roll = -roll end -- remove node-order flips
   -- return atan2(roll:dot(worldLeft), roll:dot(currentDir))
-  local axis = currVeh:getNodePosition(nodeB) - currVeh:getNodePosition(nodeA)
-  local roll = axis:cross(worldThird) -- wheel rolling direction
-  if roll:squaredLength() < 1e-12 then return 0 end
-  if roll:dot(currentDir) < 0 then roll = -roll end
-  return atan2(roll:dot(worldLeft), roll:dot(currentDir))
+
+  -- local axis = currVeh:getNodePosition(nodeB) - currVeh:getNodePosition(nodeA)
+  -- local roll = axis:cross(worldThird) -- wheel rolling direction
+  -- if roll:squaredLength() < 1e-12 then return 0 end
+  -- if roll:dot(currentDir) < 0 then roll = -roll end
+  -- return atan2(roll:dot(worldLeft), roll:dot(currentDir))
+
+  tv.vec1:setSub2(vs.currVeh:getNodePosition(nodeB), vs.currVeh:getNodePosition(nodeA))
+  tv.steeringRoll:setCross(tv.vec1, tv.worldThird)
+  if tv.steeringRoll:squaredLength() < 1e-12 then return 0 end
+  if tv.steeringRoll:dot(tv.currentDir) < 0 then tv.steeringRoll:setScaled(-1) end
+  return atan2(tv.steeringRoll:dot(tv.worldLeft), tv.steeringRoll:dot(tv.currentDir))
 end
 
-local function cloneWheelInfo(src)
-  return {
-    speed = src.speed,
-    angVelB = src.angVelB,
-    angVel = src.angVel,
-    brakeTorque = src.brakeTorque,
-    propTorque = src.propTorque,
-    downForce = src.downForce,
-    angle = src.angle,
-    angleLegacy = src.angleLegacy,
-    angleAtan2 = src.angleAtan2,
-  }
+local function computeRingSize(gfxDt, physicsDt)
+  local samplesPerGfx = max(1, ceil(gfxDt / physicsDt))
+  return max(4, 2 * samplesPerGfx)
 end
 
-local function cloneReading(src)
-  local dst = {
-    time = src.time,
-    dirX = cloneVec3Table(src.dirX),
-    dirY = cloneVec3Table(src.dirY),
-    vel = cloneVec3Table(src.vel),
-    accelRaw = cloneVec3Table(src.accelRaw),
-    accel = cloneVec3Table(src.accel),
-    angVelRaw = cloneVec3Table(src.angVelRaw),
-    angVel = cloneVec3Table(src.angVel),
-    angAccelRaw = cloneVec3Table(src.angAccelRaw),
-    pos = cloneVec3Table(src.pos),
-    quat = cloneQuatTable(src.quat),
-    wheelFR = cloneWheelInfo(src.wheelFR),
-    wheelFL = cloneWheelInfo(src.wheelFL),
-    wheelRR = cloneWheelInfo(src.wheelRR),
-    wheelRL = cloneWheelInfo(src.wheelRL),
-    steering = src.steering,
-    throttle = src.throttle,
-    brake = src.brake,
-    clutch = src.clutch,
-    pbrake = src.pbrake,
-    steeringInput = src.steeringInput,
-    throttleInput = src.throttleInput,
-    brakeInput = src.brakeInput,
-    clutchInput = src.clutchInput,
-    driveStatus = src.driveStatus,
-    engineLoad = src.engineLoad,
-    engineTorque = src.engineTorque,
-    RPM = src.RPM,
-    flywheelTorque = src.flywheelTorque,
-    turboBoost = src.turboBoost,
-    superchargerBoost = src.superchargerBoost,
-    throttleValve = src.throttleValve,
-    gearboxTorque = src.gearboxTorque,
-    gearRatio = src.gearRatio,
-    gearIndex = src.gearIndex,
-  }
+local function bootstrapRingFromFirstReading()
+  ringBuffer.ringSize = computeRingSize(sensorConfig.gfxUpdateTime, ringBuffer.physicsUpdateTime)
+  ringBuffer.readings = {}
+  for i = 1, ringBuffer.ringSize do
+    ringBuffer.readings[i] = deepCopyTable(ringBuffer.latestReading)
+  end
+  ringBuffer.ringInitialized = true
+  ringBuffer.writeIdx = 1
+  ringBuffer.writeSeq = 1
+  ringBuffer.readSeq = 0
+  ringBuffer.latestReading = ringBuffer.readings[ringBuffer.writeIdx]
+  ringBuffer.latestReading._seq = ringBuffer.writeSeq
+end
 
-  for fieldName in pairs(customFields) do
-    dst[fieldName] = src[fieldName]
+local function backfillCustomFieldAcrossRing(fieldName, defaultValue)
+  -- If the ring is not initialized, the latestReading may be the only table 
+  -- we have, so set the field there and it will be copied to all ring 
+  -- slots when we bootstrap from the first reading.
+  if not ringBuffer.ringInitialized then
+    if ringBuffer.latestReading then ringBuffer.latestReading[fieldName] = defaultValue end
+    return
   end
 
-  return dst
+  -- Fill all the ring slots with the new field
+  for i = 1, ringBuffer.ringSize do
+    ringBuffer.readings[i][fieldName] = defaultValue
+  end
+
+end
+
+local function beginNewWrite(DoMoveIndex)
+  local rb = ringBuffer
+  if not rb.ringInitialized then
+    rb.writeSeq = 1
+    rb.latestReading._seq = rb.writeSeq
+    return
+  end
+
+  -- When the data has been fully filled
+  if DoMoveIndex then
+    rb.writeIdx = (rb.writeIdx % rb.ringSize) + 1
+    rb.writeSeq = rb.writeSeq + 1
+    rb.latestReading = rb.readings[rb.writeIdx]
+    rb.latestReading._seq = rb.writeSeq
+    return
+  end
+
+  -- Otherwise just move where latestReading points to,
+  -- without incrementing the sequence (used for multiple physics steps per gfx step)
+  rb.latestReading = rb.readings[(rb.writeIdx % rb.ringSize) + 1]
+end
+
+local function getPendingGFXReadings()
+  local rb = ringBuffer
+  if not rb.ringInitialized then return {} end
+  local out = {}
+  local seq = rb.readSeq + rb.numPhysicsStepsForGFXSave
+  local lastTried = nil
+  while seq <= rb.writeSeq do
+    local idx = ((seq - 1) % rb.ringSize) + 1
+    local slot = rb.readings[idx]
+    if slot and slot._seq == seq then
+      out[#out + 1] = slot
+    end
+    lastTried = seq
+    seq = seq + rb.numPhysicsStepsForGFXSave
+  end
+  if lastTried then rb.readSeq = lastTried end
+  return out
 end
 
 --[[
@@ -276,6 +531,7 @@ end
 ]]
 local function registerCustomField(fieldName, defaultValue)
   customFields[fieldName] = defaultValue
+  backfillCustomFieldAcrossRing(fieldName, defaultValue)
   log('I', logTag, 'Registered custom field: ' .. fieldName)
   return true
 end
@@ -355,107 +611,195 @@ end
 
 -- Physics step update for this sensor instance.
 local function update(dtSim)
+  -- Cache frequently-accessed tables as locals for performance (reduces hash lookups)
+  local rb = ringBuffer
+  local sc = sensorConfig
+  local vs = vehicleState
+  local tv = tmpVectors
+  local wi = wheelInfoTables
+  
   -- Manage the update timer. Cycle it to avoid long-term drift.
-  physicsTimer = physicsTimer + dtSim
-  if physicsTimer < physicsUpdateTime then return end
-  local trueDt = physicsTimer
-  physicsTimer = physicsTimer - physicsUpdateTime
+  rb.physicsTimer = rb.physicsTimer + dtSim
+  if rb.physicsTimer < rb.physicsUpdateTime then return end
+  local dt = rb.physicsTimer
+  rb.physicsTimer = rb.physicsTimer - rb.physicsUpdateTime
 
-  local accelAlpha = alphaFromTau(trueDt, accelTauS)
-  local gyroAlpha = alphaFromTau(trueDt, gyroTauS)
+  -- Rebuild filter cache if dt has changed significantly 
+  -- (e.g., due to lag or config changes).
+  filters.rebuildCache(dt)
+
+  -- Mark the beginning of a new write cycle.
+  -- And move latestReading to point to the new slot for this physics step.
+  -- TODO: Is it safe to move it now
+  beginNewWrite(false)
 
   -- Compute the current position of the nodes defining the sensor wrt ref node.
-  local node1 = currVeh:getNodePosition(nodeIndex1)
-  local node2 = currVeh:getNodePosition(nodeIndex2)
-  local node3 = currVeh:getNodePosition(nodeIndex3)
+  local node1 = vs.currVeh:getNodePosition(sc.nodeIndex1)
+  local node2 = vs.currVeh:getNodePosition(sc.nodeIndex2)
+  local node3 = vs.currVeh:getNodePosition(sc.nodeIndex3)
 
   -- Relvant edge vectors and normal vector of the triangle.
-  local edge1, edge2 = node2 - node1, node3 - node1
-  local edge1Norm, edge2Norm = edge1:normalized(), edge2:normalized()
-  local normal = edge1Norm:cross(edge2Norm):normalized()
+  tv.edge1:setSub2(node2, node1)
+  tv.edge2:setSub2(node3, node1)
+  tv.edge1Norm:set(tv.edge1)
+  tv.edge1Norm:normalize()
+  tv.edge2Norm:set(tv.edge2)
+  tv.edge2Norm:normalize()
+  tv.normal:setCross(tv.edge1Norm, tv.edge2Norm)
+  tv.normal:normalize()
 
   -- Convert the fixed triangle-space coordinate system to world space
-  local triangleThird = edge1Norm:cross(normal):normalized() -- TODO: maybe no need to normalize
-  currentDir = (
-    edge1Norm * triangleSpaceForward.x
-    + normal * triangleSpaceForward.y
-    + triangleThird * triangleSpaceForward.z
-  ):normalized()
-  worldLeft = (
-    edge1Norm * triangleSpaceLeft.x
-    + normal * triangleSpaceLeft.y
-    + triangleThird * triangleSpaceLeft.z
-  ):normalized()
-  worldThird = currentDir:cross(worldLeft):normalized()
+  tv.triangleThird:setCross(tv.edge1Norm, tv.normal)
+  tv.triangleThird:normalize()
+
+  tv.currentDir:setScaled2(tv.edge1Norm, sc.triangleSpaceForward.x)
+  tv.vec1:setScaled2(tv.normal, sc.triangleSpaceForward.y)
+  tv.currentDir:setAdd(tv.vec1)
+  tv.vec1:setScaled2(tv.triangleThird, sc.triangleSpaceForward.z)
+  tv.currentDir:setAdd(tv.vec1)
+  tv.currentDir:normalize()
+
+  tv.worldLeft:setScaled2(tv.edge1Norm, sc.triangleSpaceLeft.x)
+  tv.vec1:setScaled2(tv.normal, sc.triangleSpaceLeft.y)
+  tv.worldLeft:setAdd(tv.vec1)
+  tv.vec1:setScaled2(tv.triangleThird, sc.triangleSpaceLeft.z)
+  tv.worldLeft:setAdd(tv.vec1)
+  tv.worldLeft:normalize()
+
+  tv.worldThird:setCross(tv.currentDir, tv.worldLeft)
+  tv.worldThird:normalize()
 
   -- Relative position of the sensor from the barycenter of the triangle.
-  local currentPos = node1 + b1 * edge2 + b2 * edge1 + signedProjDist * normal
-  sensorPos = currentPos + currVeh:getPosition()
+  tv.vec1:setScaled2(tv.edge2, sc.b1)
+  tv.vec2:setScaled2(tv.edge1, sc.b2)
+  tv.vec3:setScaled2(tv.normal, sc.signedProjDist)
+  tv.vec1:setAdd(tv.vec2)
+  tv.vec1:setAdd(tv.vec3)
+  tv.vec1:setAdd(node1) -- currentPos
+  local currentPos = tv.vec1
+
+  tv.sensorPos:setAdd2(currentPos, vs.currVeh:getPosition())
 
   -- --------------------------------------------------------------------------
   --                  [Angular] Velocity and Accelerations                   --
   -- --------------------------------------------------------------------------
 
   -- Compute the acceleration vectors at each node, using Newton II [a := F / m].
-  local a1 = currVeh:getNodeForceVector(nodeIndex1) / m1
-  local a2 = currVeh:getNodeForceVector(nodeIndex2) / m2
-  local a3 = currVeh:getNodeForceVector(nodeIndex3) / m3
+  tv.accel1:setScaled2(vs.currVeh:getNodeForceVector(sc.nodeIndex1), sc.inv_m1)
+  tv.accel2:setScaled2(vs.currVeh:getNodeForceVector(sc.nodeIndex2), sc.inv_m2)
+  tv.accel3:setScaled2(vs.currVeh:getNodeForceVector(sc.nodeIndex3), sc.inv_m3)
 
   -- Get the velocity vector at each node.
-  local v1 = currVeh:getNodeVelocityVector(nodeIndex1)
-  local v2 = currVeh:getNodeVelocityVector(nodeIndex2)
-  local v3 = currVeh:getNodeVelocityVector(nodeIndex3)
+  local v1 = vs.currVeh:getNodeVelocityVector(sc.nodeIndex1)
+  local v2 = vs.currVeh:getNodeVelocityVector(sc.nodeIndex2)
+  local v3 = vs.currVeh:getNodeVelocityVector(sc.nodeIndex3)
 
-  -- Compute the rotational component of each nodal acceleration vector,
-  -- by subtracting the aCenter component.
-  local aCenter = (a1 + a2 + a3) / 3
-  local vCenter = (v1 + v2 + v3) / 3
+  -- Rotational terms using reusable in-place temporaries.
 
-  -- Compute the curl and divergence at the projected point (on triangle plane).
-  -- vectors from the barycenter to each node.
-  local baryCenter = (node1 + node2 + node3) / 3
-  local r = currentPos - baryCenter
-  local r1, r2, r3 = node1 - baryCenter, node2 - baryCenter, node3 - baryCenter
-  local _deNom = r1:squaredLength() * w1 + r2:squaredLength() * w2 + r3:squaredLength() * w3
-  local invDenom = 1.0 / (_deNom + 1e-30)
+  tv.aCenter:setAdd2(tv.accel1, tv.accel2)
+  tv.aCenter:setAdd(tv.accel3)
+  tv.aCenter:setScaled(sc.oneThird)
 
-  local aRot1, aRot2, aRot3 = a1 - aCenter, a2 - aCenter, a3 - aCenter
-  local vRot1, vRot2, vRot3 = v1 - vCenter, v2 - vCenter, v3 - vCenter
-  local curlAcc = r1:cross(aRot1) * w1 + r2:cross(aRot2) * w2 + r3:cross(aRot3) * w3
-  local curlVel = r1:cross(vRot1) * w1 + r2:cross(vRot2) * w2 + r3:cross(vRot3) * w3
-  local divAcc = r1:dot(aRot1) * w1 + r2:dot(aRot2) * w2 + r3:dot(aRot3) * w3
+  tv.vCenter:setAdd2(v1, v2)
+  tv.vCenter:setAdd(v3)
+  tv.vCenter:setScaled(sc.oneThird)
 
-  -- Compute the total acceleration vector at the sensor position
-  local accelWorld = aCenter + (curlAcc:cross(r) + divAcc * r) * invDenom
-  if isUsingGravity then accelWorld = accelWorld + currVeh:getGravityVector() end
+  tv.baryCenter:setAdd2(node1, node2)
+  tv.baryCenter:setAdd(node3)
+  tv.baryCenter:setScaled(sc.oneThird)
 
-  -- Compute the angular velocity and angular acceleration.
-  local angVel = curlVel * invDenom
-  local angAccel = curlAcc * invDenom
+  tv.r:setSub2(currentPos, tv.baryCenter)
 
-  -- Transform the quantities in the local frame.
-  local accelLocalRaw =
-    vec3(accelWorld:dot(currentDir), accelWorld:dot(worldLeft), accelWorld:dot(worldThird))
+  -- curlAccTmp:set(0, 0, 0)
+  -- curlVelTmp:set(0, 0, 0)
+  local denom = 0.0
+  local divAcc = 0.0
 
-  local velLocal = vec3(vCenter:dot(currentDir), vCenter:dot(worldLeft), vCenter:dot(worldThird))
+  -- Node 1 contribution.
+  tv.vec1:setSub2(node1, tv.baryCenter) -- r1
+  tv.vec2:setSub2(tv.accel1, tv.aCenter) -- aRot1
+  tv.vec3:setCross(tv.vec1, tv.vec2)
+  tv.vec3:setScaled(sc.w1)
+  tv.curlAcc:set(tv.vec3)
+  divAcc = divAcc + tv.vec1:dot(tv.vec2) * sc.w1
 
-  local angVelLocalRaw = vec3(angVel:dot(currentDir), angVel:dot(worldLeft), angVel:dot(worldThird))
+  tv.vec2:setSub2(v1, tv.vCenter)       -- vRot1
+  tv.vec3:setCross(tv.vec1, tv.vec2)
+  tv.vec3:setScaled(sc.w1)
+  tv.curlVel:set(tv.vec3)
+  denom = denom + tv.vec1:squaredLength() * sc.w1
 
-  local angAccelLocalRaw = vec3(angAccel:dot(currentDir), angAccel:dot(worldLeft), angAccel:dot(worldThird))
+  -- Node 2 contribution.
+  tv.vec1:setSub2(node2, tv.baryCenter) -- r2
+  tv.vec2:setSub2(tv.accel2, tv.aCenter) -- aRot2
+  tv.vec3:setCross(tv.vec1, tv.vec2)
+  tv.vec3:setScaled(sc.w2)
+  tv.curlAcc:setAdd(tv.vec3)
+  divAcc = divAcc + tv.vec1:dot(tv.vec2) * sc.w2
 
-  -- Filter accel and gyro only (two cascaded dt-aware EMA passes).
-  if not filterState.initialized then
-    filterState.acc1:set(accelLocalRaw)
-    filterState.acc2:set(accelLocalRaw)
-    filterState.gyro1:set(angVelLocalRaw)
-    filterState.gyro2:set(angVelLocalRaw)
-    filterState.initialized = true
-  end
+  tv.vec2:setSub2(v2, tv.vCenter)       -- vRot2
+  tv.vec3:setCross(tv.vec1, tv.vec2)
+  tv.vec3:setScaled(sc.w2)
+  tv.curlVel:setAdd(tv.vec3)
+  denom = denom + tv.vec1:squaredLength() * sc.w2
 
-  local accelPass1 = emaVec3Step(filterState.acc1, accelLocalRaw, accelAlpha)
-  local accelLocal = emaVec3Step(filterState.acc2, accelPass1, accelAlpha)
-  local gyroPass1 = emaVec3Step(filterState.gyro1, angVelLocalRaw, gyroAlpha)
-  local angVelLocal = emaVec3Step(filterState.gyro2, gyroPass1, gyroAlpha)
+  -- Node 3 contribution.
+  tv.vec1:setSub2(node3, tv.baryCenter) -- r3
+  tv.vec2:setSub2(tv.accel3, tv.aCenter) -- aRot3
+  tv.vec3:setCross(tv.vec1, tv.vec2)
+  tv.vec3:setScaled(sc.w3)
+  tv.curlAcc:setAdd(tv.vec3)
+  divAcc = divAcc + tv.vec1:dot(tv.vec2) * sc.w3
+
+  tv.vec2:setSub2(v3, tv.vCenter)       -- vRot3
+  tv.vec3:setCross(tv.vec1, tv.vec2)
+  tv.vec3:setScaled(sc.w3)
+  tv.curlVel:setAdd(tv.vec3)
+  denom = denom + tv.vec1:squaredLength() * sc.w3
+
+  local invDenom = 1.0 / (denom + 1e-30)
+
+  -- total accel = aCenter + (curlAcc x r + divAcc * r) * invDenom
+  tv.vec1:setCross(tv.curlAcc, tv.r)
+  tv.vec2:setScaled2(tv.r, divAcc)
+  tv.vec3:setAdd2(tv.vec1, tv.vec2)
+  tv.vec3:setScaled(invDenom)
+  tv.accelWorld:setAdd2(tv.aCenter, tv.vec3)
+  if sc.isUsingGravity then tv.accelWorld:setAdd(vs.currVeh:getGravityVector()) end
+
+  tv.angVel:setScaled2(tv.curlVel, invDenom)
+  tv.angAccel:setScaled2(tv.curlAcc, invDenom)
+
+  -- -----------------------------------------------------------------------
+  -- Velocity filtering (world), then publish in local frame.
+  local velWorld = filters.modules.velWorld.step(dt, tv.vCenter)
+
+  -- Kalman-like predictor-corrector for linear acceleration in world frame.
+  local accelWorld = filters.modules.accelWorldKf.step(dt, tv.accelWorld, velWorld)
+
+  -- Cache latestReading locally for frequent writes (reduces hash lookups)
+  local latest = rb.latestReading
+
+  -- Transform quantities in the local frame (avoid per-step vec3 allocations).
+  -- Below store the quantities in the latestReading structure in local frame.
+  latest.accel[1] = accelWorld:dot(tv.currentDir)
+  latest.accel[2] = accelWorld:dot(tv.worldLeft)
+  latest.accel[3] = accelWorld:dot(tv.worldThird)
+
+  latest.vel[1] = velWorld:dot(tv.currentDir)
+  latest.vel[2] = velWorld:dot(tv.worldLeft)
+  latest.vel[3] = velWorld:dot(tv.worldThird)
+
+  tv.angVelLocalRaw:set(tv.angVel:dot(tv.currentDir), tv.angVel:dot(tv.worldLeft), tv.angVel:dot(tv.worldThird))
+  local angVelLocal = filters.modules.gyroLocal.step(dt, tv.angVelLocalRaw)
+  latest.angVel[1] = angVelLocal.x
+  latest.angVel[2] = angVelLocal.y
+  latest.angVel[3] = angVelLocal.z
+
+  -- Raw vaues for ang accel
+  latest.angAccel[1] = tv.angAccel:dot(tv.currentDir)
+  latest.angAccel[2] = tv.angAccel:dot(tv.worldLeft)
+  latest.angAccel[3] = tv.angAccel:dot(tv.worldThird)
   -- -----------------------------------------------------------------------
 
   -- ------------------------------------------------------------------------
@@ -463,100 +807,114 @@ local function update(dtSim)
   -- -----------------------------------------------------------------------
 
   -- Compute the orientation of the sensor.
-  local quatEst = getQuaternionFromDir(currentDir, worldLeft, worldThird) -- qx, qy, qz, qw
+  -- qx, qy, qz, qw
+  writeQuatTable(latest.quat, getQuaternionFromDir(tv.currentDir, tv.worldLeft, tv.worldThird))
 
   -- ----------------------------------------------------------------------
   --                     WheelAngle Calculation                          --
   -- ----------------------------------------------------------------------
-  local signSteering = sign(electrics.values.steering_input)
 
   -- front right
-  fillWheelInfos(wheelFRInfo, wheel_fr)
-  wheelFRInfo.angleLegacy = wheelAngleLegacyRad(wheel_fr.node1, wheel_fr.node2, signSteering)
-  wheelFRInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_fr.node1, wheel_fr.node2)
-  wheelFRInfo.angle = wheelFRInfo.angleAtan2
+  fillWheelInfos(wi.fr, wheel_fr)
+  wi.fr.angle = wheelAngleAtan2Rad(wheel_fr.node1, wheel_fr.node2)
 
   -- front left (note swapped order if needed)
-  fillWheelInfos(wheelFLInfo, wheel_fl)
-  wheelFLInfo.angleLegacy = wheelAngleLegacyRad(wheel_fl.node2, wheel_fl.node1, signSteering)
-  wheelFLInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_fl.node2, wheel_fl.node1)
-  wheelFLInfo.angle = wheelFLInfo.angleAtan2
+  fillWheelInfos(wi.fl, wheel_fl)
+  wi.fl.angle = wheelAngleAtan2Rad(wheel_fl.node2, wheel_fl.node1)
 
   -- rear right
-  fillWheelInfos(wheelRRInfo, wheel_rr)
-  wheelRRInfo.angleLegacy = wheelAngleLegacyRad(wheel_rr.node1, wheel_rr.node2, signSteering)
-  wheelRRInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_rr.node1, wheel_rr.node2)
-  wheelRRInfo.angle = wheelRRInfo.angleAtan2
+  fillWheelInfos(wi.rr, wheel_rr)
+  wi.rr.angle = wheelAngleAtan2Rad(wheel_rr.node1, wheel_rr.node2)
 
   -- rear left
-  fillWheelInfos(wheelRLInfo, wheel_rl)
-  wheelRLInfo.angleLegacy = wheelAngleLegacyRad(wheel_rl.node2, wheel_rl.node1, signSteering)
-  wheelRLInfo.angleAtan2 = wheelAngleAtan2Rad(wheel_rl.node2, wheel_rl.node1)
-  wheelRLInfo.angle = wheelRLInfo.angleAtan2
+  fillWheelInfos(wi.rl, wheel_rl)
+  wi.rl.angle = wheelAngleAtan2Rad(wheel_rl.node2, wheel_rl.node1)
+
+  -- Filter wheel angular velocities in-place (do not keep raw).
+  filters.modules.wheelsAngVel.step(dt, wi.fr, wi.fl, wi.rr, wi.rl)
   --  -------------------------------------------------------
 
   -- These inputs are updated at a lower frequency than the physics steps.
   local elecVals = electrics.values
+
   -- Extract the drive status from the state manager.
   local driveModeStatus = gtStateManager.getDriveModeStatus()
 
   -- Gather the latest reading data (in-place updates to reduce allocations).
-  latestReading.time = currVeh:getSimTime()
-  writeVec3Table(latestReading.dirX, currentDir)
-  writeVec3Table(latestReading.dirY, worldLeft)
-  writeVec3Table(latestReading.vel, velLocal)
-  writeVec3Table(latestReading.accelRaw, accelLocalRaw)
-  writeVec3Table(latestReading.accel, accelLocal)
-  writeVec3Table(latestReading.angVelRaw, angVelLocalRaw)
-  writeVec3Table(latestReading.angVel, angVelLocal)
-  writeVec3Table(latestReading.angAccelRaw, angAccelLocalRaw)
-  writeVec3Table(latestReading.pos, sensorPos)
-  writeQuatTable(latestReading.quat, quatEst)
-  latestReading.wheelFR = wheelFRInfo
-  latestReading.wheelFL = wheelFLInfo
-  latestReading.wheelRR = wheelRRInfo
-  latestReading.wheelRL = wheelRLInfo
-  -- Backward-compatible aliases (older consumers)
-  latestReading.wheel_fr = wheelFRInfo
-  latestReading.wheel_fl = wheelFLInfo
-  latestReading.wheel_rr = wheelRRInfo
-  latestReading.wheel_rl = wheelRLInfo
+  latest.time = vs.currVeh:getSimTime()
 
-  latestReading.steering = elecVals.steering
-  latestReading.throttle = elecVals.throttle
-  latestReading.brake = elecVals.brake
-  latestReading.clutch = elecVals.clutch
-  latestReading.pbrake = elecVals.parkingbrake
-  latestReading.steeringInput = elecVals.steering_input
-  latestReading.throttleInput = elecVals.throttle_input
-  latestReading.brakeInput = elecVals.brake_input
-  latestReading.clutchInput = elecVals.clutch_input
+  writeVec3Table(latest.dirX, tv.currentDir)
+  writeVec3Table(latest.dirY, tv.worldLeft)
+  writeVec3Table(latest.pos, tv.sensorPos)
+
+  -- Optional debug/raw fields in world frame.
+  writeWheelInfoTable(latest.wheelFR, wi.fr)
+  writeWheelInfoTable(latest.wheelFL, wi.fl)
+  writeWheelInfoTable(latest.wheelRR, wi.rr)
+  writeWheelInfoTable(latest.wheelRL, wi.rl)
+
+  latest.steering = elecVals.steering
+  latest.throttle = elecVals.throttle
+  latest.brake = elecVals.brake
+  latest.clutch = elecVals.clutch
+  latest.pbrake = elecVals.parkingbrake
+  latest.steeringInput = elecVals.steering_input
+  latest.throttleInput = elecVals.throttle_input
+  latest.brakeInput = elecVals.brake_input
+  latest.clutchInput = elecVals.clutch_input
 
   -- Relevant vehicle mode / state data.
-  latestReading.driveStatus = driveModeStatus
+  writeDriveStatusTable(latest.driveStatus, driveModeStatus)
 
   -- Engine relevant information
-  latestReading.engineLoad = engine and (engine.isDisabled and 0 or engine.instantEngineLoad) or 0
-  latestReading.engineTorque = engine and engine.combustionTorque or 0
-  latestReading.RPM = engine and (engine.outputAV1 * constants.avToRPM) or 0
-  latestReading.flywheelTorque = engine and engine.outputTorque1 or 0
-  latestReading.turboBoost = elecVals.turboBoost or -1
-  latestReading.superchargerBoost = elecVals.superchargerBoost or -1
-  latestReading.throttleValve = engine and engine.throttle
+  latest.engineLoad = vs.engine and (vs.engine.isDisabled and 0 or vs.engine.instantEngineLoad) or 0
+  latest.engineTorque = vs.engine and vs.engine.combustionTorque or 0
+  latest.RPM = vs.engine and (vs.engine.outputAV1 * constants.avToRPM) or 0
+  latest.flywheelTorque = vs.engine and vs.engine.outputTorque1 or 0
+  latest.turboBoost = elecVals.turboBoost or -1
+  latest.superchargerBoost = elecVals.superchargerBoost or -1
+  latest.throttleValve = vs.engine and vs.engine.throttle
 
   -- Gearbox relevant information
-  latestReading.gearboxTorque = gearbox and gearbox.outputTorque1 or 0
-  latestReading.gearRatio = gearbox and gearbox.gearRatio or 0
-  latestReading.gearIndex = elecVals.gearIndex
+  latest.gearboxTorque = vs.gearbox and vs.gearbox.outputTorque1 or 0
+  latest.gearRatio = vs.gearbox and vs.gearbox.gearRatio or 0
+  latest.gearIndex = elecVals.gearIndex
 
+  -- Update fields for debugging non-filtered raw values if enabled.
+  if filters.params.debugRaw then
+    latest.accelRaw[1] = tv.accelWorld:dot(tv.currentDir)
+    latest.accelRaw[2] = tv.accelWorld:dot(tv.worldLeft)
+    latest.accelRaw[3] = tv.accelWorld:dot(tv.worldThird)
+
+    latest.angVelRaw[1] = tv.angVelLocalRaw.x
+    latest.angVelRaw[2] = tv.angVelLocalRaw.y
+    latest.angVelRaw[3] = tv.angVelLocalRaw.z
+
+    latest.velRaw[1] = tv.vCenter:dot(tv.currentDir)
+    latest.velRaw[2] = tv.vCenter:dot(tv.worldLeft)
+    latest.velRaw[3] = tv.vCenter:dot(tv.worldThird)
+
+    latest.wheelFR_angVelRaw = filters.state.wheelsAngVel.rawFr
+    latest.wheelFL_angVelRaw = filters.state.wheelsAngVel.rawFl
+    latest.wheelRR_angVelRaw = filters.state.wheelsAngVel.rawRr
+    latest.wheelRL_angVelRaw = filters.state.wheelsAngVel.rawRl
+
+    local signSteering = sign(elecVals.steering_input)
+    latest.wheelFR_angleLegacy = wheelAngleLegacyRad(wheel_fr.node1, wheel_fr.node2, signSteering)
+    latest.wheelFL_angleLegacy = wheelAngleLegacyRad(wheel_fl.node2, wheel_fl.node1, signSteering)
+    latest.wheelRR_angleLegacy = wheelAngleLegacyRad(wheel_rr.node1, wheel_rr.node2, signSteering)
+    latest.wheelRL_angleLegacy = wheelAngleLegacyRad(wheel_rl.node2, wheel_rl.node1, signSteering)
+  end
+
+  -- TODO: Better way to handle optional NN inference without hardcoding field names and input structure.
   -- Optional: estimate torque from current state using NN.
   -- Inputs are intentionally hardcoded (like controller_nn_*):
   --   [engine_speed_rads, boost_pressure, throttle, rear_wheelspeed_ms]
   if torqueNNModel and nn then
-    local rear_wheelspeed_ms = 0.5 * (wheelRRInfo.speed+ wheelRLInfo.speed)
-    local engine_speed_rads = latestReading.RPM * constants.rpmToAV
-    local boost_pressure = latestReading.turboBoost
-    local throttle = latestReading.throttle
+    local rear_wheelspeed_ms = 0.5 * (wi.rr.speed+ wi.rl.speed)
+    local engine_speed_rads = latest.RPM * constants.rpmToAV
+    local boost_pressure = latest.turboBoost
+    local throttle = latest.throttle
 
     local out = nn.run( torqueNNModel, {
       engine_speed_rads,
@@ -569,22 +927,21 @@ local function update(dtSim)
 
   -- Add the custom fields
   for fieldName, value in pairs(customFields) do
-    latestReading[fieldName] = value
+    latest[fieldName] = value
+  end
+
+  -- Now move the index
+  beginNewWrite(true)
+
+  -- Bootstrap ring schema from first fully-populated reading.
+  if not rb.ringInitialized then
+    bootstrapRingFromFirstReading()
   end
 
   -- Store the latest readings for this State sensor in the extension. 
   -- This is used for sending back on the physics step.
-  gtStateManager.cacheLatestReading(sensorId, latestReading)
+  gtStateManager.cacheLatestReading(sc.id, latest)
 
-  -- Update the number of physics steps for the GFX save.
-  counterPhysicsSteps = counterPhysicsSteps + 1
-  if counterPhysicsSteps >= numPhysicsStepsForGFXSave then
-    -- Add the data to the readings array, for later retrieval.
-    -- This is used for sending back on the graphics step.
-    readings[readingIndex] = cloneReading(latestReading)
-    readingIndex = readingIndex + 1
-    counterPhysicsSteps = 0
-  end
 end
 
 --[[
@@ -615,52 +972,75 @@ local function init(data)
   gtStateManager = extensions.xlab_gtState
 
   -- Core sensor configuration
-  sensorId = data.sensorId
-  GFXUpdateTime = data.GFXUpdateTime or 0.033 -- Default to ~30Hz
+  sensorConfig.id = data.sensorId
+  sensorConfig.gfxUpdateTime = data.GFXUpdateTime or 0.033 -- Default to ~30Hz
 
   -- Node indices for triangular mounting surface
-  nodeIndex1 = data.nodeIndex1
-  nodeIndex2 = data.nodeIndex2
-  nodeIndex3 = data.nodeIndex3
+  sensorConfig.nodeIndex1 = data.nodeIndex1
+  sensorConfig.nodeIndex2 = data.nodeIndex2
+  sensorConfig.nodeIndex3 = data.nodeIndex3
 
   -- Set the vehicle object
-  currVeh = obj
+  vehicleState.currVeh = obj
 
   -- Masses of the three nodes
-  m1 = currVeh:getNodeMass(nodeIndex1)
-  m2 = currVeh:getNodeMass(nodeIndex2)
-  m3 = currVeh:getNodeMass(nodeIndex3)
+  sensorConfig.m1 = vehicleState.currVeh:getNodeMass(sensorConfig.nodeIndex1)
+  sensorConfig.m2 = vehicleState.currVeh:getNodeMass(sensorConfig.nodeIndex2)
+  sensorConfig.m3 = vehicleState.currVeh:getNodeMass(sensorConfig.nodeIndex3)
+  sensorConfig.inv_m1 = 1.0 / sensorConfig.m1
+  sensorConfig.inv_m2 = 1.0 / sensorConfig.m2
+  sensorConfig.inv_m3 = 1.0 / sensorConfig.m3
 
   -- Barycentric coordinates and interpolation weights
-  b1 = data.u
-  b2 = data.v
-  b3 = 1.0 - b1 - b2
+  sensorConfig.b1 = data.u
+  sensorConfig.b2 = data.v
+  sensorConfig.b3 = 1.0 - sensorConfig.b1 - sensorConfig.b2
+
   -- Non-negative weights for mass interpolation
-  w1 = max(0, b1)
-  w2 = max(0, b2)
-  w3 = max(0, b3)
+  sensorConfig.w1 = max(0, sensorConfig.b1)
+  sensorConfig.w2 = max(0, sensorConfig.b2)
+  sensorConfig.w3 = max(0, sensorConfig.b3)
 
   -- Spatial configuration
-  signedProjDist = data.signedProjDist
-  triangleSpaceForward = data.triangleSpaceForward
-  triangleSpaceLeft = data.triangleSpaceLeft
+  sensorConfig.signedProjDist = data.signedProjDist
+  sensorConfig.triangleSpaceForward = data.triangleSpaceForward
+  sensorConfig.triangleSpaceLeft = data.triangleSpaceLeft
 
   -- Operational flags
-  isVisualised = data.isVisualised
-  isUsingGravity = data.isUsingGravity
+  sensorConfig.isUsingGravity = data.isUsingGravity
 
   -- Timing configuration
-  physicsUpdateTime = data.physicsUpdateTime or 0.005 -- Default to 200Hz
-  numPhysicsStepsForGFXSave = data.numPhysicsStepsForGFXSave
+  ringBuffer.physicsUpdateTime = data.physicsUpdateTime or 0.005 -- Default to 200Hz
+  ringBuffer.numPhysicsStepsForGFXSave = max(1, tonumber(data.numPhysicsStepsForGFXSave) or 1)
+
+  -- Optional filter configuration
+  filters.params.accelTauS = tonumber(data.accelTauS or data.accel_tau_s) or filters.params.accelTauS
+  filters.params.gyroTauS = tonumber(data.gyroTauS or data.gyro_tau_s) or filters.params.gyroTauS
+  filters.params.velTauS = tonumber(data.velTauS or data.vel_tau_s) or filters.params.velTauS
+  filters.params.wheelAngVelTauS = tonumber(data.wheelAngVelTauS or data.wheel_angvel_tau_s) or filters.params.wheelAngVelTauS
+  filters.params.kfPredictGain = clamp01(tonumber(data.kfPredictGain or data.kf_predict_gain) or filters.params.kfPredictGain)
+  filters.params.debugRaw = (data.debugRaw == true) or (data.debug == true) or (data.debug_raw == true)
+
+  -- Let's log the filter configuration for debugging purposes.
+  log('I', logTag, string.format(
+    'Filter config | accelTauS=%.3f gyroTauS=%.3f velTauS=%.3f wheelAngVelTauS=%.3f kfPredictGain=%.2f debugRaw=%s',
+    filters.params.accelTauS,
+    filters.params.gyroTauS,
+    filters.params.velTauS,
+    filters.params.wheelAngVelTauS,
+    filters.params.kfPredictGain,
+    tostring(filters.params.debugRaw)
+  ))
+
+  -- Cache nominal alphas for the common dt path.
+  filters.cache.nominalDt = 0 -- default physics update time
+  filters.rebuildCache(ringBuffer.physicsUpdateTime)
+
+  -- Reset all filter states for this sensor.
+  filters.resetAll()
 
   -- Initialize timing state
-  physicsTimer = 0.0
-  timeSinceLastPoll = 0.0
-  counterPhysicsSteps = 0
-
-  -- Data collection buffers
-  readings = {} -- Circular buffer for graphics system
-  readingIndex = 1 -- Current write position in buffer
+  ringBuffer.physicsTimer = 0.0
 
   -- Wheel system integration
   wheel_fr = wheelRotators[wheelIds['FR']]
@@ -668,24 +1048,13 @@ local function init(data)
   wheel_rr = wheelRotators[wheelIds['RR']]
   wheel_rl = wheelRotators[wheelIds['RL']]
 
-  -- Wire wheel info tables into the latestReading (stable references)
-  latestReading.wheelFR = wheelFRInfo
-  latestReading.wheelFL = wheelFLInfo
-  latestReading.wheelRR = wheelRRInfo
-  latestReading.wheelRL = wheelRLInfo
-  -- Backward-compatible aliases
-  latestReading.wheel_fr = wheelFRInfo
-  latestReading.wheel_fl = wheelFLInfo
-  latestReading.wheel_rr = wheelRRInfo
-  latestReading.wheel_rl = wheelRLInfo
-
   -- Engine and gearbox references
-  engine = powertrain.getDevice('mainEngine')
-  gearbox = powertrain.getDevice('gearbox')
+  vehicleState.engine = powertrain.getDevice('mainEngine')
+  vehicleState.gearbox = powertrain.getDevice('gearbox')
 
   -- Let's make sure that they are not nil
-  if engine == nil then log('E', logTag, 'Engine reference is nil') end
-  if gearbox == nil then log('E', logTag, 'Gearbox reference is nil') end
+  if vehicleState.engine == nil then log('E', logTag, 'Engine reference is nil') end
+  if vehicleState.gearbox == nil then log('E', logTag, 'Gearbox reference is nil') end
 
   -- Optional torque estimation NN setup.
   torqueNNModel = nil
@@ -732,38 +1101,34 @@ local function init(data)
     end
   end
 
+  ringBuffer.readings = {}
+  ringBuffer.ringSize = computeRingSize(sensorConfig.gfxUpdateTime, ringBuffer.physicsUpdateTime)
+  ringBuffer.writeIdx = 0
+  ringBuffer.writeSeq = 0
+  ringBuffer.readSeq = 0
+  ringBuffer.ringInitialized = false
+
+  -- Just initialize the latestReading to an empty table for now.
+  ensureLatestReadingTables()
+
   -- Debug initialization
   log(
     'I',
     logTag,
     string.format(
-      'Initialized sensor %d | Nodes: %d,%d,%d | Update rates: Physics=%.1fkHz GFX=%.1fHz',
-      sensorId,
-      nodeIndex1,
-      nodeIndex2,
-      nodeIndex3,
-      1 / physicsUpdateTime / 1000,
-      1 / GFXUpdateTime
+      'Initialized sensor %d | Nodes: %d,%d,%d | Update rates: Physics=%.1fkHz GFX=%.1fHz | StepsPerGFX=%d | RingSize=%d',
+      sensorConfig.id,
+      sensorConfig.nodeIndex1,
+      sensorConfig.nodeIndex2,
+      sensorConfig.nodeIndex3,
+      1 / ringBuffer.physicsUpdateTime / 1000,
+      1 / sensorConfig.gfxUpdateTime,
+      ringBuffer.numPhysicsStepsForGFXSave,
+      ringBuffer.ringSize
     )
   )
 end
 
---[[
-Resets the sensor's internal state by clearing accumulated readings and resetting timers.
-Note:
-    - Assumes that `GFXUpdateTime` is a valid, positive number.
-    - Relies on `readings`, `readingIndex`, and `timeSinceLastPoll` being properly initialized.
-]]
-local function reset()
-  -- Clear the readings buffer by assigning a new empty table
-  readings = {}
-  -- Reset the reading index to 1 to start populating from the beginning
-  readingIndex = 1
-  -- Ensure GFXUpdateTime is positive and adjust the polling timer accordingly
-  timeSinceLastPoll = timeSinceLastPoll % max(GFXUpdateTime, 1e-30)
-
-  filterState.initialized = false
-end
 
 local function stop()
   if nn and torqueNNModel then
@@ -777,22 +1142,14 @@ Retrieves comprehensive sensor data for external use, such as graphical updates 
 
 Returns:
     table: A table containing the following fields:
-        - isVisualised (bool): Indicates whether the sensor's visualization is enabled.
-        - timeSinceLastPoll (number): Time elapsed since the last poll/update.
-        - GFXUpdateTime (number): Interval (in seconds) between graphical updates.
         - currentPos (vec3): The sensor's current position in world space, calculated by adding
                                 the sensor's local position to the vehicle's global position.
-        - currentDir (vec3): The sensor's current orientation direction vector in vehicle space.
         - rawReadings (table): A table of raw sensor readings accumulated since the last graphics update.
 ]]
 local function getSensorData()
   return {
-    isVisualised = isVisualised,
-    timeSinceLastPoll = timeSinceLastPoll,
-    GFXUpdateTime = GFXUpdateTime,
-    currentPos = sensorPos,
-    currentDir = currentDir,
-    rawReadings = readings,
+    currentPos = tmpVectors.sensorPos,
+    rawReadings = getPendingGFXReadings(),
   }
 end
 
@@ -804,25 +1161,15 @@ Returns:
             acceleration, angular dynamics, position, orientation quaternion, wheel states,
             control inputs, desired inputs, and drive mode status, ..
 ]]
-local function getLatest() return latestReading end
+local function getLatest() return ringBuffer.latestReading end
 
---[[
-Increments the internal timer tracking the time since the last polling event.
-This function should be called with the simulation delta time (dtSim) each physics step.
-
-Parameters:
-    dtSim (number): The time increment (in seconds) since the last simulation step.
-]]
-local function incrementTimer(dtSim) timeSinceLastPoll = timeSinceLastPoll + dtSim end
 
 -- Public interface:
 M.update = update
 M.init = init
-M.reset = reset
 M.stop = stop
 M.getSensorData = getSensorData
 M.getLatest = getLatest
-M.incrementTimer = incrementTimer
 M.registerCustomField = registerCustomField
 M.setCustomField = setCustomField
 

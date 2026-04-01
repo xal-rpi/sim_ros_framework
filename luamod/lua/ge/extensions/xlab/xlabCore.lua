@@ -39,6 +39,12 @@ M.handleOpenGtState = function(request)
   args.isForceInsideTriangle = request['isForceInsideTriangle']
   args.isDirWorldSpace = request['isDirWorldSpace']
   args.isAllowWheelNodes = request['isAllowWheelNodes']
+  args.accel_tau_s = request['accel_tau_s']
+  args.gyro_tau_s = request['gyro_tau_s']
+  args.vel_tau_s = request['vel_tau_s']
+  args.wheel_angvel_tau_s = request['wheel_angvel_tau_s']
+  args.kf_predict_gain = request['kf_predict_gain']
+  args.debug_raw = request['debug_raw']
   args.torqueNN = request['torqueNN']
 
   local name = request['name']
@@ -46,6 +52,7 @@ M.handleOpenGtState = function(request)
 
   GtStates[name] = extensions.xlab_sensors.createGtState(vid, args)
   log('I', logTag, 'Opened GtState sensor')
+  log('I', logTag, '[handle] numPhysicsStepsForGFXSave: ' .. tostring(args.numPhysicsStepsForGFXSave))
 
   request:sendACK('OpenedGtState')
 end

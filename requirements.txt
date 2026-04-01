@@ -2,7 +2,13 @@
 beamngpy
 PyYAML
 numpy
+scipy
 tqdm
+matplotlib
+casadi
+
+# Optional: schema-based rosbag2 (MCAP) decoding without ROS msg packages
+rosbags
 
 # Build-time deps when colcon uses a venv python
 empy

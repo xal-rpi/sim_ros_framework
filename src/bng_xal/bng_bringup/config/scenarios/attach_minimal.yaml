@@ -28,6 +28,11 @@ vehicles:
     sensors:
       basicStateTemp:
         type: BasicState
+      gtstate:
+        type: GtState
+        gfx_update_time: 0.15
+        physics_update_time: 0.01
+        num_physics_steps_for_gfx_save: 1
 
 # ROS publishing configuration
 ros_poll_config:
@@ -36,3 +41,8 @@ ros_poll_config:
       # topic: /ego/basicState
       poll_time: 0.05
       publish: 1
+    gtstate:
+      # topic: /ego/gtstate
+      poll_time: 0.1 # Make sure this matches the gfx_update_time and is not 3 times slower
+      publish: 1 # 0 is false, 1 is true, 2 is true and publish to all
+      # publish_all: True

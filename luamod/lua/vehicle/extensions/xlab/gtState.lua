@@ -6,6 +6,7 @@ local M = {}
 -- Module state variables
 local gtStates = {} -- Collection of active Groundtruth state sensors
 local latestReadings = {} -- Latest sensor readings
+local sensorPollTimers = {} -- Timers to track time since last poll for each sensor
 local is4WDVehicle = false -- 4WD status flag
 local frontDiff = nil -- Front differential device
 local rearDiff = nil -- Rear differential device
@@ -35,25 +36,37 @@ end
 -- @param dtSim Simulation delta time
 -- @param sensorId ID of the sensor to update
 local function updateGtStateGFXStep(dtSim, sensorId)
-  -- Get the latest data from the controller.
-  local controller = gtStates[sensorId].controller
-  local data = controller.getSensorData()
-  -- Draw this sensor, if requested.
-  if data.isVisualised == true then
-    obj.debugDrawProxy:drawSphere(0.05, data.currentPos, color(0, 255, 0, 255))
-  end
-  -- If we are not ready to poll this sensor, then increment the timer and leave.
-  if data.timeSinceLastPoll < data.GFXUpdateTime then
-    controller.incrementTimer(dtSim)
+
+  local state = gtStates[sensorId]
+  if not state then return end
+
+  -- Check if it's time to poll this sensor based on its GFX update time.
+  local gfxDt = state.data.GFXUpdateTime
+  local t = sensorPollTimers[sensorId] + dtSim
+  if t < gfxDt then
+    sensorPollTimers[sensorId] = t
     return
   end
+  sensorPollTimers[sensorId] = t - gfxDt
+
+  -- Get the latest data from the controller.
+  local controller = state.controller
+  local sensorData = controller.getSensorData() -- called only at cadence
+
   -- Send the latest sensor readings from vlua to ge lua.
-  local rawReadingsData = { sensorId = sensorId, reading = data.rawReadings }
+  local rawReadingsData = { sensorId = sensorId, reading = sensorData.rawReadings }
   obj:queueGameEngineLua(
-    string.format('xlab_sensors.updateGtStateLastReadings(%q)', lpack.encode(rawReadingsData))
+    string.format(
+      'xlab_sensors.updateGtStateLastReadings(%q)',
+      lpack.encode(rawReadingsData)
+    )
   )
-  -- Reset the raw readings table, now that the GFX update step has been performed.
-  controller.reset()
+
+  -- Draw this sensor, if requested.
+  if state.data.isVisualised == true then
+    obj.debugDrawProxy:drawSphere(0.05, sensorData.currentPos, color(0, 255, 0, 255))
+  end
+
 end
 
 --- Sets up and configures the vehicle's differentials
@@ -104,6 +117,8 @@ end
 local function create(data)
   -- Create a controller instance for this GtState sensor
   local decodedData = lpack.decode(data)
+
+  -- Controller data
   local controllerData = {
     sensorId = decodedData.sensorId,
     GFXUpdateTime = decodedData.GFXUpdateTime,
@@ -119,6 +134,12 @@ local function create(data)
     triangleSpaceLeft = decodedData.triangleSpaceLeft,
     isVisualised = decodedData.isVisualised,
     isUsingGravity = decodedData.isUsingGravity,
+    accel_tau_s = decodedData.accel_tau_s,
+    gyro_tau_s = decodedData.gyro_tau_s,
+    vel_tau_s = decodedData.vel_tau_s,
+    wheel_angvel_tau_s = decodedData.wheel_angvel_tau_s,
+    kf_predict_gain = decodedData.kf_predict_gain,
+    debug_raw = decodedData.debug_raw,
     torqueNN = decodedData.torqueNN,
   }
 
@@ -130,6 +151,14 @@ local function create(data)
       controllerData
     ),
   }
+
+  -- Store the timer for this sensor to track time since last poll.
+  sensorPollTimers[decodedData.sensorId] = 0
+
+  -- Log some info about the vehicle setup on creation of the first sensor.
+  log('I', logTag, 'Creating GtState sensor with ID: ' .. tostring(decodedData.sensorId))
+  log('I', logTag, 'Vehicle ID: ' .. tostring(objectId))
+  log('I', logTag, 'numPhysicsStepsForGFXSave: ' .. tostring(controllerData.numPhysicsStepsForGFXSave))
 
   setup4WDVehicle()
   setupDifferentials()
@@ -153,6 +182,7 @@ local function geGtStateReading(sensorId) return latestReadings[sensorId] end
 local function remove(sensorId)
   controller.unloadControllerExternal('GtState' .. sensorId)
   gtStates[sensorId] = nil
+  sensorPollTimers[sensorId] = nil
 end
 
 --- Gets the latest sensor data
@@ -202,4 +232,5 @@ M.getDriveModeStatus = getDriveModeStatus
 M.getGtStateController = getGtStateController
 
 return M
+
 
