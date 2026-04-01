@@ -1,3 +1,12 @@
+coGHeight: 0.437
+cogPos:
+- 0.334
+- 1.171
+- 0.439
+cogPosDynamic:
+- 0.334
+- 1.133
+- 0.44
 cogPosDynamicRel:
 - 0.334
 - 1.19
@@ -9,16 +18,12 @@ cogToRightWheelAxle: 0.896
 distFR: 2.501
 distLR: 1.785
 inertia:
-  xx: 511.676
-  xy: 0.969
-  xz: -18.805
-  yy: 2277.168
-  yz: 1.059
-  zz: 2591.115
-refNodePos:
-- -0.0
-- -0.0
-- 0.0
+  xx: 511.674
+  xy: 0.97
+  xz: -18.809
+  yy: 2277.167
+  yz: 1.062
+  zz: 2591.114
 totalMass: 1411.235
 vectorForward:
 - -0.0
@@ -73,7 +78,7 @@ wheel_rr:
   width: 0.3
 engine:
   fuelCapacity: 50.0
-  fuelVolume: 49.976
+  fuelVolume: 49.986
   idleRPM: 1050.0
   maxRPM: 7750.0
   superchargerBoostMax: -1.0
@@ -192,7 +197,7 @@ controllers:
   door_L_coupler: advancedCouplerControl
   door_R_coupler: advancedCouplerControl
   driveModes: driveModes
-  gtState3: xlab/gtState
+  gtState2: xlab/gtState
   hoodCatchCoupler: advancedCouplerControl
   hoodLatchCoupler: advancedCouplerControl
   postCrashBrake: braking/postCrashBrake
