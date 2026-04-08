@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib import get_backend
 from matplotlib.transforms import Affine2D
 
-from simulator import fiala_params
+from simulator_cartesian import fiala_params
 
 
 @dataclass(frozen=True)
