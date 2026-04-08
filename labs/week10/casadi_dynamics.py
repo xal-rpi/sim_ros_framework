@@ -216,8 +216,8 @@ class FialaBicycleCasADi:
 
         # Body-frame accelerations used for GG analysis.
         # Kept separate from state derivatives to make post-processing explicit.
-        accel_x = vx_dot - r * vx
-        accel_y = vy_dot - r * vy
+        accel_x = vx_dot - r * vy
+        accel_y = vy_dot + r * vx
 
         # front_wheel_torque = 0.0
         # wf_dot = (
