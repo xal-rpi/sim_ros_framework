@@ -132,12 +132,12 @@ class FrenetTrackingMPC:
         "t": (0.0, 100.0),
         "r": (-1.5, 1.5),
         "V": (2.0, 30.0),
-        "beta": (-0.2, 0.2),
+        "beta": (-0.5, 0.5),
         "wr": (2.0, 30.0),
         "e": (-10.0, 10.0),
         "dphi": (-1.2, 1.2),
         "roadwheel_angle": (-0.4, 0.4),
-        "rear_wheel_torque": (-500.0, 4500.0),
+        "rear_wheel_torque": (-500.0, 3500.0),
     }
 
     DEFAULT_MAG = {
@@ -219,12 +219,28 @@ class FrenetTrackingMPC:
         u_mag = np.array([mag[name] for name in self.CONTROL_ORDER], dtype=float)
 
         ranges = self.DEFAULT_RANGES.copy()
+        ranges["e"] = (-float(self.cfg.max_lateral_error), float(self.cfg.max_lateral_error))
         ranges.update(self._state_bounds_override)
         x_lo = np.array([ranges[name][0] for name in self.STATE_ORDER], dtype=float)
         x_hi = np.array([ranges[name][1] for name in self.STATE_ORDER], dtype=float)
         u_lo = np.array([ranges[name][0] for name in self.CONTROL_ORDER], dtype=float)
         u_hi = np.array([ranges[name][1] for name in self.CONTROL_ORDER], dtype=float)
         return x_mag, u_mag, x_lo, x_hi, u_lo, u_hi
+
+    def _resolve_lateral_error_bounds(self, ref_window: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+        e_override = self._state_bounds_override.get("e")
+        if e_override is not None:
+            e_lb, e_ub = e_override
+            horizon_len = len(np.asarray(ref_window["s"], dtype=float))
+            return (
+                np.full(horizon_len, e_lb, dtype=float),
+                np.full(horizon_len, e_ub, dtype=float),
+            )
+
+        return (
+            np.asarray(ref_window["e_min"], dtype=float),
+            np.asarray(ref_window["e_max"], dtype=float),
+        )
 
     def _build_dynamics_function(self):
         x_hat = ca.SX.sym("x_hat", len(self.STATE_ORDER))
@@ -510,8 +526,9 @@ class FrenetTrackingMPC:
         self._opti.set_value(self._P["SGRID"], s_grid)
         self._opti.set_value(self._P["KAPPA"], np.asarray(ref_window["kappa"], dtype=float))
         self._opti.set_value(self._P["XREF"], x_ref_hat)
-        self._opti.set_value(self._P["EMIN"], np.asarray(ref_window["e_min"], dtype=float))
-        self._opti.set_value(self._P["EMAX"], np.asarray(ref_window["e_max"], dtype=float))
+        e_min, e_max = self._resolve_lateral_error_bounds(ref_window)
+        self._opti.set_value(self._P["EMIN"], e_min)
+        self._opti.set_value(self._P["EMAX"], e_max)
 
         if self._warm_x is None:
             warm_x = np.array(x_ref_hat, copy=True)
