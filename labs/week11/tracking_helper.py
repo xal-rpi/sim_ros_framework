@@ -29,6 +29,8 @@ The key contract is:
 - keep the reference yaw unwrapped for interpolation and trajectory work
 - if a measured vehicle yaw is wrapped, wrap only the difference
 - use previewed curvature as the receding-horizon parameter sequence
+- keep track curvature and optimized-trajectory curvature distinct when those
+    two reference conventions need to coexist
 """
 
 from __future__ import annotations
@@ -98,28 +100,41 @@ class TrackingReference:
         e_min: np.ndarray,
         e_max: np.ndarray,
         state_profiles: dict[str, np.ndarray],
+        frame_x: Optional[np.ndarray] = None,
+        frame_y: Optional[np.ndarray] = None,
+        frame_yaw: Optional[np.ndarray] = None,
+        frame_kappa: Optional[np.ndarray] = None,
+        kappa_track: Optional[np.ndarray] = None,
+        kappa_traj: Optional[np.ndarray] = None,
+        reference_mode: str = "trajectory",
         closed: bool = False,
     ):
         self.s = np.asarray(s, dtype=float)
         self.x = np.asarray(x, dtype=float)
         self.y = np.asarray(y, dtype=float)
         self.yaw = np.unwrap(np.asarray(yaw, dtype=float))
-        self.kappa = np.asarray(kappa, dtype=float)
+        self.frame_x = np.asarray(self.x if frame_x is None else frame_x, dtype=float)
+        self.frame_y = np.asarray(self.y if frame_y is None else frame_y, dtype=float)
+        self.frame_yaw = np.unwrap(np.asarray(self.yaw if frame_yaw is None else frame_yaw, dtype=float))
+        self.kappa = np.asarray(kappa if frame_kappa is None else frame_kappa, dtype=float)
+        self.kappa_track = np.asarray(self.kappa if kappa_track is None else kappa_track, dtype=float)
+        self.kappa_traj = np.asarray(kappa if kappa_traj is None else kappa_traj, dtype=float)
         self.speed = np.asarray(speed, dtype=float)
         self.e_min = np.asarray(e_min, dtype=float)
         self.e_max = np.asarray(e_max, dtype=float)
+        self.reference_mode = str(reference_mode)
         self.state_profiles = {
             name: np.asarray(state_profiles[name], dtype=float)
             for name in self.PROFILE_KEYS
         }
         self.closed = bool(closed)
         self.length = float(self.s[-1] - self.s[0])
-        self.path = FrenetPath(s=self.s, x=self.x, y=self.y, yaw=self.yaw, kappa=self.kappa)
+        self.path = FrenetPath(s=self.s, x=self.frame_x, y=self.frame_y, yaw=self.frame_yaw, kappa=self.kappa)
 
-        self._seg_ax = self.x[:-1]
-        self._seg_ay = self.y[:-1]
-        self._seg_vx = self.x[1:] - self.x[:-1]
-        self._seg_vy = self.y[1:] - self.y[:-1]
+        self._seg_ax = self.frame_x[:-1]
+        self._seg_ay = self.frame_y[:-1]
+        self._seg_vx = self.frame_x[1:] - self.frame_x[:-1]
+        self._seg_vy = self.frame_y[1:] - self.frame_y[:-1]
         self._seg_len2 = self._seg_vx ** 2 + self._seg_vy ** 2
 
     @classmethod
@@ -166,18 +181,46 @@ class TrackingReference:
         )
 
     @classmethod
-    def from_traj_result(cls, result: Any, *, closed: bool = False) -> "TrackingReference":
-        x, y, body_yaw = result.get_xy_trajectory()
+    def from_traj_result(
+        cls,
+        result: Any,
+        *,
+        reference_mode: str = "centerline",
+        closed: bool = False,
+    ) -> "TrackingReference":
+        s_arr = np.asarray(result.s, dtype=float)
+        zero_profile = np.zeros_like(s_arr, dtype=float)
+        x_traj, y_traj, body_yaw = result.get_xy_trajectory()
         velocity_heading = np.unwrap(np.asarray(body_yaw, dtype=float) + np.asarray(result.beta, dtype=float))
+        x_center, y_center, yaw_center = result.path_ref.frenet_to_cartesian(s_arr, zero_profile, zero_profile)
         e_min, e_max = result.track.e_bounds_at(result.s)
-        kappa = np.gradient(velocity_heading, np.asarray(result.s, dtype=float), edge_order=1)
-        zero_profile = np.zeros_like(result.s, dtype=float)
+        kappa_track = np.asarray(result.track.kappa_at(s_arr), dtype=float)
+        kappa_traj = np.gradient(velocity_heading, s_arr, edge_order=1)
+
+        mode = str(reference_mode).lower()
+        if mode == "centerline":
+            ref_e = np.asarray(result.e, dtype=float)
+            ref_dphi = np.asarray(result.dphi, dtype=float)
+            frame_x = x_center
+            frame_y = y_center
+            frame_yaw = yaw_center
+            frame_kappa = kappa_track
+        elif mode == "trajectory":
+            ref_e = zero_profile
+            ref_dphi = zero_profile
+            frame_x = np.asarray(x_traj, dtype=float)
+            frame_y = np.asarray(y_traj, dtype=float)
+            frame_yaw = velocity_heading
+            frame_kappa = kappa_traj
+        else:
+            raise ValueError("reference_mode must be either 'centerline' or 'trajectory'")
+
         return cls(
-            s=np.asarray(result.s, dtype=float),
-            x=np.asarray(x, dtype=float),
-            y=np.asarray(y, dtype=float),
+            s=s_arr,
+            x=np.asarray(x_traj, dtype=float),
+            y=np.asarray(y_traj, dtype=float),
             yaw=velocity_heading,
-            kappa=kappa,
+            kappa=kappa_traj,
             speed=np.asarray(result.V, dtype=float),
             e_min=e_min,
             e_max=e_max,
@@ -187,14 +230,18 @@ class TrackingReference:
                 "V": np.asarray(result.V, dtype=float),
                 "beta": np.asarray(result.beta, dtype=float),
                 "wr": np.asarray(result.wr, dtype=float),
-                # The week11 tracking reference geometry is the optimized
-                # trajectory itself, so the reference lies on e = 0 and
-                # dphi = 0 relative to that geometry.
-                "e": zero_profile,
-                "dphi": zero_profile,
+                "e": ref_e,
+                "dphi": ref_dphi,
                 "delta": np.asarray(result.delta, dtype=float),
                 "rear_wheel_torque": np.asarray(result.rear_wheel_torque, dtype=float),
             },
+            frame_x=frame_x,
+            frame_y=frame_y,
+            frame_yaw=frame_yaw,
+            frame_kappa=frame_kappa,
+            kappa_track=kappa_track,
+            kappa_traj=kappa_traj,
+            reference_mode=mode,
             closed=closed,
         )
 
@@ -228,7 +275,12 @@ class TrackingReference:
             "x": np.interp(s_eval, self.s, self.x),
             "y": np.interp(s_eval, self.s, self.y),
             "yaw": np.interp(s_eval, self.s, self.yaw),
+            "frame_x": np.interp(s_eval, self.s, self.frame_x),
+            "frame_y": np.interp(s_eval, self.s, self.frame_y),
+            "frame_yaw": np.interp(s_eval, self.s, self.frame_yaw),
             "kappa": np.interp(s_eval, self.s, self.kappa),
+            "kappa_track": np.interp(s_eval, self.s, self.kappa_track),
+            "kappa_traj": np.interp(s_eval, self.s, self.kappa_traj),
             "speed": np.interp(s_eval, self.s, self.speed),
             "V": np.interp(s_eval, self.s, self.state_profiles["V"]),
             "e_min": np.interp(s_eval, self.s, self.e_min),
@@ -241,8 +293,16 @@ class TrackingReference:
         return out
 
     def ref_at_s(self, s_query: float) -> dict[str, float]:
-        sample = self.sample(np.array([s_query], dtype=float))
-        return {key: float(value[0]) for key, value in sample.items()}
+        s_eval = np.asarray(self.wrap_s(np.array([s_query], dtype=float)), dtype=float)
+        return {
+            "s": float(s_eval[0]),
+            "x": float(np.interp(s_eval[0], self.s, self.frame_x)),
+            "y": float(np.interp(s_eval[0], self.s, self.frame_y)),
+            "yaw": float(np.interp(s_eval[0], self.s, self.frame_yaw)),
+            "kappa": float(np.interp(s_eval[0], self.s, self.kappa)),
+            "e_min": float(np.interp(s_eval[0], self.s, self.e_min)),
+            "e_max": float(np.interp(s_eval[0], self.s, self.e_max)),
+        }
 
     def get_ref_traj(self, s_start: float, horizon_steps: int, ds: float) -> dict[str, np.ndarray]:
         s_grid = float(ds) * np.arange(int(horizon_steps) + 1, dtype=float)

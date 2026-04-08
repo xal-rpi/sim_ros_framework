@@ -244,8 +244,15 @@ Then convert the result into a tracking reference using:
 ```python
 from tracking_helper import TrackingReference
 
-reference = TrackingReference.from_traj_result(result)
+reference = TrackingReference.from_traj_result(result, reference_mode="centerline")
 ```
+
+The `reference_mode` choice matters:
+
+- `centerline`: the Frenet frame stays attached to the original track centerline. In this mode, `kappa(s)` is the original track curvature, and the optimized Week 10 `e(s)` and `dphi(s)` remain part of the reference state. This is the most natural mode if you want to say the controller is tracking the original track-based trajectory from Week 10.
+- `trajectory`: the Frenet frame is attached to the optimized trajectory itself. In this mode, `kappa(s)` is inferred from the optimized Cartesian trajectory, and the reference lies on its own geometry, so the reference `e(s)` and `dphi(s)` become zero. This is the most natural mode if you want to think of the controller as following the optimized race line directly.
+
+For this lab, use `centerline` as the default mode first. After your first working run, also try `trajectory` and compare what changes.
 
 For this lab, start from the same baseline oval/reference setup as in Week 10:
 
@@ -273,10 +280,22 @@ config = TrajOptConfig(
 
 problem = TrajOptProblem(track, config)
 result = problem.solve()
-reference = TrackingReference.from_traj_result(result)
+reference = TrackingReference.from_traj_result(result, reference_mode="trajectory")
 ```
 
-Use this as your default reference for the rest of the lab. If you need a faster debugging setup while building the loop, it is reasonable to temporarily reduce `n_laps` to `1` or reduce `num_nodes`, but your main tracking results should use the baseline reference above.
+Use this as your default reference for the rest of the lab. In this mode, the Frenet frame stays attached to the original track centerline, so the saved `kappa(s)` remains the original track curvature and the optimized Week 10 `e(s)` and `dphi(s)` remain part of the reference state. If you need a faster debugging setup while building the loop, it is reasonable to temporarily reduce `n_laps` to `1` or reduce `num_nodes`, but your main tracking results should use the baseline reference above.
+
+To switch to the trajectory-referenced mode, use:
+
+```python
+reference = TrackingReference.from_traj_result(result, reference_mode="centerline")
+```
+
+Then compare the two choices:
+
+- in `centerline` mode, the reference keeps nonzero `e_ref(s)` and `dphi_ref(s)` because the optimized trajectory is described relative to the original track centerline
+- in `trajectory` mode, the reference uses the optimized trajectory itself as the Frenet geometry, so `e_ref(s)=0` and `dphi_ref(s)=0`
+- the meaning of tracking error changes with this choice, even though the target Cartesian path can look very similar
 
 ### Tasks
 
@@ -287,6 +306,7 @@ Use this as your default reference for the rest of the lab. If you need a faster
 5. Plot reference curvature $\kappa(s)$.
 6. Plot the full reference state and input profiles versus $s$.
 7. Briefly report whether you kept the baseline setup exactly or made any temporary debugging changes.
+8. Try both `reference_mode="centerline"` and `reference_mode="trajectory"` and briefly comment on how the saved `kappa(s)`, `e_ref(s)`, and `dphi_ref(s)` differ.
 
 ### Deliverables
 
@@ -295,6 +315,7 @@ Use this as your default reference for the rest of the lab. If you need a faster
 - one plot of $\kappa(s)$
 - one figure showing the full reference state and input profiles versus $s$
 - one short note describing whether you used the baseline setup exactly or modified it for debugging
+- one short note comparing `centerline` and `trajectory` reference modes
 
 ---
 
