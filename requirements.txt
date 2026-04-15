@@ -5,6 +5,11 @@ numpy
 scipy
 tqdm
 matplotlib
+
+# Optional: separate-process week11 live visualizer
+PySide6
+pyqtgraph
+
 casadi
 
 # Optional: schema-based rosbag2 (MCAP) decoding without ROS msg packages

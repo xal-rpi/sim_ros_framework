@@ -350,9 +350,9 @@ _DEFAULT_RANGES: Dict[str, Tuple[float, float]] = {
     "e": (-10.0, 10.0),
     "dphi": (-1.2, 1.2),
     "delta": (-0.4, 0.4),
-    "rear_wheel_torque": (-500.0, 4500.0),
+    "rear_wheel_torque": (-500.0, 3000.0),
     "delta_r": (-0.9, 0.9),
-    "rear_wheel_torque_r": (-5000.0, 5000.0),
+    "rear_wheel_torque_r": (-2000.0, 2000.0),
 }
 
 _DEFAULT_MAG: Dict[str, float] = {
@@ -921,6 +921,7 @@ class TrajOptConfig:
     cost_control_rate_weight: float = 0.05
     ipopt_print_level: int = 3
     ipopt_max_iter: int = 2000
+    target_steady_velocity: Tuple[float, float] = None
 
 
 class TrajOptProblem:
@@ -1149,6 +1150,14 @@ class TrajOptProblem:
                 time_start = Xk[StateIdx.t]
             if self._s_nodes[k1] >= self.track.s_end - 5.0 and time_end is None:
                 time_end = Xk[StateIdx.t]
+            
+            # Steady state constraint
+            if self.cfg.target_steady_velocity is not None:
+                target_s, target_vel = self.cfg.target_steady_velocity
+                if self._s_nodes[k1] >= target_s:
+                    g.append(Xk[StateIdx.V] - target_vel / self._x_mag[StateIdx.V])
+                    lbg.append(0.0)
+                    ubg.append(0.0)
 
         # Minimum-time cost
         if time_start is not None and time_end is not None:

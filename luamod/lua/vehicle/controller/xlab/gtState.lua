@@ -244,12 +244,21 @@ local function writeQuatTable(dst, q)
 end
 
 local function writeWheelInfoTable(dst, src)
-  dst.speed = src.speed
-  dst.angVel = src.angVel
-  dst.brakeTorque = src.brakeTorque
-  dst.propTorque = src.propTorque
-  dst.downForce = src.downForce
-  dst.angle = src.angle
+  dst.speed = src.speed or 0.0
+  dst.angVel = src.angVel or 0.0
+  dst.brakeTorque = src.brakeTorque or 0.0
+  dst.propTorque = src.propTorque or 0.0
+  dst.downForce = src.downForce or 0.0
+  dst.angle = src.angle or 0.0
+end
+
+local function ensureWheelInfoTable(dst)
+  dst.speed = dst.speed or 0.0
+  dst.angVel = dst.angVel or 0.0
+  dst.brakeTorque = dst.brakeTorque or 0.0
+  dst.propTorque = dst.propTorque or 0.0
+  dst.downForce = dst.downForce or 0.0
+  dst.angle = dst.angle or 0.0
 end
 
 local function writeDriveStatusTable(dst, src)
@@ -356,6 +365,11 @@ local function ensureLatestReadingTables()
   ringBuffer.latestReading.wheelRR = {}
   ringBuffer.latestReading.wheelRL = {}
   ringBuffer.latestReading.driveStatus = {}
+
+  ensureWheelInfoTable(ringBuffer.latestReading.wheelFR)
+  ensureWheelInfoTable(ringBuffer.latestReading.wheelFL)
+  ensureWheelInfoTable(ringBuffer.latestReading.wheelRR)
+  ensureWheelInfoTable(ringBuffer.latestReading.wheelRL)
 
   -- Add custom fields with default values.
   if filters.params.debugRaw then

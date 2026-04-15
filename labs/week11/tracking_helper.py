@@ -205,6 +205,8 @@ class TrackingReference:
             frame_y = y_center
             frame_yaw = yaw_center
             frame_kappa = kappa_track
+            e_min_use = e_min
+            e_max_use = e_max
         elif mode == "trajectory":
             ref_e = zero_profile
             ref_dphi = zero_profile
@@ -212,6 +214,9 @@ class TrackingReference:
             frame_y = np.asarray(y_traj, dtype=float)
             frame_yaw = velocity_heading
             frame_kappa = kappa_traj
+            e_shift = np.asarray(result.e, dtype=float)
+            e_min_use = e_min - e_shift
+            e_max_use = e_max - e_shift
         else:
             raise ValueError("reference_mode must be either 'centerline' or 'trajectory'")
 
@@ -222,8 +227,8 @@ class TrackingReference:
             yaw=velocity_heading,
             kappa=kappa_traj,
             speed=np.asarray(result.V, dtype=float),
-            e_min=e_min,
-            e_max=e_max,
+            e_min=e_min_use,
+            e_max=e_max_use,
             state_profiles={
                 "t": np.asarray(result.t, dtype=float),
                 "r": np.asarray(result.r, dtype=float),

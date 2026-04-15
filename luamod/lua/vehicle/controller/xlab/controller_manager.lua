@@ -109,6 +109,22 @@ local common = {
 
 local activeController = nil
 
+local function getWheelAngle(gtReading, wheelKey, legacyKey)
+  local wheel = gtReading[wheelKey]
+  if wheel and wheel.angle ~= nil then
+    return wheel.angle
+  end
+  return gtReading[legacyKey] or 0.0
+end
+
+local function getWheelSpeed(gtReading, wheelKey)
+  local wheel = gtReading[wheelKey]
+  if wheel and wheel.speed ~= nil then
+    return wheel.speed
+  end
+  return 0.0
+end
+
 -- Reduced state packer (mirrors controller_nn_mpc.lua payload for MPC/planning)
 local function packReducedGtState(gtReading)
   if not gtReading then
@@ -147,10 +163,17 @@ local function packReducedGtState(gtReading)
 
   common.reducedGtState.beta = sideslip
   common.reducedGtState.r = gtReading.angVel[3]
-  common.reducedGtState.delta = (gtReading.wheelFL.angle + gtReading.wheelFR.angle) / 2
+  local wheel_fl_angle = getWheelAngle(gtReading, 'wheelFL', 'wheelFL_angleLegacy')
+  local wheel_fr_angle = getWheelAngle(gtReading, 'wheelFR', 'wheelFR_angleLegacy')
+  local wheel_rr_speed = getWheelSpeed(gtReading, 'wheelRR')
+  local wheel_rl_speed = getWheelSpeed(gtReading, 'wheelRL')
+  local wheel_fl_speed = getWheelSpeed(gtReading, 'wheelFL')
+  local wheel_fr_speed = getWheelSpeed(gtReading, 'wheelFR')
 
-  common.reducedGtState.wr = (gtReading.wheelRR.speed + gtReading.wheelRL.speed) / 2
-  common.reducedGtState.wf = (gtReading.wheelFL.speed + gtReading.wheelFR.speed) / 2
+  common.reducedGtState.delta = (wheel_fl_angle + wheel_fr_angle) / 2
+
+  common.reducedGtState.wr = (wheel_rr_speed + wheel_rl_speed) / 2
+  common.reducedGtState.wf = (wheel_fl_speed + wheel_fr_speed) / 2
   common.reducedGtState.we = gtReading.RPM * common.constants.rpmToAV
   common.reducedGtState.pb = gtReading.turboBoost
   common.reducedGtState.throttle = gtReading.throttle

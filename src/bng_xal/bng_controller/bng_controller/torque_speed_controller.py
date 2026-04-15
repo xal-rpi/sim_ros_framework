@@ -50,7 +50,7 @@ import socket
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
@@ -133,6 +133,7 @@ class TorqueSpeedController(Node):
         # Latest state cache (ROS subscription)
         self._latest_state_msg = None
         self._latest_state_wall_time: float = 0.0
+        self._state_listeners: list[Callable[[Any], None]] = []
 
         self._state_sub = None
         self._state_topic = state_topic or f"/{vehicle_name}/reduced_state"
@@ -223,6 +224,21 @@ class TorqueSpeedController(Node):
         with self._lock:
             self._latest_state_msg = msg
             self._latest_state_wall_time = time.time()
+            listeners = tuple(self._state_listeners)
+
+        for listener in listeners:
+            try:
+                listener(msg)
+            except Exception as exc:
+                self.get_logger().warning(f"State listener raised an exception: {exc}")
+
+    def add_state_listener(self, listener: Callable[[Any], None]) -> None:
+        with self._lock:
+            self._state_listeners.append(listener)
+
+    def remove_state_listener(self, listener: Callable[[Any], None]) -> None:
+        with self._lock:
+            self._state_listeners = [cb for cb in self._state_listeners if cb is not listener]
 
     def get_latest_state_msg(self):
         """Return the latest `ReducedGtStateMsg` (or None if not received)."""
@@ -236,6 +252,12 @@ class TorqueSpeedController(Node):
         msg = self.get_latest_state_msg()
         if msg is None:
             return None
+
+        return self.state_msg_to_dict(msg)
+
+    @staticmethod
+    def state_msg_to_dict(msg) -> Dict[str, float]:
+        """Convert a ReducedGtStateMsg into a stable plain dict."""
 
         # Keep this explicit (stable) rather than `msg.__dict__`.
         return {

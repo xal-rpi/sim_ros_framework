@@ -91,6 +91,152 @@ class FialaBicycleCasADi:
         data.setdefault("brake", 0.0)
         return data
 
+    def _powertrain_scaled_inputs(
+        self,
+        engine_speed_rads,
+        boost_pressure,
+        throttle,
+        rear_wheelspeed_ms,
+    ) -> Dict[str, Any]:
+        wheel_radius = float(self.wheel["wheel_radius"])
+        axle_speed_rads = rear_wheelspeed_ms / wheel_radius
+        return {
+            "engine_speed_rads": engine_speed_rads / 300.0,
+            "boost_pressure": boost_pressure / 10.0,
+            "throttle": throttle,
+            "rear_wheelspeed_ms": rear_wheelspeed_ms / 5.0,
+            "i_gr": 100.0 * (axle_speed_rads / (engine_speed_rads + 1e-4)),
+            "gr": 0.01 * (engine_speed_rads / (axle_speed_rads + 1e-4)),
+        }
+
+    def _compute_wheel_torque_terms(self, state_control: Dict[str, Any]) -> Dict[str, Any]:
+        """Locally embedded rear-wheel torque surrogate from the identified model."""
+        engine_speed_rads = state_control["engine_speed_rads"]
+        boost_pressure = state_control["boost_pressure"]
+        throttle = state_control["throttle"]
+        rear_wheelspeed_ms = state_control["rear_wheelspeed_ms"]
+
+        data_scaled = self._powertrain_scaled_inputs(
+            engine_speed_rads,
+            boost_pressure,
+            throttle,
+            rear_wheelspeed_ms,
+        )
+
+        eng_scaled = data_scaled["engine_speed_rads"]
+        boost_scaled = data_scaled["boost_pressure"]
+        gr_scaled = data_scaled["gr"]
+
+        hidden_1 = ca.tanh(
+            ((((-0.299247 * eng_scaled) + (-0.0105762 * boost_scaled)) + (2.09084 * throttle)) + (-1.21916 * gr_scaled))
+            + 0.314798
+        )
+        hidden_2 = ca.tanh(
+            ((((-0.498726 * eng_scaled) + (0.0547674 * boost_scaled)) + (-0.715504 * throttle)) + (0.819941 * gr_scaled))
+            + 0.222718
+        )
+        hidden_3 = ca.tanh(
+            ((((-0.17094 * eng_scaled) + (-0.021485 * boost_scaled)) + (0.0716762 * throttle)) + (3.68147 * gr_scaled))
+            + 0.0686006
+        )
+        hidden_4 = ca.tanh(
+            (((((0.745817 * eng_scaled) + (1.42766 * boost_scaled)) + (-1.60501 * throttle)) + (0.00198479 * gr_scaled)))
+            + 0.389467
+        )
+        hidden_5 = ca.tanh(
+            ((((-0.212549 * eng_scaled) + (-1.00774 * boost_scaled)) + (1.36391 * throttle)) + (0.0194709 * gr_scaled))
+            - 0.128168
+        )
+        hidden_6 = ca.tanh(
+            (((((0.0431327 * eng_scaled) + (0.806935 * boost_scaled)) + (-0.641353 * throttle)) + (0.350162 * gr_scaled)))
+            - 0.0780202
+        )
+
+        total_torque = 1000.0 * (
+            (1.48922 * ca.tanh(((((((-1.94056 * hidden_1) + (-0.0610694 * hidden_2)) + (0.819076 * hidden_3)) + (1.45404 * hidden_4)) + (-0.054226 * hidden_5)) + (0.444599 * hidden_6)) + 0.28967))
+            + (-1.88444 * ca.tanh(((((((-0.9117 * hidden_1) + (-1.14981 * hidden_2)) + (2.47463 * hidden_3)) + (-1.55474 * hidden_4)) + (-0.0627599 * hidden_5)) + (-0.375705 * hidden_6)) + 0.0779681))
+            + (-0.461754 * ca.tanh((((((((-0.0409663 * hidden_1) + (0.145847 * hidden_2)) + (0.0101948 * hidden_3)) + (-0.00553184 * hidden_4)) + (0.108535 * hidden_5)) + (0.110177 * hidden_6)) + 0.0291548)))
+            + (0.213776 * ca.tanh((((((((-0.149709 * hidden_1) + (-0.423617 * hidden_2)) + (0.0647505 * hidden_3)) + (-0.224323 * hidden_4)) + (0.254653 * hidden_5)) + (-0.00174019 * hidden_6)) - 0.0915727)))
+            + (3.17494 * ca.tanh((((((((0.31846 * hidden_1) + (-2.02533 * hidden_2)) + (2.54764 * hidden_3)) + (-2.3658 * hidden_4)) + (-0.378261 * hidden_5)) + (0.280427 * hidden_6)) - 0.173948)))
+            + (0.888703 * ca.tanh((((((((1.31051 * hidden_1) + (-2.8665 * hidden_2)) + (-0.153358 * hidden_3)) + (-1.22142 * hidden_4)) + (1.16874 * hidden_5)) + (-0.546866 * hidden_6)) + 0.36393)))
+            + 0.0936948
+        )
+
+        return {
+            "data_scaled": data_scaled,
+            "total_torque": total_torque,
+            "rear_wheel_torque": total_torque,
+            "front_wheel_torque": 0.0,
+            "torque_dist_r": 1.0,
+        }
+
+    def estimate_inverse_throttle(self, state_control: Dict[str, Any], desired_torque):
+        """Locally embedded inverse-throttle surrogate from the identified model."""
+        engine_speed_rads = state_control["engine_speed_rads"]
+        boost_pressure = state_control["boost_pressure"]
+        rear_wheelspeed_ms = state_control["rear_wheelspeed_ms"]
+
+        wheel_radius = float(self.wheel["wheel_radius"])
+        engine_speed_scaled = engine_speed_rads / 300.0
+        boost_scaled = boost_pressure / 10.0
+        desired_torque_scaled = desired_torque / 1000.0
+        gear_ratio_scaled = 0.01 * (engine_speed_rads / ((rear_wheelspeed_ms / wheel_radius) + 1e-4))
+        zero = 0.0
+
+        hidden_1 = ca.fmax((((((0.301603 * engine_speed_scaled) + (-0.170997 * boost_scaled)) + (-0.157463 * desired_torque_scaled)) + (-4.33797 * gear_ratio_scaled)) + 0.143365), zero)
+        hidden_2 = ca.fmax((((((-0.0836236 * engine_speed_scaled) + (0.129827 * boost_scaled)) + (-0.141142 * desired_torque_scaled)) + (6.88794 * gear_ratio_scaled)) - 0.0446952), zero)
+        hidden_3 = ca.fmax((((((-0.0642931 * engine_speed_scaled) + (0.241317 * boost_scaled)) + (0.348286 * desired_torque_scaled)) + (-0.241327 * gear_ratio_scaled)) + 0.396857), zero)
+        hidden_4 = ca.fmax((((((0.166931 * engine_speed_scaled) + (-0.0917765 * boost_scaled)) + (0.618937 * desired_torque_scaled)) + (-1.26335 * gear_ratio_scaled)) + 0.046271), zero)
+
+        return (
+            (0.492427 * ca.fmax((((((-0.567724 * hidden_1) + (-1.39205 * hidden_2)) + (0.410955 * hidden_3)) + (-0.241824 * hidden_4)) + 0.272251), zero))
+            + (0.841248 * ca.fmax((((((-0.338327 * hidden_1) + (-1.77441 * hidden_2)) + (-0.427265 * hidden_3)) + (0.553774 * hidden_4)) - 0.0660385), zero))
+            + (0.202179 * ca.fmax((((((-0.815237 * hidden_1) + (-0.315648 * hidden_2)) + (0.398362 * hidden_3)) + (0.47149 * hidden_4)) + 0.231422), zero))
+            + (0.120461 * ca.fmax((((((-0.324339 * hidden_1) + (-0.34381 * hidden_2)) + (-0.129538 * hidden_3)) + (0.487535 * hidden_4)) + 0.0541269), zero))
+            - 0.000217977
+        )
+
+    def build_powertrain_functions(self):
+        """Build reusable CasADi functions for wheel torque estimation and inverse throttle."""
+        torque_est_in = ca.SX.sym("eng", 5)
+        trq_we = torque_est_in[0]
+        trq_pb = torque_est_in[1]
+        trq_thr = torque_est_in[2]
+        trq_wr = torque_est_in[3]
+        trq_des = torque_est_in[4]
+
+        torque_terms = self._compute_wheel_torque_terms(
+            {
+                "engine_speed_rads": trq_we,
+                "boost_pressure": trq_pb,
+                "throttle": trq_thr,
+                "rear_wheelspeed_ms": trq_wr,
+            }
+        )
+        inv_throttle = self.estimate_inverse_throttle(
+            {
+                "engine_speed_rads": trq_we,
+                "boost_pressure": trq_pb,
+                "rear_wheelspeed_ms": trq_wr,
+            },
+            trq_des,
+        )
+
+        return {
+            "torque_terms": torque_terms,
+            "inv_throttle_expr": inv_throttle,
+            "torque_est_fn": ca.Function(
+                "torque_est",
+                [trq_we, trq_pb, trq_thr, trq_wr],
+                [torque_terms["total_torque"]],
+            ),
+            "inv_throttle_fn": ca.Function(
+                "inv_torque",
+                [trq_we, trq_pb, trq_wr, trq_des],
+                [inv_throttle],
+            ),
+        }
+
     def fiala_pure_lateral(self, alpha, c_alpha, mu, fz):
         f_max = mu * fz
         tan_a = ca.tan(alpha)

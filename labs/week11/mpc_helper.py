@@ -74,10 +74,10 @@ fiala_params = _week10_dynamics.fiala_params
 class TrackingMPCConfig:
     horizon_steps: int = 15
     prediction_ds: Optional[float] = None
-    max_steer: float = 0.35
+    max_steer: float = 0.5
     max_steer_rate: float = 0.9
-    min_torque: float = -1500.0
-    max_torque: float = 3500.0
+    min_torque: float = -500.0
+    max_torque: float = 3000.0
     max_torque_rate: float = 5000.0
     min_speed: float = 1.0
     max_speed: float = 30.0
@@ -98,6 +98,7 @@ class TrackingMPCConfig:
     ipopt_print_level: int = 0
     ipopt_max_iter: int = 1000
     accept_limited_solution: bool = True
+    warm_start_duals: bool = True
 
 
 class FrenetTrackingMPC:
@@ -129,19 +130,19 @@ class FrenetTrackingMPC:
     }
 
     DEFAULT_RANGES = {
-        "t": (0.0, 100.0),
+        "t": (0.0, 1000.0),
         "r": (-1.5, 1.5),
         "V": (2.0, 30.0),
         "beta": (-0.5, 0.5),
         "wr": (2.0, 30.0),
         "e": (-10.0, 10.0),
         "dphi": (-1.2, 1.2),
-        "roadwheel_angle": (-0.4, 0.4),
+        "roadwheel_angle": (-0.6, 0.6),
         "rear_wheel_torque": (-500.0, 3500.0),
     }
 
     DEFAULT_MAG = {
-        "t": 100.0,
+        "t": 1000.0,
         "r": 1.5,
         "V": 30.0,
         "beta": 1.0,
@@ -168,6 +169,10 @@ class FrenetTrackingMPC:
         self._opti, self._X, self._U, self._P = self._build_problem()
         self._warm_x: Optional[np.ndarray] = None
         self._warm_u: Optional[np.ndarray] = None
+        self._prev_x_hat: Optional[np.ndarray] = None
+        self._prev_u_hat: Optional[np.ndarray] = None
+        self._warm_lam_g: Optional[np.ndarray] = None
+        self._last_stats: dict[str, object] = {}
 
     @classmethod
     def _canonical_state_name(cls, raw_name: str) -> str:
@@ -375,6 +380,9 @@ class FrenetTrackingMPC:
             {
                 "ipopt.print_level": self.cfg.ipopt_print_level,
                 "ipopt.max_iter": self.cfg.ipopt_max_iter,
+                "ipopt.warm_start_init_point": "yes",
+                "ipopt.warm_start_bound_push": 1e-6,
+                "ipopt.warm_start_mult_bound_push": 1e-6,
                 "print_time": True,
             },
         )
@@ -530,19 +538,25 @@ class FrenetTrackingMPC:
         self._opti.set_value(self._P["EMIN"], e_min)
         self._opti.set_value(self._P["EMAX"], e_max)
 
-        if self._warm_x is None:
+        if self._prev_x_hat is None or self._prev_u_hat is None:
             warm_x = np.array(x_ref_hat, copy=True)
             warm_x[:, 0] = x0_hat
             warm_u = np.repeat(u_prev_hat.reshape(-1, 1), N, axis=1)
-        else:
-            warm_x = self._warm_x
-            warm_u = self._warm_u
-            warm_x = np.array(warm_x, copy=True)
+        elif self.cfg.warm_start_duals and self._warm_lam_g is not None:
+            warm_x = np.array(self._prev_x_hat, copy=True)
             warm_x[:, 0] = x0_hat
-            warm_u = np.array(warm_u, copy=True)
+            warm_u = np.array(self._prev_u_hat, copy=True)
+        else:
+            warm_x = np.array(self._prev_x_hat, copy=True)
+            warm_u = np.array(self._prev_u_hat, copy=True)
+            warm_x = np.hstack([warm_x[:, 1:], warm_x[:, -1:]])
+            warm_x[:, 0] = x0_hat
+            warm_u = np.hstack([warm_u[:, 1:], warm_u[:, -1:]])
             warm_u[:, 0] = u_prev_hat
         self._opti.set_initial(self._X, warm_x)
         self._opti.set_initial(self._U, warm_u)
+        if self.cfg.warm_start_duals and self._warm_lam_g is not None:
+            self._opti.set_initial(self._opti.lam_g, self._warm_lam_g)
 
         try:
             solution = self._opti.solve()
@@ -550,12 +564,17 @@ class FrenetTrackingMPC:
             if not self.cfg.accept_limited_solution:
                 raise
             solution = self._opti.solve_limited()
+        self._last_stats = dict(self._opti.stats())
         x_pred_hat = np.asarray(solution.value(self._X), dtype=float)
         u_pred_hat = np.asarray(solution.value(self._U), dtype=float)
         x_pred = x_pred_hat * self._x_mag.reshape(-1, 1)
         u_pred = u_pred_hat * self._u_mag.reshape(-1, 1)
+        self._prev_x_hat = np.array(x_pred_hat, copy=True)
+        self._prev_u_hat = np.array(u_pred_hat, copy=True)
         self._warm_x = np.hstack([x_pred_hat[:, 1:], x_pred_hat[:, -1:]])
         self._warm_u = np.hstack([u_pred_hat[:, 1:], u_pred_hat[:, -1:]])
+        if self.cfg.warm_start_duals:
+            self._warm_lam_g = np.asarray(solution.value(self._opti.lam_g), dtype=float)
 
         x_pred_dict = {name: x_pred[idx, :] for idx, name in enumerate(self.STATE_ORDER)}
         x_pred_dict["s"] = s0 + np.array(s_grid, copy=True)
@@ -578,7 +597,7 @@ class FrenetTrackingMPC:
             "u_pred": u_pred_dict,
             "ref_traj": {key: np.array(value, copy=True) for key, value in ref_window.items()},
             "cost": float(solution.value(self._opti.f)),
-            "solver_stats": self._opti.stats(),
+            "solver_stats": dict(self._last_stats),
         }
 
     def solve_with_ref_traj(
