@@ -532,6 +532,47 @@ This worker will eventually:
 The end of your file should have the same high-level structure as below:
 
 ```python
+
+def build_projected_state(
+    reference: TrackingReference,
+    seq: int,
+    state: dict[str, float],
+    last_s: float | None,
+    init_time: float,
+) -> tuple[dict[str, object], float]:
+    frenet = reference.cartesian_to_frenet(
+        x=state["x"],
+        y=state["y"],
+        psi=state["yaw"],
+        beta=state["beta"],
+        last_s=last_s,
+    )
+    current_state = {
+        "s": frenet.s,
+        "time": state["t"] - init_time,
+        "r": state["r"],
+        "V": max(state["V"], 2.0),
+        "beta": state["beta"],
+        "wr": max(state["wr"], 2.0),
+        "e": frenet.e,
+        "dphi": frenet.dphi,
+        "delta": state["delta"],
+    }
+    projected = {
+        "seq": seq,
+        "raw_state": dict(state),
+        "current_state": current_state,
+        "sim_time": float(state["t"]),
+        "s": float(frenet.s),
+        "e": float(frenet.e),
+        "dphi": float(frenet.dphi),
+        "x_ref": float(frenet.x_ref),
+        "y_ref": float(frenet.y_ref),
+        "yaw_ref": float(frenet.psi_ref),
+        "proj_dist": float(frenet.proj_dist),
+    }
+    return projected, frenet.s
+    
 actuation_thread = threading.Thread(target=lambda: run_worker("actuation", actuation_worker), daemon=True)
 mpc_thread = threading.Thread(target=lambda: run_worker("mpc", mpc_worker), daemon=True)
 
