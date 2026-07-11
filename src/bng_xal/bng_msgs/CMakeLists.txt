@@ -20,6 +20,10 @@ find_package(geometry_msgs REQUIRED)
 # Declare message files
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BasicStateMsg.msg"
+  "msg/BngControlCmd.msg"
+  "msg/BngGpsMsg.msg"
+  "msg/BngImuMsg.msg"
+  "msg/BngVehicleStateMsg.msg"
   "msg/FrenetStateMsg.msg"
   "msg/GtStateMsg.msg"
   "msg/HLCMsg.msg"

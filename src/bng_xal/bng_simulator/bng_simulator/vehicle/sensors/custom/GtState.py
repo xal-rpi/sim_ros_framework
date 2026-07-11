@@ -49,7 +49,6 @@ class GtStateWrapper(CommBase):
             1,
             0,
         ),  # vector relative to the vehicle's left direction, local frame
-        is_using_gravity: bool = True,
         is_allow_wheel_nodes: bool = False,
         is_visualised: bool = True,
         is_snapping_desired: bool = False,
@@ -58,9 +57,8 @@ class GtStateWrapper(CommBase):
         gyro_tau_s: Optional[float] = None,
         vel_tau_s: Optional[float] = None,
         wheel_angvel_tau_s: Optional[float] = None,
-        kf_predict_gain: Optional[float] = None,
         debug_raw: Optional[bool] = None,
-        torqueNN: Optional[dict] = None,
+        torque_map: Optional[dict] = None,
     ):
         super().__init__(beamng, vehicle)
 
@@ -83,7 +81,6 @@ class GtStateWrapper(CommBase):
             pos,
             dir,
             left,
-            is_using_gravity,
             is_allow_wheel_nodes,
             is_visualised,
             is_snapping_desired,
@@ -92,9 +89,8 @@ class GtStateWrapper(CommBase):
             gyro_tau_s,
             vel_tau_s,
             wheel_angvel_tau_s,
-            kf_predict_gain,
             debug_raw,
-            torqueNN
+            torque_map
         )
 
         # Fetch the unique Id number (in the simulator)
@@ -131,7 +127,6 @@ class GtStateWrapper(CommBase):
         pos: Float3,
         dir: Float3,
         left: Float3,
-        is_using_gravity: bool,
         is_allow_wheel_nodes: bool,
         is_visualised: bool,
         is_snapping_desired: bool,
@@ -140,9 +135,8 @@ class GtStateWrapper(CommBase):
         gyro_tau_s: Optional[float] = None,
         vel_tau_s: Optional[float] = None,
         wheel_angvel_tau_s: Optional[float] = None,
-        kf_predict_gain: Optional[float] = None,
         debug_raw: Optional[bool] = None,
-        torqueNN: Optional[dict] = None,
+        torque_map: Optional[dict] = None,
     ) -> None:
         data: StrDict = dict()
         data["name"] = name
@@ -153,7 +147,6 @@ class GtStateWrapper(CommBase):
         data["pos"] = self.calculate_cog_pos(pos)
         data["dir"] = self.calculate_dir(dir)
         data["left"] = self.calculate_dir(left)
-        data["isUsingGravity"] = is_using_gravity
         data["isAllowWheelNodes"] = is_allow_wheel_nodes
         data["isVisualised"] = is_visualised
         data["isSnappingDesired"] = is_snapping_desired
@@ -167,12 +160,10 @@ class GtStateWrapper(CommBase):
             data["vel_tau_s"] = vel_tau_s
         if wheel_angvel_tau_s is not None:
             data["wheel_angvel_tau_s"] = wheel_angvel_tau_s
-        if kf_predict_gain is not None:
-            data["kf_predict_gain"] = kf_predict_gain
         if debug_raw is not None:
             data["debug_raw"] = debug_raw
-        if torqueNN is not None:
-            data["torqueNN"] = torqueNN
+        if torque_map is not None:
+            data["torque_map"] = torque_map
         args = {
             "type": "OpenGtState",
             "ack": "OpenedGtState",
@@ -252,8 +243,10 @@ class GtState(SensorBase):
 
     def __init__(self, name: str, vehicle: Vehicle, beamng: BeamNGpy, config: dict):
         super().__init__(name, vehicle, beamng, config)
-        # Create the sensor instance.
-        self._sensor = GtStateWrapper(name, vehicle, beamng, **config)
+        cfg = dict(config)
+        cfg.pop("is_using_gravity", None)
+        cfg.pop("kf_predict_gain", None)
+        self._sensor = GtStateWrapper(name, vehicle, beamng, **cfg)
         self.__DEG_TO_RAD = np.pi / 180.0
 
     def poll(self):

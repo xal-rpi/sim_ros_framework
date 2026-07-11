@@ -17,7 +17,6 @@ from bng_simulator.vehicle.sensors import SensorBase
 from bng_simulator.core.attach_manager import AttachManager
 from bng_simulator.core.request_handler import SimulationRequestHandler
 from bng_simulator.core.scenario_builder import ScenarioBuilder
-from bng_simulator.utils.config_manager import ConfigManager
 
 
 class SimulationManager:
@@ -75,23 +74,6 @@ class SimulationManager:
         # Apply post-scenario configuration
         self.post_scenario_configuration()
 
-    @classmethod
-    def from_file(cls, config: str, logger):
-        """
-        Create a SimulationManager instance from a configuration file.
-
-        Args:
-            config (str): Path to the YAML configuration file
-
-        Returns:
-            SimulationManager: Initialized simulation manager
-        """
-        cfg = ConfigManager.get_config(config)
-        if cfg is None:
-            raise RuntimeError("Config manager returned an empty config")
-
-        return cls(cfg, logger)
-    
     def connect(self):
         """Establish connection with BeamNG simulation."""
         beamng_info = deepcopy(self.config.get("beamng", {}))
@@ -499,6 +481,37 @@ class SimulationManager:
         if not veh_pub:
             sensor_publishers.pop(veh_name, None)
 
+    def _resolved_ros_poll_config(self, node: rclpy.node.Node) -> Dict[str, Any]:
+        """
+        Return ros_poll_config, auto-adding poll entries for configured sensors.
+
+        Uses ros_poll_sensor_defaults (from composed config) when a sensor exists
+        on the vehicle but has no explicit ros_poll_config entry.
+        """
+        from copy import deepcopy
+
+        pub_config = deepcopy(self.config.get("ros_poll_config", {}))
+        defaults = self.config.get("ros_poll_sensor_defaults", {})
+        if not isinstance(defaults, dict) or not defaults:
+            return pub_config
+
+        for veh_name, veh_mgr in self.vehicles.items():
+            veh_poll = pub_config.setdefault(veh_name, {})
+            for sensor_name in veh_mgr.sensors_config:
+                if sensor_name in veh_poll:
+                    continue
+                if sensor_name not in defaults:
+                    node.get_logger().debug(
+                        f"No ros_poll default for sensor '{sensor_name}' "
+                        f"on '{veh_name}', skipping GE poll"
+                    )
+                    continue
+                veh_poll[sensor_name] = deepcopy(defaults[sensor_name])
+                node.get_logger().info(
+                    f"Auto ros_poll for {veh_name}/{sensor_name} from sensor_defaults"
+                )
+        return pub_config
+
     def register_ros_polling(self, node: rclpy.node.Node):
         """
         Register ROS publishers and polling timers for all configured sensors.
@@ -530,15 +543,14 @@ class SimulationManager:
         
         # Initialize fresh tracking dict
         node.sensor_publishers = {}
-        
-        # Get polling configuration
-        pub_config = self.config.get("ros_poll_config", {})
+
+        pub_config = self._resolved_ros_poll_config(node)
         if not isinstance(pub_config, dict):
             node.get_logger().error(
                 f"Invalid ros_poll_config: expected dict, got {type(pub_config).__name__}"
             )
             return
-        
+
         # Setup sensors for each vehicle
         for veh_name, sensor_cfg in pub_config.items():
             if veh_name == "*":

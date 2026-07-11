@@ -2,20 +2,20 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>bng_controller</name>
-  <version>0.2.0</version>
-  <description>High-level controller for BeamNG simulation</description>
+  <version>0.3.0</version>
+  <description>BeamNG xlab companion I/O bridge (sensor_dispatcher, VehicleSession)</description>
   <maintainer email="vincec4@rpi.edu">comejv</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>bng_msgs</depend>
   <depend>bng_simulator</depend>
 
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

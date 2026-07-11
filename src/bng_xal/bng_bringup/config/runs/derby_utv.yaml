@@ -1,0 +1,14 @@
+# Derby CREATE run — utv_wild at grid_lane spawn (pure_pursuit legacy pose).
+#
+# Launch:
+#   ros2 launch bng_bringup simulator.launch.py config:=derby_utv.yaml
+# Swap spawn:
+#   spawn:=hill_a
+
+compose:
+  vehicle: utv_wild
+  vehicle_id: EGO
+  level: derby
+  spawn: grid_lane
+
+scenario_mode: create

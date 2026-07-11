@@ -34,7 +34,6 @@ M.handleOpenGtState = function(request)
   args.dir = vec3(request['dir'][1], request['dir'][2], request['dir'][3])
   args.left = vec3(request['left'][1], request['left'][2], request['left'][3])
   args.isVisualised = request['isVisualised']
-  args.isUsingGravity = request['isUsingGravity']
   args.isSnappingDesired = request['isSnappingDesired']
   args.isForceInsideTriangle = request['isForceInsideTriangle']
   args.isDirWorldSpace = request['isDirWorldSpace']
@@ -43,9 +42,8 @@ M.handleOpenGtState = function(request)
   args.gyro_tau_s = request['gyro_tau_s']
   args.vel_tau_s = request['vel_tau_s']
   args.wheel_angvel_tau_s = request['wheel_angvel_tau_s']
-  args.kf_predict_gain = request['kf_predict_gain']
   args.debug_raw = request['debug_raw']
-  args.torqueNN = request['torqueNN']
+  args.torque_map = request['torque_map']
 
   local name = request['name']
   local vid = scenetree.findObject(request['vid']):getID()
@@ -118,25 +116,29 @@ M.handleOpenController = function(request)
     end
   end
 
-  -- TODO: This may need some more generality in case controller names 
-  if string.find(data.controllerType, "nn_") then
+  -- TODO: This may need some more generality in case controller names
+  local function stageTorqueMapLib(stem)
+    local ext = 'so'
+    if jit and jit.os and jit.os == 'Windows' then ext = 'dll' end
+    local mod_libpath = string.format('lua/vehicle/controller/xlab/lib/%s.%s', stem, ext)
+    local fs_libpath = string.format('tmp/%s.%s', stem, ext)
+    copyfile(mod_libpath, fs_libpath)
+    local nativePath = FS:virtual2Native(fs_libpath)
+    log('I', logTag, 'Staged torque map lib ' .. stem .. ' -> ' .. fs_libpath)
+    return nativePath
+  end
+
+  local torqueMapStem = data.calibration and data.calibration.torque_map
+
+  if torqueMapStem then
     assert(
       not Engine.Sandbox.Lua.isEnabled(),
-      'This controller can only run when the Lua security sandbox is disabled. '
-        .. "You will have to restart BeamNG with the '-disable-sandbox' argument."
+      'Native torque map libs require Lua sandbox disabled. '
+        .. "Restart BeamNG with '-disable-sandbox'."
     )
-    local mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.so'
-    local fs_libpath = 'tmp/libnn.so'
-    if jit and jit.os then
-      if jit.os == "Windows" then
-        mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.dll'
-        fs_libpath = 'tmp/libnn.dll'
-      end
-    end
-    copyfile(mod_libpath, fs_libpath)
-
-    be:sendToMailbox('libnnPath', FS:virtual2Native(fs_libpath))
-    log('I', logTag, 'Using ' .. fs_libpath)
+    data.torqueMapPath = stageTorqueMapLib(torqueMapStem)
+  elseif data.controllerType == 'llc' then
+    log('W', logTag, 'LLC opened without calibration.torque_map; torque control disabled')
   end
 
   -- handle gtStateName → gtStateSensorId
@@ -271,13 +273,6 @@ M.handleGetAdvancedLevelInfo = function(request)
     return false
   end
 
-  -- -- Check if the requested level is already loaded
-  -- local currentLevelName = extensions.core_levels.getLevelName(getMissionFilename())
-  -- local wasLevelLoaded = currentLevelName == levelName
-  -- if not wasLevelLoaded then
-  --   extensions.core_levels.startLevel(levelInfo.fullfilename)
-  -- end
-
   -- Get scenarios for the level
   local allScenarios = extensions.scenario_scenariosLoader.getList()
   local levelScenarios = {}
@@ -320,37 +315,6 @@ M.handleGetAdvancedLevelInfo = function(request)
     spawnPoints = enrichedSpawnPoints,  -- Spawn points with pos/rot
   }
   request:sendResponse(resp)
-
-  -- local levelName = request['levelName']
-  -- if not levelName then
-  --   log('E', logTag, 'No level name provided in GetAdvancedLevelInfo request')
-  --   return false
-  -- end
-
-  -- -- Get level info (includes spawnPoints)
-  -- local levelInfo = extensions.core_levels.getLevelByName(levelName)
-  -- if not levelInfo then
-  --   log('E', logTag, 'Level not found: ' .. levelName)
-  --   return false
-  -- end
-
-  -- -- Get all scenarios and filter by level
-  -- local allScenarios = extensions.scenario_scenariosLoader.getList()
-  -- local levelScenarios = {}
-  -- for _, scenario in ipairs(allScenarios) do
-  --   if scenario.levelName == levelName then
-  --     table.insert(levelScenarios, scenario.name)  -- Only names, or full scenario if needed
-  --   end
-  -- end
-
-  -- -- Prepare response
-  -- local resp = {
-  --   type = 'GetAdvancedLevelInfo',
-  --   levelName = levelName,
-  --   levelInfo = levelInfo,  -- Includes spawnPoints, previews, etc.
-  --   scenarios = levelScenarios  -- List of scenario names
-  -- }
-  -- request:sendResponse(resp)
 end
 
 local function onSocketMessage(request)

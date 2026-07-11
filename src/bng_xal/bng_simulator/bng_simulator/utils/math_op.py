@@ -54,3 +54,25 @@ def process_euler_to_quat(args_dict: dict, deg_to_rad_factor: float = np.pi / 18
         args_dict.pop("yaw_angle", None)
         args_dict.pop("pitch_angle", None)
         args_dict.pop("roll_angle", None)
+        args_dict.pop("xlab_yaw_deg", None)
+
+
+def apply_xlab_yaw_to_beamng(
+    args_dict: dict,
+    yaw_offset_deg: float,
+) -> None:
+    """
+    Convert xlab yaw to BeamNG spawn euler (in place).
+
+    beamng_yaw = xlab_yaw - yaw_offset_deg
+    (utv: gtState yaw at rest ≈ beamng_spawn_yaw + yaw_offset_deg)
+    """
+    if "rot_quat" in args_dict:
+        return
+    xlab_yaw = args_dict.pop("xlab_yaw_deg", None)
+    if xlab_yaw is None and "yaw_angle" in args_dict:
+        xlab_yaw = args_dict["yaw_angle"]
+    if xlab_yaw is None:
+        return
+    args_dict["xlab_yaw_deg"] = xlab_yaw
+    args_dict["yaw_angle"] = float(xlab_yaw) - float(yaw_offset_deg)

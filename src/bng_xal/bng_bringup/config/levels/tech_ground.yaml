@@ -1,0 +1,32 @@
+# =============================================================================
+# tech_ground level — spawn presets + level objects (CREATE mode).
+# =============================================================================
+#
+# level / scenario_name — beamngpy Scenario(level=..., name=...)
+# spawns.*.yaw_angle    — xlab body yaw [deg]
+# beamng spawn yaw      — xlab_yaw - catalog.yaw_offset_deg (utv: gtState ≈ spawn + offset)
+# extra_objects         — procedural meshes/cones (see scenario_builder.add_level_objects)
+
+level: tech_ground
+scenario_name: basic
+
+spawns:
+  origin:
+    pos: [0, 0, 0]
+    yaw_angle: 0
+    cling: true
+  hill_a:
+    pos: [44.05, 127.22, 79.3]
+    yaw_angle: 0
+    cling: true
+  grid_lane:
+    pos: [-0.243, 148.0445, 79.3]
+    yaw_angle: 0
+    cling: true
+
+# Example extra_objects entry (uncomment and set type from beamngpy):
+# extra_objects:
+#   cone_1:
+#     type: ProceduralMesh
+#     pos: [10, 0, 0]
+extra_objects: {}

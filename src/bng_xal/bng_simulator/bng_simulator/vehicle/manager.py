@@ -71,6 +71,7 @@ class VehicleManager:
         instance._sensors_config = instance._config.pop("sensors", {})
         instance._controllers_config = instance._config.pop("controllers", {})
         instance._spawn_args = {}  # Not used in attach mode
+        instance._frame = {}
         
         logger.info(f"  ✓ VehicleManager created for existing vehicle")
         logger.info(f"  Sensors to attach: {list(instance._sensors_config.keys())}")
@@ -89,6 +90,7 @@ class VehicleManager:
         # This is required so we can use VehicleManager in CREATE mode (scenario-based).
         self._sensors_config = self._config.pop("sensors", {})
         self._controllers_config = self._config.pop("controllers", {})
+        self._frame = self._config.pop("frame", {})
         self._spawn_args = self._config.pop("spawn", {})
 
         # Ensure xlab/xlabCore is always enabled for our custom sensors/controllers.
@@ -105,6 +107,20 @@ class VehicleManager:
 
         # Construct the BeamNGpy Vehicle instance
         return Vehicle(self._name, **self._config["model_args"])
+
+    @property
+    def sensors_config(self) -> Dict[str, Any]:
+        """Sensor definitions from YAML (keys used for ros_poll resolution)."""
+        return self._sensors_config
+
+    def get_spawn_args(self) -> Dict[str, Any]:
+        """Return a copy of spawn arguments for this vehicle."""
+        return deepcopy(self._spawn_args)
+
+    @property
+    def yaw_offset_deg(self) -> float:
+        """xlab → BeamNG yaw offset [deg] from vehicle catalog."""
+        return float(self._frame.get("yaw_offset_deg", 0))
 
     @property
     def controllers(self) -> Dict:
@@ -217,7 +233,38 @@ class VehicleManager:
         """Set up controllers for the vehicle."""
         controllers_config = getattr(self, "_controllers_config", {})
         for controller_name, controller_config in controllers_config.items():
+            self._inject_sensor_broadcast_ids(controller_config)
             self.setup_controller(controller_name, controller_config)
+
+    def _inject_sensor_broadcast_ids(self, controller_config: dict) -> None:
+        """Resolve sensor_broadcast[].sensorId from attached sensor names (YAML source)."""
+        broadcast = controller_config.get("sensor_broadcast")
+        if not isinstance(broadcast, dict):
+            return
+        for entry_name, entry in broadcast.items():
+            if not isinstance(entry, dict) or entry.get("sensorId") is not None:
+                continue
+            # control_state reads live controlStateOut — no attached sensor / sensorId.
+            if entry.get("sensor") == "control_state":
+                continue
+            source = entry.get("source", entry_name)
+            wrapper = self._sensors.get(source)
+            if wrapper is None:
+                self._logger.warning(
+                    f"sensor_broadcast '{entry_name}': source sensor '{source}' not attached"
+                )
+                continue
+            inner = getattr(wrapper, "_sensor", None)
+            sensor_id = getattr(inner, "sensorId", None)
+            if sensor_id is None:
+                self._logger.warning(
+                    f"sensor_broadcast '{entry_name}': source '{source}' has no simulator sensorId"
+                )
+                continue
+            entry["sensorId"] = int(sensor_id)
+            self._logger.info(
+                f"sensor_broadcast '{entry_name}' -> source '{source}' sensorId={sensor_id}"
+            )
 
     def setup_controller(self, controller_name: str, controller_config: dict):
         """Set up a specific controller for the vehicle."""

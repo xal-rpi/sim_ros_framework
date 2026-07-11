@@ -7,7 +7,7 @@ local M = {}
 
 -- Import necessary math functions for performance
 local sqrt, abs, acos, ceil = math.sqrt, math.abs, math.acos, math.ceil
-local atan2, max, min = math.atan2, math.max, math.min
+local atan2, asin, max, min = math.atan2, math.asin, math.max, math.min
 local exp = math.exp
 local pi = math.pi
 local constants = { rpmToAV = 0.104719755, avToRPM = 9.549296596425384 }
@@ -26,11 +26,17 @@ local logTag = 'GtState'
 -- Will store custom fields added by controllers or other modules.
 local customFields = {}
 
--- Optional NN torque estimator (enabled if init(data).torqueNN is provided).
-local nn = nil
-local torqueNNModel = nil
-local torqueNNOutputScaling = 1.0
-local torqueNNFieldName = 'estimated_torque'
+-- Optional forward torque estimate (torque map lib attached by controller_llc).
+local torquePolicyLib = nil
+local torqueMapEnabled = false
+local torqueMapFieldName = 'rear_wheel_torque_est'
+
+local function setTorqueMapLib(lib)
+  torquePolicyLib = lib
+  if lib then
+    log('I', logTag, 'Torque map lib attached for forward estimate')
+  end
+end
 
 -- Reference to the global state manager extension
 local gtStateManager = nil
@@ -40,18 +46,15 @@ local gtStateManager = nil
 -- add one module under filters.modules and one state under filters.state.
 local filters = {
   params = {
-    accelTauS = 0.03, -- force-based world acceleration smoothing (inside predictor-corrector)
+    accelTauS = 0.03, -- specific-force world acceleration smoothing (2-pass EMA)
     gyroTauS = 0.01, -- angular velocity smoothing (local frame)
-    velTauS = 0.01, -- world velocity smoothing (used as measurement for predictor-corrector)
+    velTauS = 0.01, -- world velocity smoothing
     wheelAngVelTauS = 0.01, -- only wheel*.angVel is filtered (in-place)
-    kfPredictGain = 0.90, -- near 1.0 trusts prediction more (smaller correction)
     debugRaw = true, -- if true, publish additional world-frame raw/filtered fields
   },
   cache = {
     nominalDt = 0.0,
-    nominalDtInv = 0.0,
     nominalAlpha = {},
-    corrScaleNominal = 0.0,
     epsDt = 1e-4,
   },
   state = {
@@ -63,14 +66,11 @@ local filters = {
       initialized = false, 
       raw = vec3(), p1 = vec3(), p2 = vec3() 
     },
-    accelWorldKf = {
+    accelWorld = {
       initialized = false,
       raw = vec3(),
-      aF1 = vec3(),
-      aF2 = vec3(),
-      vPred = vec3(),
-      corr = vec3(),
-      aOut = vec3(),
+      p1 = vec3(),
+      p2 = vec3(),
     },
     wheelsAngVel = {
       initialized = false,
@@ -97,10 +97,6 @@ local function emaScalarStep(prev, raw, alpha)
   return prev + (raw - prev) * alpha
 end
 
-local function clamp01(x)
-  return clamp(x, 0, 1)
-end
-
 function filters.isNominalDt(dt)
   return abs(dt - filters.cache.nominalDt) <= filters.cache.epsDt
 end
@@ -111,23 +107,18 @@ function filters.rebuildCache(dt)
   log('W', logTag, string.format("Rebuilding filter cache for nominalDt=%.6f (was %.6f)", dt, filters.cache.nominalDt))
   
   filters.cache.nominalDt = dt
-  filters.cache.nominalDtInv = 1.0 / max(dt, 1e-30)
 
   filters.cache.nominalAlpha.accel = alphaFromTau(dt, filters.params.accelTauS)
   filters.cache.nominalAlpha.gyro = alphaFromTau(dt, filters.params.gyroTauS)
   filters.cache.nominalAlpha.vel = alphaFromTau(dt, filters.params.velTauS)
   filters.cache.nominalAlpha.wheelAngVel = alphaFromTau(dt, filters.params.wheelAngVelTauS)
-
-  -- Used for scaling the velocity error correction in the accelWorldKf module. 
-  -- Higher gain or smaller dt means more trust in the prediction and less correction.
-  filters.cache.corrScaleNominal = (1.0 - filters.params.kfPredictGain) * filters.cache.nominalDtInv
 end
 
 
 function filters.resetAll()
   filters.state.velWorld.initialized = false
   filters.state.gyroLocal.initialized = false
-  filters.state.accelWorldKf.initialized = false
+  filters.state.accelWorld.initialized = false
   filters.state.wheelsAngVel.initialized = false
 end
 
@@ -160,45 +151,19 @@ filters.modules.gyroLocal = {
   end,
 }
 
-filters.modules.accelWorldKf = {
-  step = function(dt, accelWorldRaw, velWorldMeas)
-    local st = filters.state.accelWorldKf
+filters.modules.accelWorld = {
+  step = function(dt, accelWorldRaw)
+    local st = filters.state.accelWorld
     st.raw:set(accelWorldRaw)
     if not st.initialized then
-      st.aF1:set(accelWorldRaw)
-      st.aF2:set(accelWorldRaw)
-      st.vPred:set(velWorldMeas)
-      st.corr:set(0, 0, 0)
-      st.aOut:set(accelWorldRaw)
+      st.p1:set(accelWorldRaw)
+      st.p2:set(accelWorldRaw)
       st.initialized = true
-      return st.aOut
+      return st.p2
     end
 
-    -- st.aF2 holds force-filtered accel
-    local pass1 = emaVec3Step(st.aF1, accelWorldRaw, filters.cache.nominalAlpha.accel)
-    local aForce = emaVec3Step(st.aF2, pass1, filters.cache.nominalAlpha.accel)
-
-    -- vPred += aForce * dt (explicit component updates to avoid allocations)
-    st.vPred.x = st.vPred.x + aForce.x * dt
-    st.vPred.y = st.vPred.y + aForce.y * dt
-    st.vPred.z = st.vPred.z + aForce.z * dt
-
-    -- corr = (velMeas - vPred) * corrScale
-    local corrScale = filters.cache.corrScaleNominal
-    st.corr.x = (velWorldMeas.x - st.vPred.x) * corrScale
-    st.corr.y = (velWorldMeas.y - st.vPred.y) * corrScale
-    st.corr.z = (velWorldMeas.z - st.vPred.z) * corrScale
-
-    -- vPred += corr * dt
-    st.vPred.x = st.vPred.x + st.corr.x * dt
-    st.vPred.y = st.vPred.y + st.corr.y * dt
-    st.vPred.z = st.vPred.z + st.corr.z * dt
-
-    -- aOut = aForce + corr
-    st.aOut.x = aForce.x + st.corr.x
-    st.aOut.y = aForce.y + st.corr.y
-    st.aOut.z = aForce.z + st.corr.z
-    return st.aOut
+    local pass1 = emaVec3Step(st.p1, accelWorldRaw, filters.cache.nominalAlpha.accel)
+    return emaVec3Step(st.p2, pass1, filters.cache.nominalAlpha.accel)
   end,
 }
 
@@ -261,16 +226,14 @@ local function ensureWheelInfoTable(dst)
   dst.angle = dst.angle or 0.0
 end
 
-local function writeDriveStatusTable(dst, src)
-  dst.esc = src.esc
-  dst.abs = src.abs
-  dst.tcs = src.tcs
-  dst.engineRunning = src.engineRunning
-  dst.isRealisticDrive = src.isRealisticDrive
-  dst.mode4WD = src.mode4WD
-  dst.modeRangeBox = src.modeRangeBox
-  dst.isFrontDiffLocked = src.isFrontDiffLocked
-  dst.isRearDiffLocked = src.isRearDiffLocked
+local function writeDriveStatusFromElectrics(dst, elecVals)
+  dst.esc = elecVals.esc
+  dst.abs = elecVals.abs
+  dst.tcs = elecVals.tcs
+  dst.engineRunning = elecVals.engineRunning
+  dst.isRealisticDrive = elecVals.gearboxMode == 'realistic' and 1 or 0
+  dst.mode4WD = elecVals.mode4WD or 0
+  dst.modeRangeBox = elecVals.modeRangeBox or 0
 end
 
 --[[
@@ -289,7 +252,6 @@ local sensorConfig = {
   signedProjDist = nil, -- Signed distance from the sensor to the triangle plane
   triangleSpaceForward = nil, -- Forward direction vector in triangle space
   triangleSpaceLeft = nil, -- Left direction vector in triangle space
-  isUsingGravity = false, -- Flag to include gravity in acceleration calculations
   m1 = 0, m2 = 0, m3 = 0, -- TODO: Assume static mass for now
   inv_m1 = 0, inv_m2 = 0, inv_m3 = 0, -- Inverse masses for the nodes (precomputed for efficiency)
   oneThird = 1.0 / 3.0, -- Constant for averaging over three nodes
@@ -779,17 +741,17 @@ local function update(dtSim)
   tv.vec3:setAdd2(tv.vec1, tv.vec2)
   tv.vec3:setScaled(invDenom)
   tv.accelWorld:setAdd2(tv.aCenter, tv.vec3)
-  if sc.isUsingGravity then tv.accelWorld:setAdd(vs.currVeh:getGravityVector()) end
 
   tv.angVel:setScaled2(tv.curlVel, invDenom)
   tv.angAccel:setScaled2(tv.curlAcc, invDenom)
 
-  -- -----------------------------------------------------------------------
-  -- Velocity filtering (world), then publish in local frame.
-  local velWorld = filters.modules.velWorld.step(dt, tv.vCenter)
+  -- v_sensor = vCenter + ω × r
+  tv.vec3:setCross(tv.angVel, tv.r)
+  tv.vec3:setAdd(tv.vCenter)
+  local velWorld = filters.modules.velWorld.step(dt, tv.vec3)
 
-  -- Kalman-like predictor-corrector for linear acceleration in world frame.
-  local accelWorld = filters.modules.accelWorldKf.step(dt, tv.accelWorld, velWorld)
+  -- Specific force (F/m), 2-pass EMA — no gravity, no velocity fusion.
+  local accelWorld = filters.modules.accelWorld.step(dt, tv.accelWorld)
 
   -- Cache latestReading locally for frequent writes (reduces hash lookups)
   local latest = rb.latestReading
@@ -824,6 +786,21 @@ local function update(dtSim)
   -- qx, qy, qz, qw
   writeQuatTable(latest.quat, getQuaternionFromDir(tv.currentDir, tv.worldLeft, tv.worldThird))
 
+  -- Derived kinematics (consumed by controller_manager control_state packet).
+  local vx, vy = latest.vel[1], latest.vel[2]
+  local V = sqrt(vx * vx + vy * vy)
+  local qx, qy, qz, qw = latest.quat[1], latest.quat[2], latest.quat[3], latest.quat[4]
+  local yaw = atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+  local pitch = asin(clamp(2 * (qw * qy - qz * qx), -1, 1))
+  local roll = atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy))
+  local beta = abs(V) > 0.5 and atan2(vy, vx) or 0
+  latest.V = V
+  latest.yaw = yaw
+  latest.pitch = pitch
+  latest.roll = roll
+  latest.beta = beta
+  latest.Phi = beta + yaw
+
   -- ----------------------------------------------------------------------
   --                     WheelAngle Calculation                          --
   -- ----------------------------------------------------------------------
@@ -848,11 +825,8 @@ local function update(dtSim)
   filters.modules.wheelsAngVel.step(dt, wi.fr, wi.fl, wi.rr, wi.rl)
   --  -------------------------------------------------------
 
-  -- These inputs are updated at a lower frequency than the physics steps.
+  -- Electrics (fresh every physics step; used for actuation + driveStatus logging).
   local elecVals = electrics.values
-
-  -- Extract the drive status from the state manager.
-  local driveModeStatus = gtStateManager.getDriveModeStatus()
 
   -- Gather the latest reading data (in-place updates to reduce allocations).
   latest.time = vs.currVeh:getSimTime()
@@ -877,8 +851,7 @@ local function update(dtSim)
   latest.brakeInput = elecVals.brake_input
   latest.clutchInput = elecVals.clutch_input
 
-  -- Relevant vehicle mode / state data.
-  writeDriveStatusTable(latest.driveStatus, driveModeStatus)
+  writeDriveStatusFromElectrics(latest.driveStatus, elecVals)
 
   -- Engine relevant information
   latest.engineLoad = vs.engine and (vs.engine.isDisabled and 0 or vs.engine.instantEngineLoad) or 0
@@ -904,9 +877,9 @@ local function update(dtSim)
     latest.angVelRaw[2] = tv.angVelLocalRaw.y
     latest.angVelRaw[3] = tv.angVelLocalRaw.z
 
-    latest.velRaw[1] = tv.vCenter:dot(tv.currentDir)
-    latest.velRaw[2] = tv.vCenter:dot(tv.worldLeft)
-    latest.velRaw[3] = tv.vCenter:dot(tv.worldThird)
+    latest.velRaw[1] = tv.vec3:dot(tv.currentDir)
+    latest.velRaw[2] = tv.vec3:dot(tv.worldLeft)
+    latest.velRaw[3] = tv.vec3:dot(tv.worldThird)
 
     latest.wheelFR_angVelRaw = filters.state.wheelsAngVel.rawFr
     latest.wheelFL_angVelRaw = filters.state.wheelsAngVel.rawFl
@@ -920,23 +893,27 @@ local function update(dtSim)
     latest.wheelRL_angleLegacy = wheelAngleLegacyRad(wheel_rl.node2, wheel_rl.node1, signSteering)
   end
 
-  -- TODO: Better way to handle optional NN inference without hardcoding field names and input structure.
-  -- Optional: estimate torque from current state using NN.
-  -- Inputs are intentionally hardcoded (like controller_nn_*):
-  --   [engine_speed_rads, boost_pressure, throttle, rear_wheelspeed_ms]
-  if torqueNNModel and nn then
-    local rear_wheelspeed_ms = 0.5 * (wi.rr.speed+ wi.rl.speed)
+  -- Policy forward torque estimate + envelope (lib attached by controller_llc).
+  if torqueMapEnabled and torquePolicyLib then
+    local rear_wheelspeed_ms = 0.5 * (wi.rr.speed + wi.rl.speed)
     local engine_speed_rads = latest.RPM * constants.rpmToAV
     local boost_pressure = latest.turboBoost
     local throttle = latest.throttle
-
-    local out = nn.run( torqueNNModel, {
-      engine_speed_rads,
-      boost_pressure,
-      throttle,
-      rear_wheelspeed_ms,
-    })
-    setCustomField(torqueNNFieldName, out[1] * torqueNNOutputScaling)
+    local est = tonumber(torquePolicyLib.drivetrain_forward_torque(
+      engine_speed_rads, boost_pressure, rear_wheelspeed_ms, throttle
+    ))
+    local t0 = tonumber(torquePolicyLib.drivetrain_forward_torque(
+      engine_speed_rads, boost_pressure, rear_wheelspeed_ms, 0
+    ))
+    local t1 = tonumber(torquePolicyLib.drivetrain_forward_torque(
+      engine_speed_rads, boost_pressure, rear_wheelspeed_ms, 1
+    ))
+    setCustomField(torqueMapFieldName, est)
+    latest.torque_min = min(t0, t1)
+    latest.torque_max = max(t0, t1)
+  else
+    latest.torque_min = 0
+    latest.torque_max = 0
   end
 
   -- Add the custom fields
@@ -1020,9 +997,6 @@ local function init(data)
   sensorConfig.triangleSpaceForward = data.triangleSpaceForward
   sensorConfig.triangleSpaceLeft = data.triangleSpaceLeft
 
-  -- Operational flags
-  sensorConfig.isUsingGravity = data.isUsingGravity
-
   -- Timing configuration
   ringBuffer.physicsUpdateTime = data.physicsUpdateTime or 0.005 -- Default to 200Hz
   ringBuffer.numPhysicsStepsForGFXSave = max(1, tonumber(data.numPhysicsStepsForGFXSave) or 1)
@@ -1032,17 +1006,14 @@ local function init(data)
   filters.params.gyroTauS = tonumber(data.gyroTauS or data.gyro_tau_s) or filters.params.gyroTauS
   filters.params.velTauS = tonumber(data.velTauS or data.vel_tau_s) or filters.params.velTauS
   filters.params.wheelAngVelTauS = tonumber(data.wheelAngVelTauS or data.wheel_angvel_tau_s) or filters.params.wheelAngVelTauS
-  filters.params.kfPredictGain = clamp01(tonumber(data.kfPredictGain or data.kf_predict_gain) or filters.params.kfPredictGain)
   filters.params.debugRaw = (data.debugRaw == true) or (data.debug == true) or (data.debug_raw == true)
 
-  -- Let's log the filter configuration for debugging purposes.
   log('I', logTag, string.format(
-    'Filter config | accelTauS=%.3f gyroTauS=%.3f velTauS=%.3f wheelAngVelTauS=%.3f kfPredictGain=%.2f debugRaw=%s',
+    'Filter config | accelTauS=%.3f gyroTauS=%.3f velTauS=%.3f wheelAngVelTauS=%.3f debugRaw=%s',
     filters.params.accelTauS,
     filters.params.gyroTauS,
     filters.params.velTauS,
     filters.params.wheelAngVelTauS,
-    filters.params.kfPredictGain,
     tostring(filters.params.debugRaw)
   ))
 
@@ -1070,49 +1041,22 @@ local function init(data)
   if vehicleState.engine == nil then log('E', logTag, 'Engine reference is nil') end
   if vehicleState.gearbox == nil then log('E', logTag, 'Gearbox reference is nil') end
 
-  -- Optional torque estimation NN setup.
-  torqueNNModel = nil
-  local torqueNNCfg = data.torqueNN
-  if torqueNNCfg ~= nil then
-    torqueNNFieldName = torqueNNCfg.fieldName or torqueNNCfg.outputFieldName or 'estimated_torque'
-    torqueNNOutputScaling = tonumber(torqueNNCfg.outputScaling or torqueNNCfg.output_scaling) or 1.0
-
-    if customFields[torqueNNFieldName] == nil then
-      registerCustomField(torqueNNFieldName, 0)
+  -- Forward torque estimate enabled; policy lib attached later by controller_llc.
+  torquePolicyLib = nil
+  torqueMapEnabled = false
+  local torqueMapCfg = data.torque_map
+  if torqueMapCfg ~= nil then
+    torqueMapEnabled = true
+    torqueMapFieldName = torqueMapCfg.field_name or 'rear_wheel_torque_est'
+    if customFields[torqueMapFieldName] == nil then
+      registerCustomField(torqueMapFieldName, 0)
     end
-
-    local okReq, nnLib = pcall(require, 'lua/vehicle/controller/xlab/lib/nn')
-    if not okReq or not nnLib then
-      log('E', logTag, 'Torque NN disabled: failed to require nn library')
-    else
-      nn = nnLib
-      local okInit, errInit = pcall(nn.init)
-      if not okInit then
-        log('E', logTag, 'Torque NN disabled: nn.init failed: ' .. tostring(errInit))
-      else
-        local modelPath = torqueNNCfg.modelPath
-        if not modelPath then
-          local modelName = torqueNNCfg.modelName or torqueNNCfg.model
-          if modelName then
-            modelPath = 'lua/vehicle/controller/xlab/models/' .. modelName
-          end
-        end
-
-        if not modelPath then
-          log('E', logTag, 'Torque NN disabled: no modelPath/modelName provided in torqueNN config')
-        else
-          local okLoad, modelOrErr = pcall(nn.loadModel, modelPath)
-          if not okLoad or not modelOrErr then
-            log('E', logTag, 'Torque NN disabled: failed to load model: ' .. tostring(modelOrErr))
-          else
-            torqueNNModel = modelOrErr
-            log('I', logTag, 'Torque NN enabled: model=' .. tostring(modelPath)
-              .. ' field=' .. tostring(torqueNNFieldName)
-              .. ' outputScaling=' .. tostring(torqueNNOutputScaling))
-          end
-        end
-      end
-    end
+    log(
+      'I',
+      logTag,
+      'torque_map estimate enabled (awaiting LLC torque map) field='
+        .. tostring(torqueMapFieldName)
+    )
   end
 
   ringBuffer.readings = {}
@@ -1145,10 +1089,8 @@ end
 
 
 local function stop()
-  if nn and torqueNNModel then
-    pcall(nn.freeModel, torqueNNModel)
-  end
-  torqueNNModel = nil
+  torquePolicyLib = nil
+  torqueMapEnabled = false
 end
 
 --[[
@@ -1186,5 +1128,6 @@ M.getSensorData = getSensorData
 M.getLatest = getLatest
 M.registerCustomField = registerCustomField
 M.setCustomField = setCustomField
+M.setTorqueMapLib = setTorqueMapLib
 
 return M

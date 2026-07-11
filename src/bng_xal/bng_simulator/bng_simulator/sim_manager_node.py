@@ -4,15 +4,21 @@
 Main function to run the Simulation Manager ROS Node
 """
 
-import os
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from multiprocessing import Queue
-from ament_index_python.packages import get_package_share_directory
+
+from std_msgs.msg import Empty
 
 from bng_simulator.core.simulation_manager import SimulationManager
 from bng_simulator.utils.io_dict_utils import convert_dict_to_str, convert_str_to_dict
-from bng_simulator.utils.config_manager import ConfigManager
+from bng_simulator.utils.scenario_compose import (
+    compose_scenario,
+    launch_overrides_from_ros,
+    resolve_config_path,
+    summarize_config,
+)
 
 # Services imports
 from bng_msgs.srv import ExecuteRequest, StartLogger, StopLogger
@@ -24,22 +30,32 @@ class SimulationManagerNode(Node):
         super().__init__("sim_manager_node")
 
         # Declare parameters
-        self.declare_parameter("config", "etk_scenario.yaml")
+        self.declare_parameter("config", "gridworld.yaml")
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("remote", "")
         self.declare_parameter("beamng_port", 25252)
+        # Base UDP triplet for io.port_index 0; vehicle N uses base + N * port_stride.
         self.declare_parameter("bng_listen_port", 64257)
         self.declare_parameter("bng_send_port", 64258)
+        self.declare_parameter("bng_sensor_port", 64259)
         self.declare_parameter("scenario_mode", "create")
         self.declare_parameter("attach_fallback", False)
         self.declare_parameter("log_level", "INFO")
+        # Single-vehicle shorthand overrides (ignored when run has compose.vehicles).
+        self.declare_parameter("vehicle", "")
+        self.declare_parameter("vehicle_id", "")
+        self.declare_parameter("level", "")
+        self.declare_parameter("spawn", "")
+        self.declare_parameter("yaw", "")
+        self.declare_parameter("pos", "")
+        self.declare_parameter("preset", "")
 
         self.logger = self.get_logger()
 
         # Get parameters
         if config_path is None:
             config_name = self.get_parameter("config").value
-            self.config_path = self._resolve_config_path(config_name)
+            self.config_path = resolve_config_path(config_name)
             self.logger.info(f"config: {self.config_path}")
         else:
             self.config_path = config_path
@@ -50,6 +66,7 @@ class SimulationManagerNode(Node):
         beamng_port = self.get_parameter("beamng_port").value
         bng_listen_port = self.get_parameter("bng_listen_port").value
         bng_send_port = self.get_parameter("bng_send_port").value
+        bng_sensor_port = self.get_parameter("bng_sensor_port").value
         scenario_mode = self.get_parameter("scenario_mode").value
         attach_fallback = self.get_parameter("attach_fallback").value
 
@@ -80,8 +97,9 @@ class SimulationManagerNode(Node):
                 format=fmt,
             )
 
-        # Load configuration and override host/port BEFORE creating SimulationManager
-        config_dict = ConfigManager.get_config(self.config_path)
+        # Load configuration from composed run file.
+        launch_overrides = launch_overrides_from_ros(self)
+        config_dict = compose_scenario(self.config_path, launch_overrides)
         if config_dict is None:
             raise RuntimeError(f"Failed to load config from {self.config_path}")
         
@@ -105,23 +123,25 @@ class SimulationManagerNode(Node):
         if "attach_fallback" not in config_dict:
             config_dict["attach_fallback"] = attach_fallback
         
-        # Automatically set listenIp and sendIp in vehicle controllers to match beamng host
-        if "vehicles" in config_dict:
-            for _, vehicle_config in config_dict["vehicles"].items():
-                if "controllers" in vehicle_config:
-                    for _, controller_config in vehicle_config["controllers"].items():
-                        if "listenIp" not in controller_config:
-                            controller_config["listenIp"] = beamng_host
-                        if "sendIp" not in controller_config:
-                            controller_config["sendIp"] = remote_host or beamng_host
-                        if "listenPort" not in controller_config:
-                            controller_config["listenPort"] = bng_listen_port
-                        if "sendPort" not in controller_config:
-                            controller_config["sendPort"] = bng_send_port
-        
-        self.logger.info(f"BeamNG config: host={beamng_host}, port={beamng_port}")
-        self.logger.info(f"Scenario mode: {config_dict['scenario_mode']}")
-        self.logger.info(f"Attach fallback: {config_dict.get('attach_fallback', False)}")
+        # Inject per-vehicle xlab UDP ports (see config udp_io + vehicles.*.io.port_index).
+        from bng_simulator.utils.vehicle_io_config import inject_vehicle_io_ports
+
+        inject_vehicle_io_ports(
+            config_dict,
+            beamng_host=beamng_host,
+            remote_host=remote_host,
+            listen_port=int(bng_listen_port),
+            send_port=int(bng_send_port),
+            sensor_port=int(bng_sensor_port),
+        )
+
+        self.logger.info(
+            summarize_config(
+                config_dict,
+                config_path=self.config_path,
+                launch_overrides=launch_overrides,
+            )
+        )
 
         # Create simulation manager with modified config
         self.sim_manager = SimulationManager(
@@ -148,26 +168,13 @@ class SimulationManagerNode(Node):
         )
 
         # Logging that the node is initialized
-        self.logger.info(f"Simulation Manager Node initialized.")
+        self.logger.info("Simulation Manager Node initialized.")
 
-    def _resolve_config_path(self, config_name):
-        """
-        Resolve config file path by name.
-        Supports absolute paths, relative paths, and simple filenames.
-        Searches standard config directories if only filename is provided.
-
-        Args:
-            config_name (str): Config file name or path (e.g., 'etk_scenario.yaml')
-
-        Returns:
-            str: Resolved absolute path to config file
-        """
-        # If it's already an absolute path, use it as-is
-        if not os.path.isabs(config_name):
-            raise FileNotFoundError(
-                f"Config file '{config_name}' not found in standard directories."
-            )
-        return config_name
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._sim_ready_pub = self.create_publisher(Empty, "sim_ready", qos)
+        self._sim_ready_pub.publish(Empty())
+        rclpy.spin_once(self, timeout_sec=0.1)
+        self.logger.info("Published sim_ready (scenario open, vehicles configured)")
 
     def handle_execute_request(self, request, response):
         """
@@ -228,6 +235,7 @@ class SimulationManagerNode(Node):
         response.success = True
         self.logger.info("Logger process stopped")
         return response
+
 
 
 def main(args=None):

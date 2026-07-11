@@ -1,17 +1,13 @@
 local M = {}
 
--- Vlua sensor readings data.
-
--- The most-recently-read GtState data (this is a table).
+-- GE-side gtState registry: attach sensor matrix, forward init to vlua, buffer GE polls.
 local gtStateLastRawReadings = {}
 
 local function createGtState(vid, args)
-  -- Set optional parameters to defaults if they are not provided by the user.
   if args.pos == nil then args.pos = vec3(0, 0, 3) end
   if args.dir == nil then args.dir = vec3(0, -1, 0) end
   if args.left == nil then args.left = vec3(1, 0, 0) end
   if args.GFXUpdateTime == nil then args.GFXUpdateTime = 0.1 end
-  if args.isUsingGravity == nil then args.isUsingGravity = false end
   if args.isVisualised == nil then args.isVisualised = true end
   if args.isSnappingDesired == nil then args.isSnappingDesired = false end
   if args.isForceInsideTriangle == nil then args.isForceInsideTriangle = false end
@@ -48,7 +44,6 @@ local function createGtState(vid, args)
     GFXUpdateTime = args.GFXUpdateTime,
     physicsUpdateTime = args.physicsUpdateTime,
     numPhysicsStepsForGFXSave = args.numPhysicsStepsForGFXSave,
-    isUsingGravity = args.isUsingGravity,
     nodeIndex1 = attachData['nodeIndex1'],
     nodeIndex2 = attachData['nodeIndex2'],
     nodeIndex3 = attachData['nodeIndex3'],
@@ -62,32 +57,9 @@ local function createGtState(vid, args)
     gyro_tau_s = args.gyro_tau_s,
     vel_tau_s = args.vel_tau_s,
     wheel_angvel_tau_s = args.wheel_angvel_tau_s,
-    kf_predict_gain = args.kf_predict_gain,
     debug_raw = args.debug_raw,
-    torqueNN = args.torqueNN,
+    torque_map = args.torque_map,
   }
-
-  -- If torque NN is enabled, prepare the native NN shared lib path mailbox.
-  -- This mirrors the logic in ge/extensions/xlab/xlabCore.lua for nn_ controllers.
-  if args.torqueNN ~= nil then
-    assert(
-      not Engine.Sandbox.Lua.isEnabled(),
-      'Torque NN can only run when the Lua security sandbox is disabled. '
-        .. "You will have to restart BeamNG with the '-disable-sandbox' argument."
-    )
-
-    local mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.so'
-    local fs_libpath = 'tmp/libnn.so'
-    if jit and jit.os then
-      if jit.os == 'Windows' then
-        mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.dll'
-        fs_libpath = 'tmp/libnn.dll'
-      end
-    end
-    copyfile(mod_libpath, fs_libpath)
-    be:sendToMailbox('libnnPath', FS:virtual2Native(fs_libpath))
-    log('I', 'gtState', 'Torque NN enabled; using ' .. fs_libpath)
-  end
 
   -- Let's log node indices and barycentric coordinates.
   log(
@@ -166,7 +138,6 @@ local function updateGtStateLastReadings(data)
   local newReadings = lpack.decode(data)
   local sensor = gtStateLastRawReadings[newReadings.sensorId]
   if sensor == nil then return end
-  -- Insert each new reading into the circular buffer.
   for _, v in pairs(newReadings.reading) do
     sensor.head = (sensor.head % sensor.maxSize) + 1
     sensor.buffer[sensor.head] = v
@@ -177,39 +148,9 @@ local function updateGtStateLastReadings(data)
   end
 end
 
-local function removeAllSensorsFromVehicle(vid) Research.SensorManager.removeSensorByVid(vid) end
--- local function onUpdate(dtReal, dtSim, dtRaw)
---     -- for sensorId, _ in pairs(visualisedUltrasonicSensors) do
---     --     visualiseUltrasonicSensor(sensorId, dtSim)
---     -- end
--- end
-
--- local function onDeserialized(data)
---     -- if Research then
---     --     Research.GpuRequestManager.reset()
---     -- end
--- end
-
--- local function onVehicleDestroyed(vid)
---   removeAllSensorsFromVehicle(vid)
--- end
-
--- Public interface:
-
--- -- General sensor functions.
--- M.doesSensorExist                           = doesSensorExist
--- M.removeSensor                              = removeSensor
--- M.removeAllSensorsFromVehicle               = removeAllSensorsFromVehicle
-
--- Advanced GtState-specific sensor functions.
 M.createGtState = createGtState
 M.removeGtState = removeGtState
 M.getGtStateReadings = getGtStateReadings
 M.updateGtStateLastReadings = updateGtStateLastReadings
-
--- -- Functions triggered by hooks.
--- M.onUpdate                                  = onUpdate
--- M.onDeserialized                            = onDeserialized
--- M.onVehicleDestroyed                        = onVehicleDestroyed
 
 return M

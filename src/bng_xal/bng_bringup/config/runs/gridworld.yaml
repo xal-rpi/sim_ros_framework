@@ -1,0 +1,16 @@
+# Thin single-vehicle run — see compose_reference.yaml / multi_agent.yaml.
+#
+# Launch:
+#   ros2 launch bng_bringup simulator.launch.py config:=gridworld.yaml
+# Single-vehicle overrides (shorthand runs only):
+#   level:=derby spawn:=grid_lane yaw:=45
+#   preset:=derby_grid_lane.yaml
+#   pos:="44.05,127.22,79.3"
+
+compose:
+  vehicle: utv_wild
+  vehicle_id: EGO
+  level: tech_ground
+  spawn: origin
+
+scenario_mode: create

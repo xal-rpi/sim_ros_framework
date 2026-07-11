@@ -1,0 +1,17 @@
+# Fixed-step physics profile — use via compose.sim in a run file.
+#
+#   compose:
+#     sim: defaults/sim_fixed_step.yaml
+#
+# steps_per_second: 60 → deterministic 60 Hz physics (vs 0 = wall clock in sim.yaml).
+
+beamng:
+  open_args:
+    launch: false
+    debug: false
+    extensions:
+      - xlab/xlabCore
+  setup_funcs:
+    beamng.settings.set_deterministic:
+      steps_per_second: 60
+    beamng.ui.show_hud: {}

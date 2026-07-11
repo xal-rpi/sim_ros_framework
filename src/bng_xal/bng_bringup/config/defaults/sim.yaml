@@ -1,0 +1,20 @@
+# =============================================================================
+# Simulator connection defaults (merged into every composed run).
+# =============================================================================
+#
+# beamng.host / beamng.port — injected from launch if omitted here.
+# beamng.open_args.launch: false  → connect to already-running BeamNG.tech.
+# beamng.open_args.extensions     → xlab mod required for custom sensors/controllers.
+# setup_funcs                     → deterministic physics stepping (0 = wall clock).
+
+beamng:
+  open_args:
+    launch: false
+    debug: false
+    extensions:
+      - xlab/xlabCore
+  setup_funcs:
+    beamng.settings.set_deterministic:
+      # 0: physics dt follows wall clock; -1/n: fixed steps per frame
+      steps_per_second: 0
+    beamng.ui.show_hud: {}

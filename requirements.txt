@@ -1,21 +1,7 @@
-# Runtime deps used by bng_simulator / bng_controller
+# Golden-path Python deps (pip). Install before first colcon build:
+#   pip install -r requirements.txt
 beamngpy
 PyYAML
 numpy
-scipy
 tqdm
-matplotlib
-
-# Optional: separate-process week11 live visualizer
-PySide6
-pyqtgraph
-
-casadi
-
-# Optional: schema-based rosbag2 (MCAP) decoding without ROS msg packages
 rosbags
-
-# Build-time deps when colcon uses a venv python
-empy
-catkin_pkg
-lark-parser

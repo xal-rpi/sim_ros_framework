@@ -17,14 +17,9 @@ This script:
 import os
 import sys
 import time
-import yaml  # Requires PyYAML installed
 import argparse
 import shutil
 import rclpy
-from rclpy.node import Node
-from bng_msgs.srv import StartLogger, StopLogger, MPConfig
-import pickle
-from tqdm.auto import tqdm  # added import at module level
 import subprocess
 import signal
 import atexit
@@ -32,7 +27,12 @@ import threading
 import pathlib
 import json
 
-from bng_simulator.utils.services_utils import send_request
+from bng_simulator.utils.log_session import (
+    LoggerClient,
+    begin_run,
+    end_run,
+    get_next_run_folder,
+)
 
 # Color utilities for terminal output
 class Colors:
@@ -77,150 +77,11 @@ mpc_config_received = False
 mpc_config_thread = None
 mpc_config_stop_event = None  # Event to signal the MPC config thread to stop
 
-# Version of the messages stored by this script.
-MSG_VERSION = "1.0"
-
 # Default topics to record with ROS bag
 DEFAULT_TOPICS = [
     "/vehicle/mpc_solution",
     "/vehicle/state_n_control",
 ]
-
-# ------------------------------------------------------------------
-# Utility to create and return the next run folder (e.g., run_001, run_002, ...)
-# ------------------------------------------------------------------
-def get_next_run_folder(root_dir):
-    if not os.path.exists(root_dir):
-        os.makedirs(root_dir)
-    runs = [d for d in os.listdir(root_dir) if d.startswith("run_")]
-    if runs:
-        nums = [int(d.split("_")[1]) for d in runs if d.split("_")[1].isdigit()]
-        next_num = max(nums) + 1 if nums else 1
-    else:
-        next_num = 1
-    run_folder = os.path.join(root_dir, f"run_{next_num:03d}")
-    os.makedirs(run_folder)
-    return run_folder
-
-
-# ------------------------------------------------------------------
-# ROS Node client for starting and stopping the logger service
-# ------------------------------------------------------------------
-class LoggerClient(Node):
-    def __init__(self):
-        super().__init__("logger_client")
-        # Create ROS service clients for StartLogger and StopLogger.
-        self.start_client = self.create_client(StartLogger, "start_logger")
-        self.stop_client = self.create_client(StopLogger, "stop_logger")
-        # Create ROS service client for MPConfig
-        self.mpc_config_client = self.create_client(MPConfig, "/mpc_high_level/get_config")
-        # Wait until services are available
-        while not self.start_client.wait_for_service(timeout_sec=1.0):
-            print_info("Waiting for start_logger service...")
-        while not self.stop_client.wait_for_service(timeout_sec=1.0):
-            print_info("Waiting for stop_logger service...")
-
-    # ------------------------------------------------------------------
-    # Send a StartLogger request to the ROS service.
-    # ------------------------------------------------------------------
-    def start_logging(self, file_path, max_queue_size, flush_interval):
-        req = StartLogger.Request()
-        req.save_location = file_path
-        req.max_queue_size = max_queue_size
-        req.flush_interval = flush_interval  # mapping flush_interval to request field.
-        future = self.start_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)
-        return future.result()
-
-    # ------------------------------------------------------------------
-    # Send a StopLogger request to the ROS service.
-    # ------------------------------------------------------------------
-    def stop_logging(self):
-        req = StopLogger.Request()
-        future = self.stop_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)
-        return future.result()
-        
-    # ------------------------------------------------------------------
-    # Send a request to get MPC configuration.
-    # ------------------------------------------------------------------
-    def get_mpc_config(self):
-        # Check if the service is available
-        if not self.mpc_config_client.wait_for_service(timeout_sec=0.1):
-            return None
-        
-        req = MPConfig.Request()
-        future = self.mpc_config_client.call_async(req)
-        # Use a timeout to avoid blocking indefinitely
-        try:
-            rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
-            if future.done():
-                return future.result()
-        except Exception as e:
-            self.get_logger().warning(f"Error getting MPC config: {e}")
-        return None
-
-
-# ------------------------------------------------------------------
-# Consolidate all temporary logger data files into a single file.
-# ------------------------------------------------------------------
-def consolidate_logger_files(run_folder):
-    """
-    Consolidates all temporary logger data files (data_*.pkl) in run_folder into a single file (data.pkl),
-    merging the structured dictionaries, then deletes the temporary files.
-    """
-    consolidated = {}
-    # List temporary files using os.listdir and extract the numeric part.
-    temp_files = []
-    for fname in os.listdir(run_folder):
-        if fname.startswith("data_") and fname.endswith(".pkl"):
-            try:
-                num = int(fname[len("data_") : -len(".pkl")])
-                temp_files.append((num, os.path.join(run_folder, fname)))
-            except ValueError:
-                continue
-    # Sort files by the extracted number.
-    temp_files.sort(key=lambda x: x[0])
-
-    # Use tqdm to display progress while processing files.
-    for num, file_path in tqdm(
-        temp_files, desc="Consolidating data files", unit="file"
-    ):
-        try:
-            with open(file_path, "rb") as f:
-                data = pickle.load(f)
-            # Merge data: keys are tuples (vehicle, sensor)
-            for key, sensor_data in data.items():
-                if key not in consolidated:
-                    consolidated[key] = {}
-                for field, values in sensor_data.items():
-                    consolidated[key].setdefault(field, []).extend(values)
-        except Exception as e:
-            print_error(f"Error consolidating {file_path}: {e}")
-    
-    # Add versioning information
-    final_data = {
-        "version": "1.0",
-        "format": "sensor_timeseries", 
-        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "data": consolidated
-    }
-    
-    # Save the consolidated file.
-    consolidated_file = os.path.join(run_folder, "data.pkl")
-    try:
-        with open(consolidated_file, "wb") as f:
-            pickle.dump(final_data, f)
-        print_success(f"Consolidated data saved to {consolidated_file}")
-    except Exception as e:
-        print_error(f"Failed to save consolidated file: {e}")
-    # Delete temporary files.
-    for _, file_path in temp_files:
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            print_error(f"Failed to delete temporary file {file_path}: {e}")
-
 
 # ------------------------------------------------------------------
 # Cleanup handler for graceful shutdown
@@ -442,7 +303,7 @@ def setup_signal_handlers():
 # Main entry point of the script.
 # ------------------------------------------------------------------
 def main(args=None):
-    global run_folder, client, bag_process, logging_started
+    global run_folder, client, bag_process, logging_started, mpc_config, mpc_config_received
     
     # Setup signal handlers for graceful termination
     setup_signal_handlers()
@@ -505,30 +366,23 @@ def main(args=None):
             shutil.rmtree(run_folder)
         sys.exit("Aborted by user.\n")
 
-    # Initialize ROS and create our LoggerClient.
     rclpy.init(args=args)
     client = LoggerClient()
-    # Update global variable for cleanup handler
     globals()['client'] = client
 
-    # Send a request for getting information about the scenario
-    scenario_infos = send_request("get_sim_config", node_ros=client)
-
-    # Start the logger service with the given max_queue_size and flush_interval.
     print_info("Starting logger service...")
-    start_resp = client.start_logging(
-        file_path,
-        max_queue_size=parsed_args.max_queue_size,
-        flush_interval=parsed_args.flush_interval,  # Using flush_interval as per srv definition.
-    )
-    if not start_resp or not start_resp.success:
-        # Remove folder if logger service fails to start.
-        if os.path.exists(run_folder):
-            shutil.rmtree(run_folder)
+    try:
+        logged_run = begin_run(
+            client,
+            data_root,
+            run_folder=run_folder,
+            max_queue_size=parsed_args.max_queue_size,
+            flush_interval=parsed_args.flush_interval,
+        )
+    except RuntimeError:
         print_error("Failed to start logger service.")
         sys.exit(1)
     print_success("Logging started.")
-    # Update global variable for cleanup handler
     globals()['logging_started'] = True
     
     # Initialize and start MPC configuration checking thread
@@ -599,13 +453,6 @@ def main(args=None):
             print("\nInterrupted. Stopping logging.")
             break  # Treat interruption as a stop command
 
-    # Request the service to stop logging.
-    stop_resp = client.stop_logging()
-    if not stop_resp or not stop_resp.success:
-        print_error("Failed to stop logger service.")
-    else:
-        print_success("Logging stopped successfully.")
-        
     # Stop ROS bag recording if it was started
     if bag_process:
         try:
@@ -626,19 +473,6 @@ def main(args=None):
     map_name = input("Map Name: ").strip()
     additional_info = input("Additional Info: ").strip()
 
-    metadata = {
-        "map_name": map_name,
-        "additional_info": additional_info,
-        "run_folder": os.path.basename(run_folder),
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "msg_version": MSG_VERSION,  # Include message version in metadata
-        **scenario_infos["vehicles_part"],
-        "sim": scenario_infos,
-    }
-    
-    # Add MPC configuration to metadata if received
-    global mpc_config, mpc_config_received
-    
     # Stop the MPC config thread if it's still running
     if mpc_config_thread and mpc_config_thread.is_alive():
         if mpc_config_stop_event:
@@ -647,34 +481,35 @@ def main(args=None):
         if mpc_config_thread.is_alive():
             print("Warning: MPC configuration thread did not terminate cleanly.")
     
-    # Add the config to metadata if we received it
     if mpc_config_received and mpc_config:
-        metadata["mpc_config"] = mpc_config
         print_success("Added MPC configuration to metadata.")
     else:
         print_warning("MPC configuration was not received.")
-    
-    # Add ROS bag recording information to metadata
+
     if not parsed_args.no_rosbag:
-        metadata["rosbag"] = {
+        rosbag_meta = {
             "enabled": True,
             "format": parsed_args.bag_format,
             "topics": recorded_topics if recorded_topics != ["-a"] else ["all"],
-            "path": os.path.basename(bag_folder)  # Use the basename of the new folder
+            "path": os.path.basename(bag_folder),
         }
     else:
-        metadata["rosbag"] = {
-            "enabled": False
-        }
+        rosbag_meta = {"enabled": False}
 
-    # Save metadata to metadata.yaml in the run folder.
-    metadata_path = os.path.join(run_folder, "metadata.yaml")
-    with open(metadata_path, "w") as f:
-        yaml.dump(metadata, f, sort_keys=False)
-    print_success(f"Metadata saved to {metadata_path}")
-
-    # Consolidate temporary logger files into one data.pkl and remove temporary data files.
-    consolidate_logger_files(file_path)
+    try:
+        data_pkl = end_run(
+            client,
+            logged_run,
+            {"map_name": map_name, "additional_info": additional_info},
+            mpc_config=mpc_config if mpc_config_received else None,
+            rosbag=rosbag_meta,
+        )
+    except RuntimeError:
+        print_error("Failed to stop logger service.")
+        sys.exit(1)
+    print_success("Logging stopped successfully.")
+    print_success(f"Metadata saved to {os.path.join(run_folder, 'metadata.yaml')}")
+    print_success(f"Consolidated data saved to {data_pkl}")
 
     # Prompt the user if they want to keep the log folder.
     keep = input("Do you want to keep the run folder? (y/n): ").strip().lower()

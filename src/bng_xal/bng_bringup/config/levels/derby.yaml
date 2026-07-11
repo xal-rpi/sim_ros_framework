@@ -1,0 +1,22 @@
+# =============================================================================
+# derby level — spawn presets + level objects (CREATE mode).
+# =============================================================================
+
+level: derby
+scenario_name: basic
+
+spawns:
+  grid_lane:
+    pos: [-0.243, 148.0445, 79.3]
+    yaw_angle: 0
+    cling: true
+  hill_a:
+    pos: [44.05, 127.22, 79.3]
+    yaw_angle: 0
+    cling: true
+  origin:
+    pos: [0, 0, 0]
+    yaw_angle: 0
+    cling: true
+
+extra_objects: {}

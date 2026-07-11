@@ -1,0 +1,21 @@
+# =============================================================================
+# UDP I/O port model (one triplet per vehicle instance).
+# =============================================================================
+#
+# Each vehicle with an LLC needs a UNIQUE port triplet on the companion host.
+# Launch args (bng_listen_port, bng_send_port, bng_sensor_port) set the BASE
+# triplet for port_index 0 (typically EGO). Additional vehicles use:
+#   port = base + vehicles.<name>.io.port_index * port_stride
+#
+# Triplet roles (vehicle/simulator-centric names in LLC YAML):
+#   control_listen       — vehicle BINDs; companion sendto commands (64257+)
+#   control_state_send   — vehicle sendto live controlStateOut (64258+)
+#   sensor_send          — vehicle sendto observations; companion BINDs (64259+)
+#
+# IPs are injected at launch: control_listen_ip = BeamNG host;
+# control_state_send_ip / sensor_send_ip = remote (WSL) or BeamNG host.
+
+control_listen: 64257
+control_state_send: 64258
+sensor_send: 64259
+port_stride: 10

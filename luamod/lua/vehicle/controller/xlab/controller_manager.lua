@@ -1,19 +1,32 @@
--- ./vehicle/controller/xlab/controller_manager.lua
+--[[
+  controller_manager.lua — per-vehicle I/O gateway
+
+  Role: UDP transport, message routing, plugin host. No control law here.
+
+  Ports (vehicle/simulator-centric; see vehicle_io.py on the Python side):
+    control_listen       vehicle BINDs — many clients sendto commands/tune
+    control_state_send   vehicle sendto — companion BINDs for live controlStateOut
+    sensor_send          vehicle sendto — companion BINDs for observation batches
+
+  Each update tick (order matters):
+    1. Drain control_listen (recv-last) and route messages
+    2. refreshControlState() once (gt._seq dedup)
+    3. Stream control_state_send at controlStateRate
+    4. Stream sensor_send for due sensor_broadcast streams
+    5. Run actuation plugin (+ optional feedback plugin)
+
+  Optional feedback: YAML `feedback: <stem>` → feedback_<stem>.lua
+  See luamod/FEEDBACK_CONTRACT.md
+]]
+
 local M = {}
 local logTag = 'ControllerManager'
 
--- math locals (small perf win; avoids global lookups)
-local atan2 = math.atan2
-local abs = math.abs
-local sqrt = math.sqrt
+-- ============================================================================
+-- §1  Shared runtime bag (passed to actuation / feedback plugins as `common`)
+-- ============================================================================
 
--- A minimal circular‐buffer latency tracker
-local latency = {
-  window = 100,
-  data = {}, -- will hold up to `window` samples
-  idx = 1,
-  max = 0,
-}
+local latency = { window = 100, data = {}, idx = 1, max = 0 }
 
 function latency:add(lat)
   self.data[self.idx] = lat
@@ -24,491 +37,536 @@ end
 function latency:average()
   local n, sum = #self.data, 0
   if n == 0 then return 0 end
-  for i = 1, n do
-    sum = sum + self.data[i]
-  end
+  for i = 1, n do sum = sum + self.data[i] end
   return sum / n
 end
 
--- This is our “shared” state, all controllers will refer to it
 local common = {
-  -- flags & sockets
   isRunning = false,
   isBypassed = false,
-  listenIp = nil,
-  listenPort = nil,
-  sendIp = nil,
-  sendPort = nil,
+
+  controlListenIp = nil,
+  controlListenPort = nil,
+  controlStateSendIp = nil,
+  controlStateSendPort = nil,
   socketIn = nil,
   socketOut = nil,
-  controllerRate = 0,
+  sensorSendIp = nil,
+  sensorSendPort = nil,
+  sensorSocketOut = nil,
 
-  -- manager-owned reduced-gtState broadcaster
-  -- If gtStateSendRate > 0, the manager will periodically read gtState,
-  -- pack a reduced subset, store it in `reducedGtState`, and send it to sendIp:sendPort.
-  gtStateSendRate = 0,
-  gtStateSendAccum = 0,
-  reducedGtState = {
+  controllerRate = 0,
+  controlStateRate = 0,
+  controlStateSendAccum = 0,
+  controlStateSeq = nil,
+  controlStateOut = {
     t = -1,
-    x = 0,
-    y = 0,
-    -- z = 0,
-    yaw = 0,
-    V = 0,
-    vx = 0,
-    vy = 0,
-    -- vz = 0,
-    beta = 0,
-    r = 0,
-    delta = 0,
-    wr = 0,
-    wf = 0,
-    we = 0,
-    pb = 0,
-    throttle = 0,
-    brake = 0,
-    accel_x = 0,
-    accel_y = 0,
-    -- accel_z = 0,
-    rear_wheel_torque_est = 0.0,
+    x = 0, y = 0, z = 0,
+    quat = { 0, 0, 0, 1 },
+    yaw = 0, pitch = 0, roll = 0,
+    Phi = 0, beta = 0,
+    vx = 0, vy = 0, vz = 0, V = 0,
+    p = 0, q = 0, r = 0,
+    accel_x = 0, accel_y = 0, accel_z = 0,
+    w_fl = 0, w_fr = 0, w_rl = 0, w_rr = 0,
+    delta_l = 0, delta_r = 0,
+    throttle = 0, brake = 0, pbrake = 0,
+    gear_index = 0, gear_ratio = 0,
+    we = 0, pb = 0,
+    rear_wheel_torque_est = 0,
+    torque_min = 0, torque_max = 0,
   },
+
+  sensorBroadcastList = nil,
+  sensorBatchOut = nil,
 
   performanceMetrics = {
-    latency = nil,
-    avgLatency = 0,
-    maxLatency = 0,
-    lastCommandTimestamp = 0,
-    lastResponseTimestamp = 0,
-    commandsReceived = 0,
-    missedUpdates = 0,
+    latency = nil, avgLatency = 0, maxLatency = 0,
+    lastCommandTimestamp = 0, lastResponseTimestamp = 0,
+    commandsReceived = 0, missedUpdates = 0,
   },
 
+  torqueMapPath = nil,
   getSimTime = nil,
-
-  -- gtState
   gtStateSensorId = nil,
   gtStateManager = nil,
-  updateGtReading = nil,
-  cachedGtReading = nil,
-  lastGtReadingTime = 0,
 
-  -- RPM lookup
-  torqueLookup = nil,
-
-  -- vehicle cache
-  vehicleState = {
-    maxTorque = 0,
-    maxRPM = 0,
-    wheelRadius = 0.3,
-    mass = 1200,
-    torqueCurve = {},
-  },
-
-  constants = { rpmToAV = 0.104719755, avToRPM = 9.549296596425384 },
+  constants = { rpmToAV = 0.104719755 },
 }
 
 local activeController = nil
+local activeControllerType = nil
+local activeFeedback = nil
+local activeFeedbackStem = nil
 
-local function getWheelAngle(gtReading, wheelKey, legacyKey)
-  local wheel = gtReading[wheelKey]
-  if wheel and wheel.angle ~= nil then
-    return wheel.angle
-  end
-  return gtReading[legacyKey] or 0.0
-end
+-- ============================================================================
+-- §2  control_state — live packet (control_state_send + sensor_broadcast)
+-- ============================================================================
 
-local function getWheelSpeed(gtReading, wheelKey)
-  local wheel = gtReading[wheelKey]
-  if wheel and wheel.speed ~= nil then
-    return wheel.speed
-  end
-  return 0.0
-end
-
--- Reduced state packer (mirrors controller_nn_mpc.lua payload for MPC/planning)
-local function packReducedGtState(gtReading)
-  if not gtReading then
-    return { t = -1 }
-  end
-
-  -- Velocity (local frame)
-  local vel_x = gtReading.vel[1]
-  local vel_y = gtReading.vel[2]
-  local vel = sqrt(vel_x * vel_x + vel_y * vel_y)
-
-  -- Yaw angle from quaternion
-  local qx = gtReading.quat[1]
-  local qy = gtReading.quat[2]
-  local qz = gtReading.quat[3]
-  local qw = gtReading.quat[4]
-  local yaw = atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
-
-  -- Sideslip angle
-  local sideslip = 0
-  if abs(vel) > 1.5 then
-    sideslip = atan2(vel_y, vel_x)
-  end
-
-  common.reducedGtState.t = gtReading.time
-  common.reducedGtState.x = gtReading.pos[1]
-  common.reducedGtState.y = gtReading.pos[2]
-  -- z = gtReading.pos[3]
-  common.reducedGtState.yaw = yaw
-  -- Phi = sideslip + yaw,
-
-  common.reducedGtState.V = vel
-  common.reducedGtState.vx = gtReading.vel[1]
-  common.reducedGtState.vy = gtReading.vel[2]
-  -- common.reducedGtState.vz = gtReading.vel[3]
-
-  common.reducedGtState.beta = sideslip
-  common.reducedGtState.r = gtReading.angVel[3]
-  local wheel_fl_angle = getWheelAngle(gtReading, 'wheelFL', 'wheelFL_angleLegacy')
-  local wheel_fr_angle = getWheelAngle(gtReading, 'wheelFR', 'wheelFR_angleLegacy')
-  local wheel_rr_speed = getWheelSpeed(gtReading, 'wheelRR')
-  local wheel_rl_speed = getWheelSpeed(gtReading, 'wheelRL')
-  local wheel_fl_speed = getWheelSpeed(gtReading, 'wheelFL')
-  local wheel_fr_speed = getWheelSpeed(gtReading, 'wheelFR')
-
-  common.reducedGtState.delta = (wheel_fl_angle + wheel_fr_angle) / 2
-
-  common.reducedGtState.wr = (wheel_rr_speed + wheel_rl_speed) / 2
-  common.reducedGtState.wf = (wheel_fl_speed + wheel_fr_speed) / 2
-  common.reducedGtState.we = gtReading.RPM * common.constants.rpmToAV
-  common.reducedGtState.pb = gtReading.turboBoost
-  common.reducedGtState.throttle = gtReading.throttle
-  common.reducedGtState.brake = gtReading.brake
-  
-  common.reducedGtState.accel_x = gtReading.accel[1]
-  common.reducedGtState.accel_y = gtReading.accel[2]
-  -- accel_z = gtReading.accel[3]
-  -- Add torque estimates and more if needed
-  common.reducedGtState.rear_wheel_torque_est = gtReading.rear_wheel_torque_est or 0.0
-end
-
--- Manager-owned periodic sender of reduced gtState.
--- Intentionally does not clear cachedGtReading; it only refreshes it.
-local function managerSendReducedGtState(dt)
-  if not common.isRunning then return end
-  if common.gtStateSendRate <= 0 then return end
-  -- if not common.socketOut or not common.sendIp or not common.sendPort then return end
-
-  common.gtStateSendAccum = common.gtStateSendAccum + dt
-  if common.gtStateSendAccum < common.gtStateSendRate then return end
-  -- keep accumulator bounded, avoid spiral if dt is large
-  common.gtStateSendAccum = common.gtStateSendAccum - common.gtStateSendRate
-
-  -- Read latest gtState directly
-  if common.gtStateManager and common.gtStateSensorId then
-    local mgr = common.gtStateManager
-    packReducedGtState(mgr.geGtStateReading(common.gtStateSensorId))
-  else
-    return
-  end
-
-  local ok, js = pcall(jsonEncode, common.reducedGtState)
-  if not ok then
-    log('E', logTag, 'Reduced-gtState JSON encode error: ' .. tostring(js))
-    return
-  end
-
-  common.socketOut:sendto(js, common.sendIp, common.sendPort)
-end
-
-local function makeTorqueLookup(curve, vsMaxTorque)
-  -- collect & sort RPM keys
-  local rpms = {}
-  for k, _ in pairs(curve) do
-    if type(k) == 'number' then rpms[#rpms + 1] = k end
-  end
-  table.sort(rpms)
-
-  -- closure captures curve, rpms, vsMaxTorque
-  local function getMaxTorqueAtRPM(rpm)
-    if type(rpm) ~= 'number' or #rpms == 0 then return vsMaxTorque end
-    -- below range?
-    if rpm <= rpms[1] then return curve[rpms[1]] end
-    -- above range?
-    if rpm >= rpms[#rpms] then return curve[rpms[#rpms]] end
-    -- find bracket
-    local lo, hi
-    for i = 1, #rpms - 1 do
-      if rpm >= rpms[i] and rpm <= rpms[i + 1] then
-        lo, hi = rpms[i], rpms[i + 1]
-        break
-      end
-    end
-    -- interpolate
-    local Tlo, Thi = curve[lo], curve[hi]
-    local w = (rpm - lo) / (hi - lo)
-    return Tlo * (1 - w) + Thi * w
-  end
-
-  local function calculateThrottleFromTorque(reqT, rpm)
-    local maxT = getMaxTorqueAtRPM(rpm)
-    local r = reqT / (maxT + 1e-6)
-    return math.min(1, math.max(0, r))
-  end
-
-  return {
-    getMaxTorqueAtRPM = getMaxTorqueAtRPM,
-    calculateThrottleFromTorque = calculateThrottleFromTorque,
-  }
-end
-
--- Cache vehicle state via gtState or fallback
-local function updateVehicleAndCacheState()
-  local now = common.getSimTime()
-
-  -- pull from gtState if available, cache every 0.1 s
-  if common.gtStateManager and common.gtStateSensorId then
-    if not common.cachedGtReading or (now - common.lastGtReadingTime > 0.1) then
-      local mgr = common.gtStateManager
-      if mgr.geGtStateReading then
-        common.cachedGtReading = mgr.geGtStateReading(common.gtStateSensorId)
-      end
-      common.lastGtReadingTime = now
-      if not common.cachedGtReading then log('W', logTag, 'No reading from gtState sensor') end
-    end
-  end
-
-  return common.cachedGtReading
-end
-
-local function initVehicleStaticValues()
-  log('I', logTag, 'Starting static values init')
-  local vs = common.vehicleState
-
-  local e = powertrain.getDevice('mainEngine')
-  if e then
-    vs.maxRPM = e.maxRPM or 7000
-    vs.maxTorque = e.maxTorque or 500
-    if e.torqueData and e.torqueData.curves and e.torqueData.finalCurveName then
-      local name = e.torqueData.finalCurveName
-      vs.torqueCurve = e.torqueData.curves[name].torque
-    else
-      log('W', logTag, 'torque data unavailable')
-    end
-  else
-    log('W', logTag, 'main engine unavailable')
-  end
-
-  if wheels and wheels.wheels and wheels.wheels[0] then
-    vs.wheelRadius = wheels.wheels[0].radius or vs.wheelRadius
-  else
-    log('W', logTag, 'wheels data unavailable')
-  end
-
-  -- This gets steering column angle, not wheel angle
-  -- if hydros then
-  --   for _, h in pairs(hydros.hydros) do
-  --     --check if it's a steering hydro
-  --     if h.inputSource == 'steering_input' then
-  --       --if the value is present, scale the values
-  --       if h.steeringWheelLock then
-  --         vs.maxSteeringAngle = math.abs(h.steeringWheelLock) / 2
-  --         log('I', logTag, 'max steering angle = ' .. vs.maxSteeringAngle)
-  --         break
-  --       end
-  --     end
-  --   end
-  -- else
-  --   log('W', logTag, 'hydros unavailable')
-  -- end
-
-  if v and v.data and v.data.nodes then
-    local sum = 0
-    for _, n in pairs(v.data.nodes) do
-      if n.nodeWeight then sum = sum + n.nodeWeight end
-    end
-    if sum > 0 then
-      vs.mass = sum
-      log('I', logTag, 'Total vehicle mass = ' .. vs.mass)
-    end
-  else
-    log('W', logTag, 'v.data.nodes unavailable')
-  end
-end
-
-local function commonInit(data)
-  -- JSON encoder/decoder check
-  if not jsonEncode or not jsonDecode then
-    log('E', logTag, 'JSON encoder/decoder not initialized')
+local function refreshControlState()
+  if not common.gtStateManager or not common.gtStateSensorId then
+    common.controlStateOut.t = -1
     return false
   end
 
-  -- Reset performance metrics
-  for k, _ in pairs(common.performanceMetrics) do
-    common.performanceMetrics[k] = 0
-  end
-  common.performanceMetrics.latency = latency
-
-  common.getSimTime = function() return obj:getSimTime() end
-
-  -- If data is a packed string, decode it
-  if type(data) == 'string' then
-    local ok, decoded = pcall(function() return lpack.decode(data) end)
-    if not ok then
-      log('E', logTag, 'Failed to decode init data: ' .. tostring(decoded))
-      return false
-    end
-    data = decoded
-  end
-
-  -- Extract endpoints
-  common.listenIp = data.listenIp
-  common.listenPort = data.listenPort
-  common.sendIp = data.sendIp
-  common.sendPort = data.sendPort
-
-  -- Optional: manager-level reduced-gtState send rate (seconds)
-  -- If not provided, defaults to 0 (disabled).
-  common.gtStateSendRate = tonumber(data.gtStateSendRate) or 0
-  common.gtStateSendAccum = 0
-
-  -- Controller rate
-  common.controllerRate = data.controllerRate
-
-  -- Ensure gtStateSendRate is not smaller than controllerRate (if enabled)
-  if common.gtStateSendRate > 0 and common.gtStateSendRate < common.controllerRate then
-    log('W', logTag, 'gtStateSendRate (' .. common.gtStateSendRate .. ') is smaller than controllerRate (' .. common.controllerRate .. '), using controllerRate')
-    common.gtStateSendRate = common.controllerRate
-  end
-
-  -- init vehicle state
-  initVehicleStaticValues()
-
-  -- gtState sensor ID
-  common.gtStateSensorId = data.gtStateSensorId
-  if extensions.xlab_gtState then
-    common.gtStateManager = extensions.xlab_gtState
-  else
-    log('W', logTag, 'gtState extension not found')
-  end
-  common.updateGtReading = updateVehicleAndCacheState
-
-  -- Set up drivetrain transmission mode
-  if data.drivetrain then
-    local drtr = data.drivetrain
-    if drtr.mode then
-      -- shifterMode = 0 : realistic (manual)
-      -- shifterMode = 1 : realistic (manual autoclutch)
-      -- shifterMode = 2 : arcade
-      -- shifterMode = 3 : realistic (automatic)
-      drivetrain.setShifterMode(data.drivetrain.mode)
-      log('I', logTag, 'Set shifter mode to ' .. drtr.mode)
-    end
-    if drtr.startGear then
-      drivetrain.shiftToGear(drtr.startGear)
-      log('I', logTag, 'Set gear to ' .. drtr.startGear)
-    end
-    -- Disable all safety features if enabled
-    if drtr.disableSafety then
-      local safetyWhitelist = drtr.disableWhiteList or drtr.disableWhitelist
-      if extensions.xlab_xlabCore and extensions.xlab_xlabCore.stopSafetyFeatures then
-        extensions.xlab_xlabCore.stopSafetyFeatures(safetyWhitelist)
-        log('I', logTag, 'Disabled safety features')
-      else
-        log('W', logTag, 'xlabCore extension not found; cannot disable safety features')
-      end
-    end
-  end
-
-  -- Torque RPM lookup
-  common.torqueLookup =
-    makeTorqueLookup(common.vehicleState.torqueCurve, common.vehicleState.maxTorque)
-
-  -- Create & bind UDP sockets
-  common.socketIn = socket.udp()
-  local ok, err = common.socketIn:setsockname(common.listenIp, common.listenPort)
-  if not ok then
-    log('E', logTag, 'Failed to bind socketIn: ' .. tostring(err))
+  local gt = common.gtStateManager.geGtStateReading(common.gtStateSensorId)
+  if not gt or gt.time == nil then
+    common.controlStateOut.t = -1
     return false
   end
-  common.socketIn:settimeout(0)
-  log('D', logTag, 'Bound UDP receive socket on ' .. common.listenIp .. ':' .. common.listenPort)
+  if gt._seq == common.controlStateSeq then return true end
+  common.controlStateSeq = gt._seq
 
-  common.socketOut = socket.udp()
-  common.socketOut:settimeout(0)
+  local cs = common.controlStateOut
+  cs.t = gt.time
+  cs.x, cs.y, cs.z = gt.pos[1], gt.pos[2], gt.pos[3]
 
-  common.isRunning = true
-  log('I', logTag, 'Common init complete')
+  local q = cs.quat
+  q[1], q[2], q[3], q[4] = gt.quat[1], gt.quat[2], gt.quat[3], gt.quat[4]
+
+  cs.yaw = gt.yaw or 0
+  cs.pitch = gt.pitch or 0
+  cs.roll = gt.roll or 0
+  cs.Phi = gt.Phi or 0
+  cs.beta = gt.beta or 0
+  cs.vx, cs.vy, cs.vz, cs.V = gt.vel[1], gt.vel[2], gt.vel[3], gt.V or 0
+  cs.p, cs.q, cs.r = gt.angVel[1], gt.angVel[2], gt.angVel[3]
+  cs.accel_x, cs.accel_y, cs.accel_z = gt.accel[1], gt.accel[2], gt.accel[3]
+
+  local wfl, wfr = gt.wheelFL or {}, gt.wheelFR or {}
+  local wrl, wrr = gt.wheelRL or {}, gt.wheelRR or {}
+  cs.w_fl = wfl.speed or 0
+  cs.w_fr = wfr.speed or 0
+  cs.w_rl = wrl.speed or 0
+  cs.w_rr = wrr.speed or 0
+  cs.delta_l = wfl.angle or 0
+  cs.delta_r = wfr.angle or 0
+
+  cs.throttle = gt.throttle or 0
+  cs.brake = gt.brake or 0
+  cs.pbrake = gt.pbrake or 0
+  cs.gear_index = gt.gearIndex or 0
+  cs.gear_ratio = gt.gearRatio or 0
+  cs.we = (gt.RPM or 0) * common.constants.rpmToAV
+  cs.pb = gt.turboBoost or 0
+  cs.rear_wheel_torque_est = gt.rear_wheel_torque_est or 0
+  cs.torque_min = gt.torque_min or 0
+  cs.torque_max = gt.torque_max or 0
   return true
 end
 
--- BeamNG‐style entrypoint
-function M.init(data)
-  if not commonInit(data) then
-    log('E', logTag, 'Error during common init')
+local function sendControlState(dt)
+  if common.controlStateRate <= 0 then return end
+  if not common.socketOut or not common.controlStateSendIp or not common.controlStateSendPort then return end
+
+  common.controlStateSendAccum = common.controlStateSendAccum + dt
+  if common.controlStateSendAccum < common.controlStateRate then return end
+  common.controlStateSendAccum = common.controlStateSendAccum - common.controlStateRate
+
+  if common.controlStateOut.t < 0 then
+    log('W', logTag, 'control_state_send skipped: no gtState reading yet')
     return
   end
-
-  -- pick the controller implementation
-  local ctlType = data.controllerType
-  local path = 'vehicle.controller.xlab.controller_' .. ctlType
-  local ok, ctl = pcall(require, path)
-  if not ok then
-    log('E', logTag, "Could not load controller '" .. path .. "': " .. tostring(ctl))
-    return
-  end
-
-  activeController = ctl
-
-  -- Override any calibration params
-  if data.calibration then
-    M.calibrate(data.calibration)
-  else
-    log('W', logTag, 'No calibration data sent')
-  end
-  if activeController.init then activeController.init(common) end
+  common.socketOut:sendto(jsonEncode(common.controlStateOut), common.controlStateSendIp, common.controlStateSendPort)
 end
 
-function M.update(dt)
-  if not common.isRunning then return end
+-- ============================================================================
+-- §3  sensor_send — observation batches (sensor_broadcast in YAML)
+-- ============================================================================
 
-  -- Manager-owned reduced-gtState broadcaster (independent of controller)
-  managerSendReducedGtState(dt)
+local function fetchImuReading(sensorId)
+  if not sensorId then return nil end
+  if not extensions.tech_advancedIMU then extensions.load('tech/advancedIMU') end
+  local ext = extensions.tech_advancedIMU
+  if ext and ext.getLatest then return ext.getLatest(sensorId) end
+  return nil
+end
 
-  if activeController and activeController.update then
+local function fetchGpsReading(sensorId)
+  if not sensorId then return nil end
+  if not extensions.tech_GPS then extensions.load('tech/GPS') end
+  local ext = extensions.tech_GPS
+  if ext and ext.getLatest then return ext.getLatest(sensorId) end
+  return nil
+end
+
+local function packControlStateObservation(entry)
+  local cs = common.controlStateOut
+  if cs.t < 0 then return nil end
+  return {
+    sensor = 'control_state',
+    name = entry.name,
+    t = cs.t,
+    data = cs,
+  }
+end
+
+local function packImuObservation(entry)
+  if not entry.sensorId then return nil end
+  local reading = fetchImuReading(entry.sensorId)
+  if not reading or reading.time == nil then return nil end
+  return {
+    sensor = 'imu', name = entry.name, t = reading.time,
+    data = {
+      pos = reading.pos,
+      accel = reading.accSmooth or reading.accRaw,
+      gyro = reading.angVelSmooth or reading.angVel,
+      ang_accel = reading.angAccel,
+      dir_x = reading.dirX, dir_y = reading.dirY, dir_z = reading.dirZ,
+      mass = reading.mass,
+    },
+  }
+end
+
+local function packGpsObservation(entry)
+  if not entry.sensorId then return nil end
+  local reading = fetchGpsReading(entry.sensorId)
+  if not reading or reading.time == nil then return nil end
+  return {
+    sensor = 'gps', name = entry.name, t = reading.time,
+    data = { x = reading.x, y = reading.y, lon = reading.lon, lat = reading.lat },
+  }
+end
+
+local SENSOR_PACK_FN = {
+  control_state = packControlStateObservation,
+  imu = packImuObservation,
+  gps = packGpsObservation,
+}
+
+local function initSensorBroadcast(data)
+  common.sensorBroadcastList = {}
+  local cfg = data.sensor_broadcast
+  if type(cfg) ~= 'table' then return end
+
+  for name, entry in pairs(cfg) do
+    if type(entry) == 'table' then
+      local sensorType = entry.sensor
+      local packFn = sensorType and SENSOR_PACK_FN[sensorType]
+      if not packFn then
+        log('E', logTag, string.format(
+          'sensor_broadcast %s: unknown or missing sensor type %s',
+          name, tostring(sensorType)
+        ))
+      else
+        common.sensorBroadcastList[#common.sensorBroadcastList + 1] = {
+          name = name,
+          sensor = sensorType,
+          rate = tonumber(entry.rate) or 0.05,
+          accum = 0,
+          sensorId = entry.sensorId,
+          packFn = packFn,
+        }
+        local e = common.sensorBroadcastList[#common.sensorBroadcastList]
+        log('I', logTag, string.format(
+          'sensor_broadcast %s: type=%s id=%s rate=%.4fs',
+          name, e.sensor, tostring(e.sensorId), e.rate
+        ))
+      end
+    end
+  end
+
+  common.sensorBatchOut = common.sensorBatchOut or { sent_t = 0 }
+end
+
+local function sendSensorObservations(dt)
+  if not common.sensorSocketOut or not common.sensorBroadcastList then return end
+
+  local list = common.sensorBroadcastList
+  local anyDue = false
+  for i = 1, #list do
+    list[i].accum = list[i].accum + dt
+    if list[i].accum >= list[i].rate then anyDue = true; break end
+  end
+  if not anyDue then return end
+
+  local batch = common.sensorBatchOut
+  for i = 1, #list do batch[list[i].name] = nil end
+  batch.sent_t = common.getSimTime()
+
+  local count = 0
+  for i = 1, #list do
+    local entry = list[i]
+    if entry.accum >= entry.rate then
+      entry.accum = entry.accum - entry.rate
+      local payload = entry.packFn(entry)
+      if payload then
+        batch[entry.name] = payload
+        count = count + 1
+      else
+        log('W', logTag, 'sensor_send skipped for ' .. entry.name .. ': no reading yet')
+      end
+    end
+  end
+  if count == 0 then return end
+
+  common.sensorSocketOut:sendto(jsonEncode(batch), common.sensorSendIp, common.sensorSendPort)
+end
+
+-- ============================================================================
+-- §5  control_listen — drain recv-last, route by envelope.type
+-- ============================================================================
+
+local function drainControlListen()
+  if not common.socketIn then return nil end
+  local lastMsg, err
+  repeat
+    local msg, _, _, recvErr = common.socketIn:receivefrom()
+    err = recvErr
+    if msg and #msg > 0 then lastMsg = msg end
+  until not msg and (not err or err == 'timeout')
+  if err and err ~= 'timeout' then
+    log('E', logTag, 'control_listen error: ' .. tostring(err))
+  end
+  return lastMsg
+end
+
+local function routeIncomingMessage(msg)
+  if not msg or msg == '' then return end
+
+  local envelope = jsonDecode(msg)
+  if type(envelope) ~= 'table' then
+    log('W', logTag, 'Ignoring non-table control_listen payload')
+    return
+  end
+
+  local msgType = envelope.type
+  if msgType == 'tune' then
+    local payload = envelope.data or {}
+    local tuneOk = true
+    if activeFeedback and activeFeedback.onTune and type(payload.feedback_gains) == 'table' then
+      tuneOk = activeFeedback.onTune({ feedback_gains = payload.feedback_gains }) ~= false
+    end
+    if activeController and activeController.onTune then
+      tuneOk = activeController.onTune(payload) ~= false and tuneOk
+    else
+      M.calibrate(payload)
+    end
+    if not tuneOk then log('W', logTag, 'Tune rejected') end
+    return
+  end
+
+  if msgType == 'bypass' then
+    M.toggleBypass(envelope.data and envelope.data.enabled == true)
+    return
+  end
+
+  if msgType == 'reset' then
+    M.reset()
+    return
+  end
+
+  if msgType == 'cmd' then
+    if type(envelope.data) == 'table' and activeController and activeController.onCommand then
+      activeController.onCommand(envelope.data)
+    end
+    return
+  end
+
+  log('W', logTag, 'Ignoring unknown control_listen message type: ' .. tostring(msgType))
+end
+
+-- ============================================================================
+-- §6  Actuation tick — plugin + optional feedback (FEEDBACK_CONTRACT.md)
+-- ============================================================================
+
+local function runActuationTick(dt)
+  if not activeController then return end
+
+  if activeFeedback then
+    local ctl = activeController
+    if not (ctl.prepareControlStep and ctl.resolveSetpoints and ctl.applySetpoints) then
+      error(logTag .. ': feedback requires actuation plugin split API')
+    end
+
+    local step = ctl.prepareControlStep(dt, common)
+    if not step then return end
+
+    local resolved = ctl.resolveSetpoints(step.plant)
+    local sp_eff = activeFeedback.transform({
+      sim_t = common.getSimTime(),
+      dt = step.dt_control,
+      plant = step.plant,
+      resolved = resolved,
+      raw = ctl.getRawTargets and ctl.getRawTargets() or nil,
+    })
+    if type(sp_eff) ~= 'table' then sp_eff = resolved end
+
+    ctl.applySetpoints(step.plant, sp_eff, step.dt_control, step)
+    if ctl.finishControlStep then ctl.finishControlStep(common, step) end
+    return
+  end
+
+  if activeController.update then
     activeController.update(dt, common)
   end
 end
 
-function M.toggleBypass(bypassActive)
-  if type(bypassActive) == 'boolean' then
-    common.isBypassed = bypassActive
-    log('I', logTag, 'Controller bypass toggled to: ' .. tostring(common.isBypassed))
-  else
-    log('W', logTag, 'toggleBypass called with non-boolean value: ' .. tostring(bypassActive))
+-- ============================================================================
+-- §7  Init
+-- ============================================================================
+
+local function applyDrivetrainConfig(drtr)
+  if type(drtr) ~= 'table' then return end
+  if drtr.mode then
+    drivetrain.setShifterMode(drtr.mode)
+    log('I', logTag, 'drivetrain mode=' .. drtr.mode)
+  end
+  if drtr.startGear then
+    drivetrain.shiftToGear(drtr.startGear)
+    log('I', logTag, 'drivetrain startGear=' .. drtr.startGear)
+  end
+  if drtr.disableSafety and extensions.xlab_xlabCore then
+    extensions.xlab_xlabCore.stopSafetyFeatures(drtr.disableWhiteList or drtr.disableWhitelist)
+    log('I', logTag, 'drivetrain safety disabled')
+  end
+end
+
+local function commonInit(data)
+  if not jsonEncode or not jsonDecode then
+    log('E', logTag, 'JSON encoder/decoder not initialized')
+    return false
+  end
+  if type(data) == 'string' then data = lpack.decode(data) end
+
+  for k, _ in pairs(common.performanceMetrics) do common.performanceMetrics[k] = 0 end
+  common.performanceMetrics.latency = latency
+  common.getSimTime = function() return obj:getSimTime() end
+
+  -- I/O (sim_manager injects control_listen / control_state_send / sensor_send)
+  common.controlListenIp = data.control_listen_ip
+  common.controlListenPort = data.control_listen
+  common.controlStateSendIp = data.control_state_send_ip
+  common.controlStateSendPort = data.control_state_send
+  common.sensorSendIp = data.sensor_send_ip
+  common.sensorSendPort = data.sensor_send
+
+  if not common.controlListenIp or not common.controlListenPort then
+    log('E', logTag, 'Missing control_listen_ip / control_listen')
+    return false
+  end
+  if not common.controlStateSendIp or not common.controlStateSendPort then
+    log('E', logTag, 'Missing control_state_send_ip / control_state_send')
+    return false
+  end
+
+  common.controlStateRate = tonumber(data.controlStateRate) or 0
+  common.controlStateSendAccum = 0
+  common.controlStateSeq = nil
+  common.controlStateOut.t = -1
+  common.controllerRate = data.controllerRate
+  if common.controlStateRate > 0 and common.controlStateRate < common.controllerRate then
+    common.controlStateRate = common.controllerRate
+  end
+
+  common.gtStateSensorId = data.gtStateSensorId
+  common.torqueMapPath = data.torqueMapPath
+  common.gtStateManager = extensions.xlab_gtState
+
+  applyDrivetrainConfig(data.drivetrain)
+  initSensorBroadcast(data)
+
+  common.socketIn = socket.udp()
+  local ok, err = common.socketIn:setsockname(common.controlListenIp, common.controlListenPort)
+  if not ok then
+    log('E', logTag, 'Failed to bind control_listen: ' .. tostring(err))
+    return false
+  end
+  common.socketIn:settimeout(0)
+  common.socketOut = socket.udp()
+  common.socketOut:settimeout(0)
+
+  if common.sensorSendPort and common.sensorBroadcastList and #common.sensorBroadcastList > 0 then
+    common.sensorSocketOut = socket.udp()
+    common.sensorSocketOut:settimeout(0)
+  end
+
+  log('I', logTag, string.format(
+    'I/O listen=%s:%s control_state_send->%s:%s sensor_send->%s:%s (%d streams)',
+    common.controlListenIp, common.controlListenPort,
+    common.controlStateSendIp, common.controlStateSendPort,
+    common.sensorSendIp, common.sensorSendPort,
+    common.sensorBroadcastList and #common.sensorBroadcastList or 0
+  ))
+
+  common.isRunning = true
+  return true
+end
+
+-- ============================================================================
+-- §8  Public API
+-- ============================================================================
+
+function M.init(data)
+  if not commonInit(data) then return end
+
+  activeControllerType = data.controllerType
+  activeController = require('vehicle.controller.xlab.controller_' .. activeControllerType)
+
+  if data.calibration then M.calibrate(data.calibration) end
+  if activeController.init then activeController.init(common) end
+
+  -- Optional feedback plugin (fail-fast require; see FEEDBACK_CONTRACT.md)
+  activeFeedback = nil
+  activeFeedbackStem = nil
+  local stem = data.feedback
+  if stem and stem ~= '' and stem ~= 'none' then
+    activeFeedbackStem = tostring(stem)
+    activeFeedback = require('vehicle.controller.xlab.feedback_' .. activeFeedbackStem)
+    if activeFeedback.init then
+      activeFeedback.init(common, {
+        stem = activeFeedbackStem,
+        gains = type(data.feedback_gains) == 'table' and data.feedback_gains or {},
+      })
+    end
+    log('I', logTag, "feedback='" .. activeFeedbackStem .. "'")
+  end
+end
+
+function M.update(dt)
+  if not common.isRunning then return end
+  local lastMsg = drainControlListen()
+  if lastMsg then routeIncomingMessage(lastMsg) end
+  refreshControlState()
+  sendControlState(dt)
+  sendSensorObservations(dt)
+  runActuationTick(dt)
+end
+
+function M.toggleBypass(enabled)
+  if type(enabled) == 'boolean' then
+    common.isBypassed = enabled
+    log('I', logTag, 'bypass=' .. tostring(enabled))
   end
 end
 
 function M.stop()
-  if common.isRunning then
-    common.isRunning = false
-    if common.socketIn then common.socketIn:close() end
-    if common.socketOut then common.socketOut:close() end
-    if activeController and activeController.stop then activeController.stop(common) end
-    log('I', logTag, 'Controller stopped')
-  end
+  if not common.isRunning then return end
+  common.isRunning = false
+  if common.socketIn then common.socketIn:close() end
+  if common.socketOut then common.socketOut:close() end
+  if common.sensorSocketOut then common.sensorSocketOut:close() end
+  if activeController and activeController.stop then activeController.stop(common) end
+  if activeFeedback and activeFeedback.stop then activeFeedback.stop() end
+  activeFeedback, activeFeedbackStem = nil, nil
 end
 
 function M.setGtStateSensor(id)
   common.gtStateSensorId = id
-  if activeController and activeController.setGtStateSensor then
-    activeController.setGtStateSensor(id, common)
-  end
 end
 
 function M.calibrate(params)
+  if type(params) == 'table' and activeFeedback and activeFeedback.onTune
+      and type(params.feedback_gains) == 'table' then
+    activeFeedback.onTune({ feedback_gains = params.feedback_gains })
+  end
   if activeController and activeController.calibrate then
     activeController.calibrate(params)
-  else
-    log('W', logTag, 'No controller found for calibration')
   end
 end
 
 function M.reset()
+  if activeFeedback and activeFeedback.reset then activeFeedback.reset() end
   if activeController and activeController.reset then activeController.reset(common) end
 end
 
@@ -516,7 +574,7 @@ function M.getStatus()
   if activeController and activeController.getStatus then
     return activeController.getStatus(common)
   end
-  return { isRunning = false }
+  return { isRunning = common.isRunning }
 end
 
 return M

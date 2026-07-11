@@ -43,7 +43,7 @@ class SimulationRequestHandler:
         Returns:
             dict: {"success": bool}
         """
-        from bng_simulator.utils.math_op import process_euler_to_quat
+        from bng_simulator.utils.math_op import apply_xlab_yaw_to_beamng, process_euler_to_quat
         
         if vehicle_name is None:
             vehicle_name = self._sim.default_vehicle_name
@@ -58,7 +58,8 @@ class SimulationRequestHandler:
         if rot_quat is None:
             rot_quat = spawn_args.get("rot_quat", [0, 0, 0, 1.0])
             
-        # Convert euler angles to quaternion if provided using utility function
+        # yaw_angle in kwargs is xlab frame; convert before quaternion.
+        apply_xlab_yaw_to_beamng(kwargs, vehicle_manager.yaw_offset_deg)
         process_euler_to_quat(kwargs, deg_to_rad_factor=self._PI / 180)
         if "rot_quat" in kwargs:
             rot_quat = kwargs["rot_quat"]

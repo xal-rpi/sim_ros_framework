@@ -1,42 +1,18 @@
 --- Ground Truth State Module
--- Handles ground truth state sensors and differential status for vehicles
+-- Handles ground truth state sensors and GE poll handoff for vehicles.
+-- driveStatus is sampled from electrics in the gtState controller physics step.
 local logTag = 'GtState'
 local M = {}
 
 -- Module state variables
 local gtStates = {} -- Collection of active Groundtruth state sensors
-local latestReadings = {} -- Latest sensor readings
+local latestReadings = {} -- Latest sensor readings (manager live path)
 local sensorPollTimers = {} -- Timers to track time since last poll for each sensor
-local is4WDVehicle = false -- 4WD status flag
-local frontDiff = nil -- Front differential device
-local rearDiff = nil -- Rear differential device
-local driveModeStatus = {} -- Drive mode status values
-
---- Gets the current drive mode status
--- @return table containing drive mode status values
-local function getDriveModeStatus() return driveModeStatus end
-
---- Updates the drive mode status
-local function updateDriveModeStatus()
-  local elecVals = electrics.values
-  driveModeStatus.esc = elecVals.esc
-  driveModeStatus.abs = elecVals.abs
-  driveModeStatus.tcs = elecVals.tcs
-  driveModeStatus.engineRunning = elecVals.engineRunning
-  driveModeStatus.isRealisticDrive = elecVals.gearboxMode == 'realistic' and 1 or 0
-  if is4WDVehicle then
-    driveModeStatus.mode4WD = elecVals.mode4WD
-    driveModeStatus.modeRangeBox = elecVals.modeRangeBox
-  end
-  if frontDiff then driveModeStatus.isFrontDiffLocked = frontDiff.mode == 'locked' and 1 or 0 end
-  if rearDiff then driveModeStatus.isRearDiffLocked = rearDiff.mode == 'locked' and 1 or 0 end
-end
 
 --- Updates ground truth state graphics step
 -- @param dtSim Simulation delta time
 -- @param sensorId ID of the sensor to update
 local function updateGtStateGFXStep(dtSim, sensorId)
-
   local state = gtStates[sensorId]
   if not state then return end
 
@@ -66,50 +42,6 @@ local function updateGtStateGFXStep(dtSim, sensorId)
   if state.data.isVisualised == true then
     obj.debugDrawProxy:drawSphere(0.05, sensorData.currentPos, color(0, 255, 0, 255))
   end
-
-end
-
---- Sets up and configures the vehicle's differentials
--- Extracts and validates front and rear differential devices
--- Logs differential status and availability of modes
-local function setupDifferentials()
-  -- Extract the front and rear diffs, if the vehicle is a 4WD vehicle.
-  frontDiff = powertrain.getDevice('differential_F')
-  rearDiff = powertrain.getDevice('differential_R')
-  if frontDiff == nil then
-    log('I', logTag, 'No front differential found.')
-  else
-    local modesFDiff = frontDiff.availableModes
-    if #modesFDiff <= 1 then
-      log('I', logTag, 'No ability to toggle front differential state.')
-      frontDiff = nil
-    end
-  end
-  if rearDiff == nil then
-    log('I', logTag, 'No rear differential found.')
-  else
-    local modesRDiff = rearDiff.availableModes
-    if #modesRDiff <= 1 then
-      log('I', logTag, 'No ability to toggle rear differential state.')
-      rearDiff = nil
-    end
-  end
-end
-
---[[
-    Sets up the vehicle as a 4WD vehicle.
-    If the vehicle is a 4WD vehicle, then set the flag to true.
-]]
-local function setup4WDVehicle()
-  -- If the vehicle is a 4WD vehicle, then set the flag to true.
-  local ctrl4wds = controller.getControllersByType('4wd')
-  if #ctrl4wds == 0 then
-    log('I', logTag, 'No 4wd controller found.')
-    is4WDVehicle = false
-  else
-    log('I', logTag, '4wd controller found.')
-    is4WDVehicle = true
-  end
 end
 
 --- Creates a new ground truth state sensor
@@ -133,14 +65,12 @@ local function create(data)
     triangleSpaceForward = decodedData.triangleSpaceForward,
     triangleSpaceLeft = decodedData.triangleSpaceLeft,
     isVisualised = decodedData.isVisualised,
-    isUsingGravity = decodedData.isUsingGravity,
     accel_tau_s = decodedData.accel_tau_s,
     gyro_tau_s = decodedData.gyro_tau_s,
     vel_tau_s = decodedData.vel_tau_s,
     wheel_angvel_tau_s = decodedData.wheel_angvel_tau_s,
-    kf_predict_gain = decodedData.kf_predict_gain,
     debug_raw = decodedData.debug_raw,
-    torqueNN = decodedData.torqueNN,
+    torque_map = decodedData.torque_map,
   }
 
   gtStates[decodedData.sensorId] = {
@@ -159,10 +89,6 @@ local function create(data)
   log('I', logTag, 'Creating GtState sensor with ID: ' .. tostring(decodedData.sensorId))
   log('I', logTag, 'Vehicle ID: ' .. tostring(objectId))
   log('I', logTag, 'numPhysicsStepsForGFXSave: ' .. tostring(controllerData.numPhysicsStepsForGFXSave))
-
-  setup4WDVehicle()
-  setupDifferentials()
-  updateDriveModeStatus()
 end
 
 --- Caches the latest sensor reading
@@ -193,8 +119,6 @@ local function getLatest(sensorId) return gtStates[sensorId].controller.getLates
 --- Updates ground truth state graphics
 -- @param dtSim Simulation delta time
 local function updateGFX(dtSim)
-  -- If the vehicle is a 4WD vehicle, check the front and rear diffs for lockup.
-  updateDriveModeStatus()
   for sensorId, _ in pairs(gtStates) do
     updateGtStateGFXStep(dtSim, sensorId)
   end
@@ -228,9 +152,7 @@ M.geGtStateReading = geGtStateReading
 M.getLatest = getLatest
 M.updateGFX = updateGFX
 M.onVehicleDestroyed = onVehicleDestroyed
-M.getDriveModeStatus = getDriveModeStatus
 M.getGtStateController = getGtStateController
 
 return M
-
 

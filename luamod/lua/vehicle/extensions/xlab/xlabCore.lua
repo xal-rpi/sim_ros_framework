@@ -8,16 +8,6 @@
 local M = {}
 local logTag = 'XalVE'
 
--- local min = math.min
--- local acos = math.acos
--- local sqrt = math.sqrt
-
---[[
-    Check if a table contains a specific value
-    @param table: table - Table to search
-    @param value: any - Value to search for
-    @return: boolean - Whether the value is found in the table
-]]
 local function table_contains(tbl, element)
   for _, value in pairs(tbl) do
     if value == element then return true end
