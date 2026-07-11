@@ -1,0 +1,12 @@
+# Attach to a running BeamNG session (freeroam or scenario).
+#
+# Launch:
+#   ros2 launch bng_bringup simulator.launch.py config:=attach.yaml
+#
+# Multi attach (rare): list in-game vehicle ids under compose.vehicles.
+
+compose:
+  profile: attach
+  vehicle_id: thePlayer
+
+scenario_mode: attach

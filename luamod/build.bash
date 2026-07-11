@@ -10,8 +10,8 @@ set -euo pipefail
 # ## Features
 
 # - Automatically detects Git root and validates mod directory
-# - Selects tracked or all model files based on flags
-# - Compiles native or Windows DLL for neural net utilities
+# - Selects tracked or all Lua/JSON mod sources based on --lua flag
+# - Compiles export-c torque map libs from lib/policies/*.c
 # - Preserves file paths inside the zip
 # - Outputs to BeamNG mod directory
 
@@ -30,7 +30,7 @@ cd "${GIT_ROOT}/luamod"
 
 # Default build target
 PLATFORM="linux"
-MODEL_MODE="tracked"
+LUA_MODE="tracked"
 
 # Optional platform override
 for arg in "$@"; do
@@ -41,11 +41,11 @@ for arg in "$@"; do
     --platform=linux|--linux)
       PLATFORM="linux"
       ;;
-    --models=all|--all)
-      MODEL_MODE="all"
+    --lua=all|--all)
+      LUA_MODE="all"
       ;;
-    --models=tracked|--tracked)
-      MODEL_MODE="tracked"
+    --lua=tracked|--tracked)
+      LUA_MODE="tracked"
       ;;
     *)
       echo "Unknown option: $arg"
@@ -56,7 +56,7 @@ done
 
 # Print platform
 echo "Building for platform: $PLATFORM"
-echo "Including models mode: $MODEL_MODE"
+echo "Including Lua sources: $LUA_MODE"
 
 # Set default mod directory (Linux)
 MOD_DIR="${HOME}/.local/share/BeamNG.drive/0.35/mods"
@@ -88,12 +88,12 @@ mkdir -p "$(dirname "$MOD_DIR")"
 # remove any existing zip
 rm -f "$MOD_ZIP"
 
-# list of globs or paths you want in the mod
-declare -a WANT="*.lua"
-if [[ "$MODEL_MODE" == "tracked" ]]; then
+# Collect Lua + JSON sources (tracked = git index only; all = every file on disk)
+declare -a WANT=( '*.lua' 'lua/**/*.json' )
+if [[ "$LUA_MODE" == "tracked" ]]; then
   mapfile -t FILES < <(git ls-files "${WANT[@]}")
 else
-  mapfile -t FILES < <(find . -type f \( -name "${WANT[0]}" \))
+  mapfile -t FILES < <(find . -type f \( -name '*.lua' -o -name '*.json' \))
 fi
 
 # if nothing to do, exit
@@ -102,35 +102,27 @@ if [ ${#FILES[@]} -eq 0 ]; then
   exit 1
 fi
 
-# Compile nn util
-NN_DIR="./lua/vehicle/controller/xlab/lib"
-cc -O3 -fPIC -shared -o ${NN_DIR}/libnn.so ${NN_DIR}/nn.c -lm
-if [[ "$PLATFORM" == "windows" ]]; then
-  if ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
+# Compile export-c torque map libs (lib/<stem>.{so,dll} from policies/<stem>.{c,h})
+LIB_DIR="./lua/vehicle/controller/xlab/lib"
+POLICY_DIR="${LIB_DIR}/policies"
+if [[ -d "$POLICY_DIR" ]]; then
+  if [[ "$PLATFORM" == "windows" ]] && ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
     echo "❌ Error: MinGW toolchain not found. Please install x86_64-w64-mingw32-gcc." >&2
     exit 1
   fi
-  # TODO: This assumes you have the MinGW toolchain installed on WSL. Better Alternative?
-  x86_64-w64-mingw32-gcc -D_WIN32 -O3 -shared -o "${NN_DIR}/libnn.dll" "${NN_DIR}/nn.c" -lm
-  FILES+=( "${NN_DIR}/libnn.dll" )
-else
-  # For Linux, use the native compiler
-  cc -O3 -fPIC -shared -o "${NN_DIR}/libnn.so" "${NN_DIR}/nn.c" -lm
-  FILES+=( "${NN_DIR}/libnn.so" )
-fi
-
-# Add actions
-MODELS_DIR="./lua/ge/extensions/core/input/actions"
-FILES+=( "${MODELS_DIR}/bypass_controller.json" )
-
-# Add models
-MODELS_DIR="./lua/vehicle/controller/xlab/models"
-if [[ "$MODEL_MODE" == "tracked" ]]; then
-  mapfile -t TRACKED_MODELS < <(git ls-files "$MODELS_DIR" | grep '\.json$')
-  FILES+=( "${TRACKED_MODELS[@]}" )
-else
-  mapfile -t ALL_MODELS < <(find "$MODELS_DIR" -type f -name "*.json")
-  FILES+=( "${ALL_MODELS[@]}" )
+  for src in "$POLICY_DIR"/*.c; do
+    [[ -f "$src" ]] || continue
+    stem="$(basename "$src" .c)"
+    if [[ "$PLATFORM" == "windows" ]]; then
+      out_dll="${LIB_DIR}/${stem}.dll"
+      x86_64-w64-mingw32-gcc -D_WIN32 -O3 -shared -I"${POLICY_DIR}" -o "$out_dll" "$src" -lm
+      FILES+=( "$out_dll" )
+    else
+      out_so="${LIB_DIR}/${stem}.so"
+      cc -O3 -fPIC -shared -I"${POLICY_DIR}" -o "$out_so" "$src" -lm
+      FILES+=( "$out_so" )
+    fi
+  done
 fi
 
 # zip them preserving paths

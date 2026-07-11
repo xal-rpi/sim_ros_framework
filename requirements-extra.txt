@@ -1,0 +1,9 @@
+# Optional — notebooks, plotting, MPC/dev tools (not required for launch or logging).
+scipy
+matplotlib
+PySide6
+pyqtgraph
+casadi
+empy
+catkin_pkg
+lark-parser

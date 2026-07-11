@@ -1,0 +1,111 @@
+# =============================================================================
+# Golden-path LLC stack (CREATE mode + sensor_dispatcher UDP bridge).
+# =============================================================================
+#
+# See defaults/udp_io.yaml for per-vehicle UDP port assignment.
+# Vehicle catalog may override: steering_to_input, torque_map, gains, drivetrain.
+
+sensors:
+  # beamngpy BasicState — lightweight pose snapshot (GE poll / attach).
+  basicState:
+    type: BasicState
+
+  # xlab GtState — full estimated state for control / logging.
+  gtstate:
+    type: GtState
+    gfx_update_time: 0.3          # [s] graphics-side save rate
+    physics_update_time: 0.005    # [s] physics-side filter step
+    num_physics_steps_for_gfx_save: 1
+    accel_tau_s: 0.04             # low-pass time constant on linear accel
+    gyro_tau_s: 0.005
+    vel_tau_s: 0.005
+    wheel_angvel_tau_s: 0.005
+    debug_raw: true               # log raw vs filtered in Lua (verbose)
+
+  # AdvancedIMU mounted on roof; dir/up define sensor frame vs body.
+  roof_imu:
+    type: AdvancedIMU
+    gfx_update_time: 0.3
+    physics_update_time: 0.01
+    is_using_gravity: true
+    is_visualised: true
+    is_dir_world_space: false
+    dir: [0, -1, 0]               # sensor x-axis in body frame
+    up: [1, 0, 0]                  # sensor y-axis (RH rule with dir)
+    pos: [0, 0, 1.0]               # [m] offset from vehicle origin
+
+controllers:
+  LowLevelController:
+    controllerType: llc            # xlab low-level controller (Lua controller_llc)
+
+    controllerRate: 0.01           # [s] main control period (100 Hz)
+    controlStateRate: 0.01         # [s] control_state_send + broadcast rate
+    feedback: passthrough          # feedback plugin: passthrough | none
+    gtStateName: gtstate           # vehicle.sensors key for ground-truth estimator
+    # UDP observation streams (sensor_dispatcher BINDs sensor_send).
+    sensor_broadcast:
+      control_state:
+        sensor: control_state      # live controlStateOut (no source/sensorId)
+        rate: 0.01                 # [s] batch period
+      roof_imu:
+        sensor: imu                # converter type on wire
+        source: roof_imu           # vehicle.sensors key; sensorId injected
+        rate: 0.05
+
+    # BeamNG shifter + safety — applied once at LLC open (controller_manager.lua).
+    drivetrain:
+      # Shifter mode passed to drivetrain.setShifterMode():
+      #   0 realistic | 1 realistic autoclutch | 2 arcade | 3 realistic automatic
+      mode: 0
+      # Initial gear index. CVT/UTV: 0=N, 1=P, 2=D (see vehicle gearbox in export YAML).
+      startGear: 2
+      # When true, calls xlab stopSafetyFeatures() — disables ABS/ESC and unloads
+      # drivingDynamics/* controllers EXCEPT entries listed in disableWhitelist.
+      #
+      # How to find controller names / typeNames to whitelist or expect removed:
+      #   1. ATTACH with config:=attach.yaml, then export vehicle YAML — the generated
+      #      config/vehicles/<vehicle>.yaml lists every controller module under
+      #      ``controllers:`` (instance name → typeName path).
+      #   2. Or query at runtime after attach: execute_request get_controller_infos
+      #      (maps active controller name → type string).
+      # Whitelist entries KEEP modules during safety teardown; everything else under
+      # drivingDynamics/* is shut down. Keys are usually instance names from that list.
+      disableSafety: false
+      # Dense example — keep sensor hub + vehicle data in disableWhitelist:
+      # disableWhitelist:
+      #   drivingDynamics/sensors/sensorHub: drivingDynamics/sensors/sensorHub
+      #   electronicSplitShaftLock: drivingDynamics/actuators/electronicSplitShaftLock
+      #   motorTorqueControl: drivingDynamics/supervisors/components/motorTorqueControl
+      #   sensors: drivingDynamics/sensors/virtualSensors
+      #   vehicleData: drivingDynamics/sensors/vehicleData
+      #   # drivingDynamics/supervisors/slipProviders/virtualSpeedSlip: drivingDynamics/supervisors/slipProviders/virtualSpeedSlip
+      #   # drivingDynamics/supervisors/yawProviders/STMEstimate: drivingDynamics/supervisors/yawProviders/STMEstimate
+
+    calibration:
+      # true → mode/setpoint transition logs + periodic PI dump (every 4 sim s)
+      verbose: true
+      # torque_map: <stem>  — injected from vehicle_catalog when available.
+      # Trajectory setpoint pick along projected path:
+      #   next | lerp | closest
+      trajectory_pick: next
+      # LLC authority gating for scalar commands:
+      #   full | steering_only | torque_only
+      control_mode: full
+      # [s] no command → LLC releases to manual control
+      command_timeout: 3.0
+      gains:
+        # Rear wheel-speed PI (needs torque_map for actuation).
+        pi_enable: 1.0             # 0 = feedforward / throttle_override only
+        kp: 4027.676261566621
+        ki: 12.951175253199954
+        i_min: -500.0              # anti-windup on integral state [N·m·s]
+        i_max: 500.0
+        t_min: -100.0              # clamp on PI term [N·m], not total tCmd
+        t_max: 100.0
+        u_smooth: 0.05               # throttle FF low-pass (0..0.99)
+        du_max: 0.3                  # max throttle step per REF_DT
+        # Steering PI on roadwheel angle [rad] → steering_input.
+        steer_pi_enable: 0.0         # 0 = open-loop steer_des_rad only
+        steer_kp: 0.01
+        steer_ki: 0.1
+        # steering_to_input injected from vehicle_catalog (rad per input unit).

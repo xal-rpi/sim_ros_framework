@@ -1,249 +1,246 @@
-# BeamNG-ROS2 Bridge: Autonomous Vehicle Simulation Framework
+# xlab — BeamNG ↔ ROS2 research framework
 
-A comprehensive framework connecting ROS2 with the BeamNG vehicle simulator, enabling high-fidelity physics-based simulation for autonomous driving research and development.
+High-fidelity vehicle simulation (BeamNG.tech) with a **compose-based** config stack, per-vehicle UDP I/O, and a thin ROS bridge for observations and low-level control.
 
-## Features
+## Quick start
 
-- **High-fidelity vehicle simulation** with BeamNG's realistic physics engine
-- **Advanced sensor suite** including ground truth state, IMU, GPS, and more
-- **Dual-level controller architecture** (high-level and low-level)
-- **ROS2 integration** with custom messages, services, and publishers
-- **YAML-based configuration** for easy scenario and vehicle setup
-- **Interactive shell** for real-time simulation control
-- **Data logging and replay** capabilities for experiment analysis
-
-## System Architecture
-
-![System architecture](./figures/all_flow_chart.png)
-
-The system consists of these key components:
-
-| Component | Description |
-|-----------|-------------|
-| **SimulationManager** | Core component managing BeamNG instances, scenarios, and vehicles. Part of `bng_simulator`. |
-| **VehicleManager** | Handles individual vehicles and their configurations. Part of `bng_simulator`. |
-| **Sensors** | Various sensor types for vehicle state and environment perception. Configured in `bng_simulator`, data often published via `bng_msgs`. |
-| **Controllers** | Both low-level actuator control (via `luamod`) and high-level decision making (e.g., `bng_controller`). |
-| **ROS2 Interface** | Bridge between simulation and ROS2 ecosystem, primarily managed by `bng_simulator` using `bng_msgs`. |
-
-## Package Overview
-
-This framework is organized into several key modules:
-
-*   **`luamod/`**: Contains low-level Lua modifications for the BeamNG.tech simulator. These mods are essential for enabling custom interactions, sensor data extraction, and advanced vehicle control capabilities directly within the simulation environment.
-    *   [Details in `luamod/README.md`](luamod/README.md)
-*   **`bng_simulator`**: The core ROS 2 package responsible for launching, managing, and interacting with BeamNG.tech simulation instances. It handles scenario definitions, vehicle spawning, and the primary bridge to ROS 2.
-    *   [Details in `src/bng_xal/bng_simulator/README.md`](src/bng_xal/bng_simulator/README.md)
-*   **`bng_msgs`**: This ROS 2 package defines the custom messages and services necessary for communication between various ROS 2 nodes and the BeamNG.tech simulation. It provides the data structures for exchanging information like vehicle state, sensor readings, and control commands.
-    *   [Details in `src/bng_xal/bng_msgs/README.md`](src/bng_xal/bng_msgs/README.md)
-*   **`bng_controller`**: A ROS 2 package that provides high-level control algorithms for vehicles within the BeamNG.tech simulation. It typically subscribes to vehicle state and sensor information (via `bng_msgs`) and publishes control commands.
-    *   [Details in `src/bng_xal/bng_controller/README.md`](src/bng_xal/bng_controller/README.md)
-
-## Prerequisites
-
-Without Nix:
-- ROS2 (Humble or newer)
-- BeamNG.tech simulator
-- Python 3.8+
-- Operating System:
-  - Windows with WSL2, or
-  - Ubuntu 24.04 LTS (beta support for BeamNG.tech)
-
-With Nix:
-- Working Nix installation
-- Flakes enabled
-
-## Installation
-
-> [!NOTE]
-> Step 2 assumes you have a working ROS2 environment.
-> The provided flake.nix will install ROS2 and dependencies, allowing you to skip step 2.
-> Simply run `nix develop` to install the ROS2 environment and all dependencies.
-
-1. **Clone the repository:**
+1. **Prerequisites:** ROS 2 Humble (Ubuntu 22.04) or Jazzy (Ubuntu 24.04), BeamNG.tech, Python 3.10+, [luamod](luamod/README.md) built and installed in BeamNG.
+2. **Clone into a colcon workspace:**
    ```bash
-   cd ~/ros2_ws/src
-   git clone https://github.com/xal-rpi/sim_ros_framework
+   cd ~/ros2_ws/src && git clone <repo-url> sim_ros_framework
    ```
-
-2. **Install dependencies:**
+3. **Install dependencies (once per machine / when `package.xml` or `requirements.txt` change):**
    ```bash
    cd ~/ros2_ws
-   rosdep install --from-paths src --ignore-src -r -y
+   source /opt/ros/humble/setup.bash    # or jazzy on Ubuntu 24.04
+
+   # apt + ROS keys from package.xml (may use sudo)
+   rosdep install --from-paths src/sim_ros_framework/src/bng_xal --ignore-src -r -y
+
+   # pure Python (beamngpy, etc.) — use your venv first if you have one
+   pip install -r src/sim_ros_framework/requirements.txt
+   ```
+   Optional notebooks / plotting / MPC tools: `pip install -r src/sim_ros_framework/requirements-extra.txt`
+
+4. **Build workspace**
+
+   **First time** — run these three commands in order (symlink **only** `bng_bringup` so config YAML is edited live in `src/`):
+
+   ```bash
+   cd ~/ros2_ws
+   source /opt/ros/humble/setup.bash
    ```
 
-3. **Build the workspace:**
    ```bash
-   colcon build
+   colcon build --packages-select bng_msgs bng_simulator bng_controller
    ```
-> [!NOTE]
-> Remember that building is needed after all file changes, even configuration files, unless you specify `--symlink-install`.
 
-4. **Source the workspace:**
    ```bash
+   colcon build --symlink-install --packages-select bng_bringup
    source install/setup.bash
    ```
 
-## Configuration
+   **Check** that config is symlinked (not copied):
 
-### BeamNG Setup
-
-1. Ensure BeamNG.tech is installed and configured according to the BeamNG documentation
-2. Set up network communication:
-   - For WSL2, find the correct IP address and update the IP in your scenario configuration files:
-     ```bash
-     ip route show | grep -i default | awk '{ print $3}'
-     ```
-     or [set networkingMode=mirrored under \[wsl2\] in the .wslconfig file](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#configuration-settings-for-wslconfig) and use the default configuration.
-   - On linux using the default `127.0.0.1` config should work.
-
-### YAML Configuration Structure
-
-Simulation scenarios, vehicle properties, sensor details, and controller parameters are primarily configured via YAML files. The main configuration files are typically processed by the `bng_simulator` and `bng_controller` packages.
-
-For a detailed explanation of the YAML structure for scenarios, vehicles, and sensors, please refer to the [bng_simulator README](src/bng_xal/bng_simulator/README.md#configuration-config-directory).
-For details on configuring the high-level controller, see the [bng_controller README](src/bng_xal/bng_controller/README.md).
-
-A brief example of a configuration snippet:
-```yaml
-# Example: Part of a scenario configuration (typically in bng_simulator/config/scenarios/)
-beamng:
-  host: 127.0.0.1 # Default for local Linux, adjust for WSL2 if needed
-  port: 64256
-
-scenario:
-  level: smallgrid # BeamNG level to load
-  name: basic_example
-
-vehicles:
-  ego: # Vehicle name
-    model: utv # BeamNG vehicle model
-    sensors:
-      gtstate: { type: GtState, gfx_update_time: 0.1, physics_update_time: 0.01 }
-    controllers:
-      LowLevelController: { type: default, control_rate: 0.1 } # Refers to luamod controller
-
-# Example: Part of a high-level controller configuration (used by bng_controller)
-high_level_controller:
-  control_fn: PY_compute_control_follow
-  path_file: loop.csv
-```
-The mapping from YAML configurations to specific code components (like `SimulationManager` or Lua controllers) is detailed within the respective package READMEs, particularly `bng_simulator`.
-
-## Usage
-
-### Launch Commands
-
-1. Start BeamNG: `./BinLinux/BeamNG.tech.x64 -tcom -colorStdOutLog [-disable-sandbox] [-nosteam]`
-> [!NOTE]
-> Disable the sandbox when using a controller that calls `ffi.load()` (e.g., those starting with `nn` in `luamod`).
-> Adding `-nosteam` prevents some errors showing up in the lua console but is not required.
-2. **Start the relevant ROS nodes**:
-   - Only the sensors:
    ```bash
-   ros2 launch bng_simulator simulator.launch.py
-   ```
-   - Sensors and controllers:
-   ```bash
-   ros2 launch bng_controller controller.launch.py
+   ls -la install/share/bng_bringup/config
    ```
 
-For detailed launch parameters accepted by `simulator.launch.py` and `controller.launch.py`, please refer to the README files of the `bng_simulator` and `bng_controller` packages, respectively.
-*   [bng_simulator Launch Arguments](src/bng_xal/bng_simulator/README.md#launching-the-simulator)
-*   [bng_controller Launch Arguments](src/bng_xal/bng_controller/README.md#launching-the-controller)
+   The path should end with `-> .../src/bng_xal/bng_bringup/config`. If it is a normal directory, re-run the `bng_bringup` symlink build above.
 
-### Available utility scripts
+   **Config YAML** (`src/bng_xal/bng_bringup/config/…`) — after the check passes, save and relaunch (step 6). No rebuild for edits or new run/preset/default files.
 
-Several utility scripts are provided across the packages:
+   **Later rebuilds** — only when you change code (always `source install/setup.bash` after):
 
-#### `sim_shell` (from `bng_simulator`)
+   ```bash
+   # Python in bng_simulator or bng_controller
+   colcon build --packages-select bng_simulator bng_controller
+   ```
 
-This interactive shell allows for real-time control and inspection of the simulation.
-```bash
-ros2 run bng_simulator sim_shell
+   ```bash
+   # .msg / .srv in bng_msgs, then dependents
+   colcon build --packages-select bng_msgs
+   colcon build --packages-select bng_simulator bng_controller
+   ```
+
+   ```bash
+   # launch/simulator.launch.py in bng_bringup (keep --symlink-install)
+   colcon build --symlink-install --packages-select bng_bringup
+   ```
+
+   **Rules** — do not mix normal and symlink builds on the same package:
+   - Never add `--symlink-install` to `bng_msgs`, `bng_simulator`, or `bng_controller`.
+   - Always add `--symlink-install` when rebuilding `bng_bringup` (a plain build copies stale config into `install/`).
+   - If `bng_bringup` symlink build fails after a mode switch:
+
+   ```bash
+   rm -rf build/bng_bringup install/bng_bringup
+   colcon build --symlink-install --packages-select bng_bringup
+   source install/setup.bash
+   ```
+
+5. **Start BeamNG** (with xlab mod loaded):
+   ```bash
+   ./BinLinux/BeamNG.tech.x64 -tcom -colorStdOutLog -disable-sandbox
+   # -tcom -colorStdOutLog [-disable-sandbox] [-nosteam] -console -headless -gfx null
+   ```
+6. **Launch sim + bridge:**
+   ```bash
+   ros2 launch bng_bringup simulator.launch.py config:=gridworld.yaml
+   ```
+
+You should see `sim_manager_node` spawn the scenario and `sensor_dispatcher` publish `/EGO/sensors/...`.
+
+**WSL2 networking:** set `host:=` / `remote:=` on launch if BeamNG runs on Windows — see [bng_bringup README](src/bng_xal/bng_bringup/README.md).
+
+---
+
+## Architecture (golden path)
+
 ```
-Once inside, type `help` to see available commands. For more details, see the [bng_simulator README](src/bng_xal/bng_simulator/README.md#important-scripts-bng_simulatorscripts).
-
-#### `start_logs` (from `bng_simulator`)
-Writes GtState sensor data to disk as a pickle file.
-```bash
-ros2 run bng_simulator start_logs [--max_queue_size N] [--flush_interval T]
+┌─────────────────────────────────────────────────────────────────┐
+│  ros2 launch bng_bringup simulator.launch.py                    │
+└────────────┬───────────────────────────────┬────────────────────┘
+             │                               │
+     sim_manager_node                  sensor_dispatcher
+     (scenario, vehicles, LLC)        (UDP ↔ ROS bridge)
+             │                               │
+             └─────────── BeamNG ────────────┘
+                    xlab LLC (luamod)
+                    control_listen  ← commands
+                    sensor_send     → observations
 ```
-For details on arguments, see the [bng_simulator README](src/bng_xal/bng_simulator/README.md#important-scripts-bng_simulatorscripts).
 
-#### `find_ema` (from `bng_simulator`)
-A utility to help tune Exponential Moving Average (EMA) parameters used in `gtState.lua` (part of `luamod`).
-```bash
-ros2 run bng_simulator find_ema [OPTIONS]
+| Layer | Package | Role |
+|-------|---------|------|
+| **Launch + config** | `bng_bringup` | Run YAML, catalog, levels, presets, launch file |
+| **Simulation** | `bng_simulator` | `sim_manager_node`, scenario compose, BeamNG API |
+| **Companion I/O** | `bng_controller` | `sensor_dispatcher`, `VehicleSession`, UDP client |
+| **Messages** | `bng_msgs` | `BngControlCmd`, `BngVehicleStateMsg`, services |
+| **In-sim logic** | `luamod` | LLC Lua, gtState, torque map FFI |
+
+**Config flow:** thin `config/runs/*.yaml` → `scenario_compose` → fragments (`defaults/`, `levels/`, `vehicle_catalog.yaml`).
+
+---
+
+## Control: three ways
+
+### 1. ROS topic (recommended for controllers)
+
+Publish `bng_msgs/BngControlCmd` to `/<vehicle>/control/cmd`.  
+`sensor_dispatcher` forwards to the vehicle's `control_listen` UDP port.
+
+```python
+# See bng_controller/examples/control_via_ros.py
+cmd.valid_fields = BngControlCmd.FIELD_TORQUE | BngControlCmd.FIELD_STEERING
+cmd.torque = 50.0
+cmd.steering = 0.05   # roadwheel [rad], uses catalog steering_to_input
 ```
-For details on arguments, see the [bng_simulator README](src/bng_xal/bng_simulator/README.md#important-scripts-bng_simulatorscripts).
 
-#### `generate_path` (from `bng_controller`)
-Creates a CSV file describing random paths for the high-level controller.
-```bash
-ros2 run bng_controller generate_path [OPTIONS]
+### 2. Python `VehicleSession` (scripts, calibration, notebooks)
+
+```python
+from bng_controller.vehicle_session import VehicleSession
+from bng_msgs.msg import BngControlCmd
+
+with VehicleSession.from_vehicle_name("EGO", recreate=True) as session:
+    session.send_control_cmd(cmd)
 ```
-For details on arguments, see the [bng_controller README](src/bng_xal/bng_controller/README.md#path-generation-scripts).
 
-#### `send_override_target` (from `bng_controller`)
-Override the targets sent by the compute_control function of the HLC.
+See [bng_controller README](src/bng_xal/bng_controller/README.md) and `examples/`.
+
+### 3. Raw UDP (advanced)
+
+`VehicleIoClient.send_command({"torque": 50, "steering_input": 0.2})` — same JSON envelope as LLC `loadScalar`.
+
+**Steering axes:**
+
+| Field | Use when |
+|-------|----------|
+| `steering_input` [-1,1] | Calibrating — unknown `steering_to_input` |
+| `steering` [rad] | Closed-loop — scale in `vehicle_catalog.yaml` |
+
+Details: [bng_msgs/MESSAGES.md](src/bng_xal/bng_msgs/MESSAGES.md).
+
+---
+
+## Observations
+
+After launch, typical topics (vehicle `EGO`):
+
+| Topic | Message |
+|-------|---------|
+| `/EGO/sensors/control_state/control_state` | `BngVehicleStateMsg` |
+| `/EGO/sensors/roof_imu/imu` | `BngImuMsg` |
+
 ```bash
-ros2 run bng_controller send_override_target [OPTIONS]
+ros2 topic echo /EGO/sensors/control_state/control_state --field yaw,v,rear_wheel_torque_est
 ```
-For details on arguments, see the [bng_controller README](src/bng_xal/bng_controller/README.md#target-override-script).
 
-### ROS2 Services
+---
 
-Interact with the simulator and other components using ROS2 services. Service definitions are provided by the `bng_msgs` package.
+## Configuration at launch
 
-Example:
 ```bash
-# Request vehicle teleportation (handled by bng_simulator)
-ros2 service call /execute_request bng_msgs/srv/ExecuteRequest "{function_name: 'teleport_vehicle', arguments: 'vehicle_name: ego\npos: [0, 0, 0]\nyaw_angle: 90'}"
+# Default gridworld (tech_ground, utv at origin)
+ros2 launch bng_bringup simulator.launch.py
 
-# Start data logging (handled by bng_simulator)
-ros2 service call /start_logger bng_msgs/srv/StartLogger "{save_location: '/tmp/logs', max_queue_size: 1000, flush_interval: 0.5}"
+# Derby preset (no new YAML file)
+ros2 launch bng_bringup simulator.launch.py preset:=derby_grid_lane.yaml
+
+# Overrides
+ros2 launch bng_bringup simulator.launch.py level:=derby spawn:=grid_lane yaw:=0
 ```
-For a list of available services and their definitions, refer to the [bng_msgs README](src/bng_xal/bng_msgs/README.md#services) and the READMEs of the packages that provide them (mainly `bng_simulator`).
+
+Full reference: `bng_bringup/config/runs/compose_reference.yaml`.
+
+---
+
+## Tests
+
+```bash
+source ~/ros2_ws/install/setup.bash
+pytest src/sim_ros_framework/src/bng_xal/bng_simulator/test \
+       src/sim_ros_framework/src/bng_xal/bng_controller/test -q
+```
+
+After `.msg` changes: `colcon build --packages-select bng_msgs` then rebuild dependents. After Python edits: `colcon build --packages-select bng_simulator bng_controller`. Config YAML: no rebuild if `bng_bringup` was symlink-installed (see step 4).
+
+---
+
+## Package documentation
+
+| Package | README |
+|---------|--------|
+| Launch & config | [bng_bringup](src/bng_xal/bng_bringup/README.md) |
+| Simulation manager | [bng_simulator](src/bng_xal/bng_simulator/README.md) |
+| UDP / ROS bridge | [bng_controller](src/bng_xal/bng_controller/README.md) |
+| ROS messages | [bng_msgs](src/bng_xal/bng_msgs/README.md) · [MESSAGES.md](src/bng_xal/bng_msgs/MESSAGES.md) |
+| BeamNG Lua mod | [luamod](luamod/README.md) |
+
+---
 
 ## Troubleshooting
 
-### Common Issues
+| Issue | Fix |
+|-------|-----|
+| BeamNG needs focus | Keep window focused when loading scenarios |
+| WSL2 can't reach BeamNG | `host:=<windows-ip>` on launch; see bringup README |
+| Vehicle falls / wrong spawn on derby | Use `preset:=derby_grid_lane.yaml` (origin is void on derby) |
+| Mod changes ignored | Re-run `./luamod/build.bash` and restart BeamNG |
+| `xlab extension not found` (headless) | `-headless -noui -nosteam` |
+| Torque units wrong | Metric units in BeamNG settings |
+| Config edits ignored after launch | `ls -la install/share/bng_bringup/config` — re-run `colcon build --symlink-install --packages-select bng_bringup` (see step 4) |
+| `bng_msgs` / `bng_simulator` symlink build errors | Use split build: symlink **only** `bng_bringup`; never mix `--symlink-install` on other packages |
 
-1. **BeamNG Focus Issue**
-   - **Problem:** BeamNG.tech requires focus when managing scenarios
-   - **Solution:** Ensure the BeamNG window is focused, not minimized
+---
 
-2. **IP Configuration**
-   - **Problem:** Incorrect IP address prevents communication
-   - **Solution:** Verify the IP in scenario config matches WSL2 IP
+## Optional: Nix dev shell
 
-3. **Vehicle Control Instability**
-   - **Problem:** Vehicles may behave erratically after teleportation
-   - **Solution:** Reset vehicle state with `teleport vehicle_name=ego reset=true`
+```bash
+nix develop   # ROS 2 + Python deps from flake.nix
+```
 
-4. **Sensor Data Missing**
-   - **Problem:** Sensors not publishing data
-   - **Solution:** Check sensor configuration and poll rates
+---
 
-5. **Request not handled by BNG:**
-   - **Problem:** The controller crashes with `The request was not handled by BeamNG.tech` error after having hot reloaded the mod
-   - **Solution:** Restart BNG, wait at least one second before starting the ROS nodes
-
-6. **Torque target not applied properly:**
-   - **Problem:** The reported torque is different from the target torque
-   - **Solution:** Ensure units are metric in the GUI settings of BNG
-
-7. **Xlab extension not found with `-headless`:**
-   - **Problem:** When running BNG in headless mode the Xlab extension cannot be loaded
-   - **Solution:** Use these flags when running BeamNG: `-headless -noui -nosteam`
-
-8. **Checking out old commit doesn't work**
-   - **Problem:** Something suddenly stopped working and checking out an old commit did not resolve the issue
-   - **Solution:** Remember that you have to run `./luamod/build.bash` each time you change the code inside of it, including through git
-
-## Acknowledgments
-
-- BeamNG.tech team for providing the simulation environment and help on the forums
-- ROS2 community for the robotics framework
-- All contributors to this project
+*License: Apache-2.0*

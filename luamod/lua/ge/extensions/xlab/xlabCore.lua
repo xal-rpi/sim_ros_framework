@@ -7,6 +7,10 @@ local M = {}
 local GtStates = {}
 local Controllers = {}
 
+if not extensions.scenario_scenariosLoader then
+  extensions.load('scenario/scenariosLoader')
+end
+
 -- Basic Hello Xlab
 M.handleHelloXlab = function(request)
   log('I', logTag, 'Hello Xlab')
@@ -30,17 +34,23 @@ M.handleOpenGtState = function(request)
   args.dir = vec3(request['dir'][1], request['dir'][2], request['dir'][3])
   args.left = vec3(request['left'][1], request['left'][2], request['left'][3])
   args.isVisualised = request['isVisualised']
-  args.isUsingGravity = request['isUsingGravity']
   args.isSnappingDesired = request['isSnappingDesired']
   args.isForceInsideTriangle = request['isForceInsideTriangle']
   args.isDirWorldSpace = request['isDirWorldSpace']
   args.isAllowWheelNodes = request['isAllowWheelNodes']
+  args.accel_tau_s = request['accel_tau_s']
+  args.gyro_tau_s = request['gyro_tau_s']
+  args.vel_tau_s = request['vel_tau_s']
+  args.wheel_angvel_tau_s = request['wheel_angvel_tau_s']
+  args.debug_raw = request['debug_raw']
+  args.torque_map = request['torque_map']
 
   local name = request['name']
   local vid = scenetree.findObject(request['vid']):getID()
 
   GtStates[name] = extensions.xlab_sensors.createGtState(vid, args)
   log('I', logTag, 'Opened GtState sensor')
+  log('I', logTag, '[handle] numPhysicsStepsForGFXSave: ' .. tostring(args.numPhysicsStepsForGFXSave))
 
   request:sendACK('OpenedGtState')
 end
@@ -106,25 +116,29 @@ M.handleOpenController = function(request)
     end
   end
 
-  -- TODO: This may need some more generality in case controller names 
-  if string.find(data.controllerType, "nn_") then
+  -- TODO: This may need some more generality in case controller names
+  local function stageTorqueMapLib(stem)
+    local ext = 'so'
+    if jit and jit.os and jit.os == 'Windows' then ext = 'dll' end
+    local mod_libpath = string.format('lua/vehicle/controller/xlab/lib/%s.%s', stem, ext)
+    local fs_libpath = string.format('tmp/%s.%s', stem, ext)
+    copyfile(mod_libpath, fs_libpath)
+    local nativePath = FS:virtual2Native(fs_libpath)
+    log('I', logTag, 'Staged torque map lib ' .. stem .. ' -> ' .. fs_libpath)
+    return nativePath
+  end
+
+  local torqueMapStem = data.calibration and data.calibration.torque_map
+
+  if torqueMapStem then
     assert(
       not Engine.Sandbox.Lua.isEnabled(),
-      'This controller can only run when the Lua security sandbox is disabled. '
-        .. "You will have to restart BeamNG with the '-disable-sandbox' argument."
+      'Native torque map libs require Lua sandbox disabled. '
+        .. "Restart BeamNG with '-disable-sandbox'."
     )
-    local mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.so'
-    local fs_libpath = 'tmp/libnn.so'
-    if jit and jit.os then
-      if jit.os == "Windows" then
-        mod_libpath = 'lua/vehicle/controller/xlab/lib/libnn.dll'
-        fs_libpath = 'tmp/libnn.dll'
-      end
-    end
-    copyfile(mod_libpath, fs_libpath)
-
-    be:sendToMailbox('libnnPath', FS:virtual2Native(fs_libpath))
-    log('I', logTag, 'Using ' .. fs_libpath)
+    data.torqueMapPath = stageTorqueMapLib(torqueMapStem)
+  elseif data.controllerType == 'llc' then
+    log('W', logTag, 'LLC opened without calibration.torque_map; torque control disabled')
   end
 
   -- handle gtStateName → gtStateSensorId
@@ -201,6 +215,106 @@ M.handleSetControllerGtState = function(request)
     'Updated controller ' .. controllerName .. ' to use gtState sensor ' .. gtStateName
   )
   request:sendACK('ControllerGtStateUpdated')
+end
+
+
+M.handleGetCurrentLevel = function(request)
+  -- Get the currently loaded level name
+  local levelIdentifier = getCurrentLevelIdentifier()
+  
+  if not levelIdentifier or levelIdentifier == '' then
+    log('W', logTag, 'No level currently loaded')
+    request:sendResponse({
+      type = 'GetCurrentLevel',
+      level = nil,
+      loaded = false
+    })
+    return
+  end
+  
+  log('D', logTag, 'Current level: ' .. levelIdentifier)
+  request:sendResponse({
+    type = 'GetCurrentLevel',
+    level = levelIdentifier,
+    loaded = true
+  })
+end
+
+M.handleStartLevel = function(request)
+  local levelName = request['levelName']
+  if not levelName then
+    log('E', logTag, 'No level name provided in StartLevel request')
+    return
+  end
+
+  local levelInfo = extensions.core_levels.getLevelByName(levelName)
+  if not levelInfo then
+    log('E', logTag, 'Level not found: ' .. levelName)
+    return
+  end
+
+  extensions.core_levels.startLevel(levelInfo.fullfilename)
+  log('I', logTag, 'Started level: ' .. levelName)
+  request:sendACK('StartedLevel')
+end
+
+M.handleGetAdvancedLevelInfo = function(request)
+
+  local levelName = request['levelName']
+  if not levelName then
+    log('E', logTag, 'No level name provided in GetAdvancedLevelInfo request')
+    return false
+  end
+
+  -- Get level info
+  local levelInfo = extensions.core_levels.getLevelByName(levelName)
+  if not levelInfo then
+    log('E', logTag, 'Level not found: ' .. levelName)
+    return false
+  end
+
+  -- Get scenarios for the level
+  local allScenarios = extensions.scenario_scenariosLoader.getList()
+  local levelScenarios = {}
+  for _, scenario in ipairs(allScenarios) do
+    if scenario.levelName == levelName then
+      table.insert(levelScenarios, {
+        name = scenario.name,
+        humanName = scenario.humanName or scenario.name,
+        description = scenario.description,
+        sourceFile = scenario.sourceFile  -- Path to load the scenario
+      })
+    end
+  end
+
+  -- Enrich spawn points with pos/rot (from levels.lua onGetRawPoiListForLevel)
+  local enrichedSpawnPoints = {}
+  for _, spawnPoint in ipairs(levelInfo.spawnPoints or {}) do
+    if spawnPoint.objectname then
+      local obj = scenetree.findObject(spawnPoint.objectname)
+      if obj then
+        table.insert(enrichedSpawnPoints, {
+          objectname = spawnPoint.objectname,
+          translationId = spawnPoint.translationId,
+          previews = spawnPoint.previews,
+          pos = obj:getPosition(),  -- vec3 {x, y, z}
+          rot = obj:getRotation()   -- quat {x, y, z, w}
+        })
+      else
+        log('W', 'handleGetAdvancedLevelInfo', 'Spawn point object not found: ' .. spawnPoint.objectname)
+      end
+    end
+  end
+
+  -- Prepare response
+  local resp = {
+    type = 'GetAdvancedLevelInfo',
+    levelName = levelName,
+    levelInfo = levelInfo,  -- Full level metadata
+    scenarios = levelScenarios,  -- List of scenarios with names and paths
+    spawnPoints = enrichedSpawnPoints,  -- Spawn points with pos/rot
+  }
+  request:sendResponse(resp)
 end
 
 local function onSocketMessage(request)

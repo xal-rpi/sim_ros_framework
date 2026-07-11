@@ -1,0 +1,209 @@
+cogPosDynamicRel:
+- 0.329
+- 0.25
+- 0.317
+cogToFrontAxle: 1.184
+cogToLeftWheelAxle: 0.849
+cogToRearAxle: 1.412
+cogToRightWheelAxle: 0.904
+distFR: 2.597
+distLR: 1.797
+inertia:
+  xx: 469.965
+  xy: -12.302
+  xz: -97.461
+  yy: 2250.989
+  yz: 0.412
+  zz: 2512.378
+refNodePos:
+- -0.0
+- 0.0
+- -0.0
+totalMass: 1275.86
+vectorForward:
+- 0.0
+- -1.0
+- 0.007
+vectorLeft:
+- 1.0
+- 0.0
+- -0.0
+vectorUp:
+- 0.0
+- 0.007
+- 1.0
+vehHeight: 1.438
+vehLength: 4.518
+vehWidth: 1.94
+wheel_fl:
+  inertia: 0.742
+  mass: 13.44
+  pos:
+  - 0.893
+  - -1.185
+  - -0.142
+  radius: 0.315
+  width: 0.225
+wheel_fr:
+  inertia: 0.742
+  mass: 13.44
+  pos:
+  - -0.904
+  - -1.186
+  - -0.142
+  radius: 0.315
+  width: 0.225
+wheel_rl:
+  inertia: 0.778
+  mass: 14.08
+  pos:
+  - 0.849
+  - 1.411
+  - -0.161
+  radius: 0.305
+  width: 0.25
+wheel_rr:
+  inertia: 0.778
+  mass: 14.08
+  pos:
+  - -0.861
+  - 1.411
+  - -0.161
+  radius: 0.305
+  width: 0.25
+engine:
+  fuelCapacity: 35.0
+  fuelVolume: 34.993
+  idleRPM: 1150.0
+  maxRPM: 8100.0
+  superchargerBoostMax: -1.0
+  turboBoostMax: 14.5
+gearbox:
+  -1.0:
+    index: -1
+    mode_index: 0.0
+    gear_ratio: -3.545
+    mode: ''
+    indexCmd: -1
+  0.0:
+    index: 0
+    mode_index: 0.0
+    gear_ratio: 0.0
+    mode: ''
+    indexCmd: 0
+  1.0:
+    index: 1
+    mode_index: 0.0
+    gear_ratio: 3.083
+    mode: ''
+    indexCmd: 1
+  2.0:
+    index: 2
+    mode_index: 0.0
+    gear_ratio: 1.947
+    mode: ''
+    indexCmd: 2
+  3.0:
+    index: 3
+    mode_index: 0.0
+    gear_ratio: 1.366
+    mode: ''
+    indexCmd: 3
+  4.0:
+    index: 4
+    mode_index: 0.0
+    gear_ratio: 1.088
+    mode: ''
+    indexCmd: 4
+  5.0:
+    index: 5
+    mode_index: 0.0
+    gear_ratio: 0.8250000000000001
+    mode: ''
+    indexCmd: 5
+powertrain:
+  mainEngine:
+    type: combustionEngine
+    clutch:
+      type: frictionClutch
+      gearRatio: 1.0
+      gearbox:
+        type: manualGearbox
+        gearRatio: 0.0
+        gearRatios:
+          -1.0: -3.545
+          0.0: 0.0
+          1.0: 3.083
+          2.0: 1.947
+          3.0: 1.366
+          4.0: 1.088
+          5.0: 0.825
+        transfercase:
+          type: shaft
+          gearRatio: 1.0
+          availableModes:
+          - connected
+          torsionReactorR:
+            type: torsionReactor
+            gearRatio: 1.0
+            driveshaft:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+              differential_R:
+                type: differential
+                gearRatio: 5.21
+                availableModes:
+                - locked
+                diffTorqueSplit: 0.5
+                wheelaxleRL:
+                  type: shaft
+                  gearRatio: 1.0
+                  availableModes:
+                  - connected
+                  spindleRL:
+                    type: shaft
+                    gearRatio: 1.0
+                    availableModes:
+                    - connected
+                wheelaxleRR:
+                  type: shaft
+                  gearRatio: 1.0
+                  availableModes:
+                  - connected
+                  spindleRR:
+                    type: shaft
+                    gearRatio: 1.0
+                    availableModes:
+                    - connected
+  spindleFL:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+  spindleFR:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+controllers:
+  door_FL_coupler: advancedCouplerControl
+  door_FR_coupler: advancedCouplerControl
+  door_RL_coupler: advancedCouplerControl
+  door_RR_coupler: advancedCouplerControl
+  gauge: gauges/genericGauges
+  gauges/customModules/accelerationData: gauges/customModules/accelerationData
+  gauges/customModules/combustionEngineData: gauges/customModules/combustionEngineData
+  gauges/customModules/electricMotorData: gauges/customModules/electricMotorData
+  gauges/customModules/environmentData: gauges/customModules/environmentData
+  gauges/customModules/tireData: gauges/customModules/tireData
+  gtState3: xlab/gtState
+  hPattern: propAnimation/hPattern
+  hoodCatchCoupler: advancedCouplerControl
+  hoodLatchCoupler: advancedCouplerControl
+  nitrousOxideInjection: nitrousOxideInjection
+  shiftLights: shiftLights
+  trunkCoupler: advancedCouplerControl
+  vehicleController: vehicleController/vehicleController
+  xlabControllerManager: xlab/controller_manager

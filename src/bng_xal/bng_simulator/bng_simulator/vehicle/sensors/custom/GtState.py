@@ -49,11 +49,16 @@ class GtStateWrapper(CommBase):
             1,
             0,
         ),  # vector relative to the vehicle's left direction, local frame
-        is_using_gravity: bool = True,
         is_allow_wheel_nodes: bool = False,
         is_visualised: bool = True,
         is_snapping_desired: bool = False,
         is_force_inside_triangle: bool = False,
+        accel_tau_s: Optional[float] = None,
+        gyro_tau_s: Optional[float] = None,
+        vel_tau_s: Optional[float] = None,
+        wheel_angvel_tau_s: Optional[float] = None,
+        debug_raw: Optional[bool] = None,
+        torque_map: Optional[dict] = None,
     ):
         super().__init__(beamng, vehicle)
 
@@ -76,11 +81,16 @@ class GtStateWrapper(CommBase):
             pos,
             dir,
             left,
-            is_using_gravity,
             is_allow_wheel_nodes,
             is_visualised,
             is_snapping_desired,
             is_force_inside_triangle,
+            accel_tau_s,
+            gyro_tau_s,
+            vel_tau_s,
+            wheel_angvel_tau_s,
+            debug_raw,
+            torque_map
         )
 
         # Fetch the unique Id number (in the simulator)
@@ -117,27 +127,43 @@ class GtStateWrapper(CommBase):
         pos: Float3,
         dir: Float3,
         left: Float3,
-        is_using_gravity: bool,
         is_allow_wheel_nodes: bool,
         is_visualised: bool,
         is_snapping_desired: bool,
         is_force_inside_triangle: bool,
+        accel_tau_s: Optional[float] = None,
+        gyro_tau_s: Optional[float] = None,
+        vel_tau_s: Optional[float] = None,
+        wheel_angvel_tau_s: Optional[float] = None,
+        debug_raw: Optional[bool] = None,
+        torque_map: Optional[dict] = None,
     ) -> None:
         data: StrDict = dict()
         data["name"] = name
         data["vid"] = vehicle.vid
         data["GFXUpdateTime"] = gfx_update_time
         data["physicsUpdateTime"] = physics_update_time
-        data["numPhysicsStepsForGfxSave"] = num_physics_steps_for_gfx_save
+        data["numPhysicsStepsForGFXSave"] = num_physics_steps_for_gfx_save
         data["pos"] = self.calculate_cog_pos(pos)
         data["dir"] = self.calculate_dir(dir)
         data["left"] = self.calculate_dir(left)
-        data["isUsingGravity"] = is_using_gravity
         data["isAllowWheelNodes"] = is_allow_wheel_nodes
         data["isVisualised"] = is_visualised
         data["isSnappingDesired"] = is_snapping_desired
         data["isForceInsideTriangle"] = is_force_inside_triangle
-        data["isDirWorldSpace"] = True
+        data["isDirWorldSpace"] = True # True
+        if accel_tau_s is not None:
+            data["accel_tau_s"] = accel_tau_s
+        if gyro_tau_s is not None:
+            data["gyro_tau_s"] = gyro_tau_s
+        if vel_tau_s is not None:
+            data["vel_tau_s"] = vel_tau_s
+        if wheel_angvel_tau_s is not None:
+            data["wheel_angvel_tau_s"] = wheel_angvel_tau_s
+        if debug_raw is not None:
+            data["debug_raw"] = debug_raw
+        if torque_map is not None:
+            data["torque_map"] = torque_map
         args = {
             "type": "OpenGtState",
             "ack": "OpenedGtState",
@@ -167,10 +193,10 @@ class GtStateWrapper(CommBase):
         well as the vehicle's center of mass.
         """
         veh_prop = get_vehicle_principal_axis(self.vehicle)
-        self.cogPos = veh_prop["cogPosStatic"]
-        self.vectorForward = veh_prop["vectorForward"]
-        self.vectorLeft = veh_prop["vectorLeft"]
-        self.vectorUp = veh_prop["vectorUp"]
+        self.cogPos = veh_prop["cogPosRel"] # Position relative to the vehicle's ref point
+        self.vectorForward = tuple(veh_prop["vectorForward"]) # Forward vector in world coordinates
+        self.vectorLeft = tuple(veh_prop["vectorLeft"]) # Left vector in world coordinates
+        self.vectorUp = veh_prop["vectorUp"] # Up vector in world coordinates
         self.logger.info(f"Vehicle properties extracted: \n{veh_prop}")
 
     def calculate_cog_pos(self, pos: Float3) -> Float3:
@@ -217,8 +243,10 @@ class GtState(SensorBase):
 
     def __init__(self, name: str, vehicle: Vehicle, beamng: BeamNGpy, config: dict):
         super().__init__(name, vehicle, beamng, config)
-        # Create the sensor instance.
-        self._sensor = GtStateWrapper(name, vehicle, beamng, **config)
+        cfg = dict(config)
+        cfg.pop("is_using_gravity", None)
+        cfg.pop("kf_predict_gain", None)
+        self._sensor = GtStateWrapper(name, vehicle, beamng, **cfg)
         self.__DEG_TO_RAD = np.pi / 180.0
 
     def poll(self):
@@ -299,7 +327,6 @@ class GtState(SensorBase):
         wheelRL = data["wheelRL"]
 
         msg.wheel_fr_speed = wheelFR["speed"]
-        msg.wheel_fr_ang_vel_b = wheelFR["angVelB"]
         msg.wheel_fr_ang_vel = wheelFR["angVel"]
         msg.wheel_fr_brake_torque = wheelFR["brakeTorque"]
         msg.wheel_fr_prop_torque = wheelFR["propTorque"]
@@ -307,7 +334,6 @@ class GtState(SensorBase):
         msg.wheel_fr_downforce = wheelFR["downForce"]
 
         msg.wheel_fl_speed = wheelFL["speed"]
-        msg.wheel_fl_ang_vel_b = wheelFL["angVelB"]
         msg.wheel_fl_ang_vel = wheelFL["angVel"]
         msg.wheel_fl_brake_torque = wheelFL["brakeTorque"]
         msg.wheel_fl_prop_torque = wheelFL["propTorque"]
@@ -315,7 +341,6 @@ class GtState(SensorBase):
         msg.wheel_fl_downforce = wheelFL["downForce"]
 
         msg.wheel_rr_speed = wheelRR["speed"]
-        msg.wheel_rr_ang_vel_b = wheelRR["angVelB"]
         msg.wheel_rr_ang_vel = wheelRR["angVel"]
         msg.wheel_rr_brake_torque = wheelRR["brakeTorque"]
         msg.wheel_rr_prop_torque = wheelRR["propTorque"]
@@ -323,7 +348,6 @@ class GtState(SensorBase):
         msg.wheel_rr_downforce = wheelRR["downForce"]
 
         msg.wheel_rl_speed = wheelRL["speed"]
-        msg.wheel_rl_ang_vel_b = wheelRL["angVelB"]
         msg.wheel_rl_ang_vel = wheelRL["angVel"]
         msg.wheel_rl_brake_torque = wheelRL["brakeTorque"]
         msg.wheel_rl_prop_torque = wheelRL["propTorque"]

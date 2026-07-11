@@ -1,0 +1,23 @@
+# =============================================================================
+# GE/TCP poll defaults for sim_manager_node (NOT the UDP golden path).
+# =============================================================================
+#
+# Composed runs build ros_poll_config[vehicle_id] automatically: for each key in
+# vehicles.<id>.sensors, if a matching sensor_defaults entry exists below, a poll
+# timer is registered. Sensors without an entry here are not polled.
+#
+# Fields per sensor:
+#   poll_time  — timer period [s] for beamngpy poll (+ optional ROS publish)
+#   publish    — 0 off | 1 on /<vehicle_id>/<sensor_name> | 2 publish_all
+#   topic      — optional override (default /<vehicle_id>/<sensor_name>)
+
+sensor_defaults:
+  basicState:
+    poll_time: 0.1
+    publish: 1
+  gtstate:
+    poll_time: 0.25
+    publish: 0
+  roof_imu:
+    poll_time: 0.25
+    publish: 0

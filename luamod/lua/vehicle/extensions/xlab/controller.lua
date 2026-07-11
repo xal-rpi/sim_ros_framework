@@ -1,8 +1,6 @@
+-- Vehicle extension shim: GE OpenController → controller_manager on this vehicle.
 local logTag = 'CtrlExt'
 local M = {}
-
--- Module state variables
-local activeController = nil
 
 M.create = function(data)
   local decoded = lpack.decode(data)
@@ -11,18 +9,25 @@ M.create = function(data)
     controllerData[k] = v
   end
 
-  activeController = controller.loadControllerExternal(
+  controller.loadControllerExternal(
     'xlab/controller_manager',
     'xlabControllerManager',
     controllerData
   )
 end
 
---- Removes a ground truth state sensor
--- @param sensorId ID of the sensor to remove
-function M.remove(controllerId)
+function M.remove(_controllerId)
   controller.unloadControllerExternal('xlabControllerManager')
-  activeController = nil
+end
+
+-- Runtime gtState rebind (GE handleSetControllerGtState).
+function M.setGtStateSensor(sensorId)
+  local mgr = controller.getController('xlabControllerManager')
+  if mgr and mgr.setGtStateSensor then
+    mgr.setGtStateSensor(sensorId)
+  else
+    log('E', logTag, 'xlabControllerManager not loaded; cannot set gtState sensor')
+  end
 end
 
 return M

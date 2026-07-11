@@ -1,0 +1,39 @@
+# =============================================================================
+# Hand-maintained xlab vehicle catalog (NOT auto-generated physics exports).
+# =============================================================================
+#
+# Add one entry per supported (model, part_config). Scripts may update
+# steering_to_input here after calibration.
+#
+# Fields:
+#   model, part_config  — BeamNG vehicle identity (required)
+#   yaw_offset_deg      — utv body→gtState: beamng_spawn = xlab_yaw - offset (default 90)
+#   steering_to_input   — roadwheel_rad / steering_input scale (LLC)
+#   torque_map          — luamod lib stem; omit if no drivetrain map exists
+#   io.port_index       — UDP port slot (0=EGO base ports, 1=+port_stride, …)
+
+defaults:
+  yaw_offset_deg: 90
+
+catalog:
+  utv_wild:
+    model: utv
+    part_config: /vehicles/utv/wild.pc
+    io:
+      port_index: 0
+    steering_to_input: -0.5948683325943701
+    torque_map: utv_wild_drivetrain
+
+  etk800_track:
+    model: etk800
+    part_config: /vehicles/etk800/844_track_M.pc
+    # io:
+    #   port_index: 1
+
+  sunburst2_drift:
+    model: sunburst2
+    part_config: /vehicles/sunburst2/drift_pro.pc
+
+  sbr_track:
+    model: sbr
+    part_config: /vehicles/sbr/track.pc

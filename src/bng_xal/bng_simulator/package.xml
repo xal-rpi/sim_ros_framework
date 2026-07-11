@@ -2,25 +2,25 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>bng_simulator</name>
-  <version>0.2.0</version>
-  <description>Core functionality package for beamng_xal ROS2 interface</description>
-  <maintainer email="user@todo.todo">user</maintainer>
+  <version>0.3.0</version>
+  <description>BeamNG xlab simulation manager and scenario compose</description>
+  <maintainer email="djeumf2@rpi.edu">franck</maintainer>
   <license>Apache-2.0</license>
 
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>ament_python</buildtool_depend>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>bng_msgs</depend>
+  <depend>ament_index_python</depend>
+  <depend>python3-yaml</depend>
+  <depend>python3-numpy</depend>
+  <depend>python3-tqdm</depend>
 
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
     <build_type>ament_python</build_type>
-    <ros_python>
-      <depend>ament_cmake</depend>
-    </ros_python>
   </export>
 </package>

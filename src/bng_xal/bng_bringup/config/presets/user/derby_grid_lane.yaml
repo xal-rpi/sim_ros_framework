@@ -1,0 +1,13 @@
+# User preset — derby map, grid_lane spawn (safe ground; origin is void).
+#
+# Launch (base run stays gridworld.yaml):
+#   ros2 launch bng_bringup simulator.launch.py preset:=derby_grid_lane.yaml
+#
+# Or with explicit base run:
+#   ros2 launch bng_bringup simulator.launch.py config:=gridworld.yaml preset:=derby_grid_lane.yaml
+#
+# One-off tweak on top of preset (launch wins):
+#   ros2 launch bng_bringup simulator.launch.py preset:=derby_grid_lane.yaml yaw:=45
+
+level: derby
+spawn: grid_lane

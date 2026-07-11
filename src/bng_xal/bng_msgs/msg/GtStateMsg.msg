@@ -24,9 +24,9 @@ geometry_msgs/Quaternion quat
 
 # Wheel information
 # Speed (m/s), Angular velocity from brake torque (rad/s), Angular velocity (rad/s)
-# Brake torque (Nm), Propulsion torque (Nm), Angle (radians)
+# Brake torque (Nm), Propulsion torque (Nm)
+# Wheel angles are in radians.
 float64 wheel_fr_speed
-float64 wheel_fr_ang_vel_b
 float64 wheel_fr_ang_vel
 float64 wheel_fr_brake_torque
 float64 wheel_fr_prop_torque
@@ -34,7 +34,6 @@ float64 wheel_fr_angle
 float64 wheel_fr_downforce
 
 float64 wheel_fl_speed
-float64 wheel_fl_ang_vel_b
 float64 wheel_fl_ang_vel
 float64 wheel_fl_brake_torque
 float64 wheel_fl_prop_torque
@@ -42,7 +41,6 @@ float64 wheel_fl_angle
 float64 wheel_fl_downforce
 
 float64 wheel_rr_speed
-float64 wheel_rr_ang_vel_b
 float64 wheel_rr_ang_vel
 float64 wheel_rr_brake_torque
 float64 wheel_rr_prop_torque
@@ -50,7 +48,6 @@ float64 wheel_rr_angle
 float64 wheel_rr_downforce
 
 float64 wheel_rl_speed
-float64 wheel_rl_ang_vel_b
 float64 wheel_rl_ang_vel
 float64 wheel_rl_brake_torque
 float64 wheel_rl_prop_torque

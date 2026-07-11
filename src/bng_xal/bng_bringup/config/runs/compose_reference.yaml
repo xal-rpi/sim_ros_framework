@@ -1,0 +1,83 @@
+# =============================================================================
+# Compose reference — every run-file knob in one place.
+# =============================================================================
+#
+# Launch selects the run; single-vehicle shorthand may override compose fields:
+#   ros2 launch bng_bringup simulator.launch.py config:=gridworld.yaml \
+#     level:=derby spawn:=grid_lane yaw:=45
+#
+# User preset overlay (shorthand runs only) — no new run YAML required:
+#   ros2 launch bng_bringup simulator.launch.py preset:=derby_grid_lane.yaml
+#   ros2 launch bng_bringup simulator.launch.py preset:=derby_custom_pos.yaml yaw:=90
+#   ros2 launch bng_bringup simulator.launch.py preset:=/absolute/path/to/my_spot.yaml
+# Preset search: config/presets/user/  then  ~/.config/bng_bringup/presets/
+# Merge order: base run → preset → launch args (level, spawn, yaw, pos, vehicle, …)
+#
+# Absolute spawn from CLI (no preset file):
+#   ros2 launch bng_bringup simulator.launch.py level:=derby spawn:=grid_lane \
+#     pos:="44.05,127.22,79.3"
+#
+# Multi-vehicle runs (compose.vehicles) — edit the YAML; launch overrides rejected.
+#
+# Infrastructure launch args (host, UDP base ports, log_level) are NOT scenario
+# content. UDP ports are a BASE triplet for port_index=0; each vehicle uses
+# base + io.port_index * port_stride (see defaults/udp_io.yaml).
+#
+# Fragment stack (CREATE profile):
+#   compose.sim       → defaults/sim.yaml (or sim_fixed_step.yaml)
+#   compose.level     → levels/<level>.yaml (spawn presets + extra_objects)
+#   compose.vehicles  → per-agent catalog + spawn + yaw + port_index
+#   defaults/llc.yaml → LLC + sensors (per vehicle)
+#   defaults/ros_poll.yaml → auto ros_poll_config per vehicle
+#   defaults/udp_io.yaml   → port_stride; launch sets base triplet for index 0
+#
+# compose.profile:
+#   create (default) — spawn vehicles via scenario_manager
+#   attach           — graft xlab onto in-game vehicle ids (no spawn/LLC)
+
+compose:
+  profile: create
+  level: tech_ground
+  # sim: defaults/sim_fixed_step.yaml
+
+  # --- Multi-vehicle (preferred for anything beyond one ego) ---
+  vehicles:
+    - id: EGO                    # BeamNG id + ROS topic prefix
+      vehicle: utv_wild          # vehicle_catalog.yaml key
+      spawn: origin              # levels/<level>.yaml spawn preset
+      # yaw: 45                  # optional xlab yaw [deg]
+      # pos_offset: [6, 0, 0]    # offset from preset pos (same spawn, lineup)
+      # pos: [10, 0, 0]          # or absolute pos (replaces preset pos)
+      # port_index: 0            # UDP slot (default: list index or catalog)
+    # - id: AGENT2
+    #   vehicle: etk800_track
+    #   spawn: hill_a
+    #   yaw: -90
+    #   port_index: 1
+
+  # --- Single-vehicle shorthand (equivalent to one entry in vehicles[]) ---
+  # vehicle: utv_wild
+  # vehicle_id: EGO
+  # spawn: origin
+  # yaw: 45
+
+scenario_mode: create
+
+# -----------------------------------------------------------------------------
+# overrides — deep-merged onto composed config after fragment assembly.
+# -----------------------------------------------------------------------------
+overrides:
+  # beamng:
+  #   setup_funcs:
+  #     beamng.settings.set_deterministic:
+  #       steps_per_second: 60
+
+  # ros_poll — per vehicle, per sensor (GE/TCP path; NOT UDP golden path):
+  ros_poll:
+    EGO:
+      gtstate:
+        poll_time: 0.1
+        publish: 1
+    # AGENT2:
+    #   basicState:
+    #     publish: 1

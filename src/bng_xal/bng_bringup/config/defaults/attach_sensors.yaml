@@ -1,0 +1,19 @@
+# =============================================================================
+# Minimal sensors for ATTACH profile (property extraction / freeroam).
+# =============================================================================
+#
+# No LLC or UDP — attach grafts these onto an existing in-game vehicle (id EGO).
+
+sensors:
+  basicState:
+    type: BasicState
+  gtstate:
+    type: GtState
+    gfx_update_time: 0.15
+    physics_update_time: 0.01
+    num_physics_steps_for_gfx_save: 1
+    accel_tau_s: 0.04
+    gyro_tau_s: 0.005
+    vel_tau_s: 0.005
+    wheel_angvel_tau_s: 0.005
+    debug_raw: true

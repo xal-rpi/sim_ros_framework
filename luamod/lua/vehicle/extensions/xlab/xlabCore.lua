@@ -8,16 +8,6 @@
 local M = {}
 local logTag = 'XalVE'
 
--- local min = math.min
--- local acos = math.acos
--- local sqrt = math.sqrt
-
---[[
-    Check if a table contains a specific value
-    @param table: table - Table to search
-    @param value: any - Value to search for
-    @return: boolean - Whether the value is found in the table
-]]
 local function table_contains(tbl, element)
   for _, value in pairs(tbl) do
     if value == element then return true end
@@ -357,186 +347,31 @@ local function getCrossInertia(axis1, axis2, cog, vD, vL, vU, worldSpace)
   return inertia
 end
 
---[[
-    Utility function to calculate the  center of mass from the current
-    node configuration. This is not the runtime center of mass, but the
-    center of mass as defined in the vehicle's jbeam file including wheels.
+--[[  
+    Calculate center of mass from node configuration (static, includes wheels)
+    
+    COORDINATE FRAME GOTCHA:
+    - obj:getNodePosition(cid): World position relative to refNode (refNode is at origin)
+    - node.pos: Local/initial configuration position in vehicle frame
+    
+    @param worldSpace: boolean - If true, use world positions; if false, use local config
+    @return: totalMass, cogPosition - Total mass and COG position in selected frame
 ]]
-
 local function relativeCenterOfMass(worldSpace)
   local totalMass = 0
-  local cog = vec3(0, 0, 0)
-  local inWorldSpace = worldSpace or false
+  local cogPosition = vec3(0, 0, 0)
+  local useWorldSpace = worldSpace or true
+  
   for _, node in pairs(v.data.nodes) do
     if node.nodeWeight then
-      local cpos = inWorldSpace and obj:getNodePosition(node.cid) or vec3(node.pos)
-      cog = cog + cpos * node.nodeWeight
+      local nodePos = useWorldSpace and obj:getNodePosition(node.cid) or vec3(node.pos)
+      cogPosition = cogPosition + nodePos * node.nodeWeight
       totalMass = totalMass + node.nodeWeight
     end
   end
-  -- Is this cog wrt to the reference node? TBD
-  return totalMass, cog / totalMass
+  
+  return totalMass, cogPosition / totalMass
 end
-
--- --[[
---     Main function to gather vehicle properties
---     @param props: table - Optional parameters
---     @return: table - Complete vehicle properties dataset
--- ]]
--- local function getVehicleProperties(props)
---     -- Vehicle dimensions from bounding box
---     local vehLength = obj:getInitialLength()
---     local vehWidth = obj:getInitialWidth()
---     local vehHeight = obj:getInitialHeight()
-
---     -- Center of gravity calculations
---     local withoutWheels = props and props.withoutWheels or false
---     -- local cogRel = obj:calcCenterOfGravityRel(withoutWheels)
---     local cogGlobal = obj:calcCenterOfGravity(withoutWheels)
---     local currPos = obj:getPosition()
---     local currDirection = obj:getDirectionVector():normalized()
---     -- local newCog = cogGlobal - currPos
-
---     -- Center of mass wrt to the reference node in vehicle frame.
---     local cogPosRelRef = relativeCenterOfMass()
---     local estCogGlobal = cogPosRelRef + currPos
-
---     -- Reference coordinate system setup
---     local refNodes = v.data.refNodes[0]  -- Preserved [0] index access
---     if not (refNodes and refNodes.ref and refNodes.back and refNodes.up) then
---        log('E', logTag, 'Reference nodes not found')
---        return {}
---     end
-
---     -- Extract some of the reference node positions
---     local nodeRef = v.data.nodes[refNodes.ref]
---     local nodeBack = v.data.nodes[refNodes.back]
---     local nodeUp = v.data.nodes[refNodes.up]
-
---     -- Get the position of the nodes in the world space
---     local posRef = obj:getNodePosition(nodeRef.cid)
---     local posBack = obj:getNodePosition(nodeBack.cid)
---     local posUp = obj:getNodePosition(nodeUp.cid)
---     local estCogGlobalV2 = posRef + cogPosRelRef
-
---     -- Position relative to the reference node
---     local relPosRef = vec3(nodeRef.pos)
---     local relPosBack = vec3(nodeBack.pos)
---     local relPosUp = vec3(nodeUp.pos)
-
---     -- Find the direction
---     local vectorForwardWS = (posRef - posBack):normalized()
---     local vectorUpWS = (posUp - posRef):normalized()
---     local vectorLeftWS = vectorUpWS:cross(vectorForwardWS):normalized()
-
---     -- Find the direction world space
---     local vectorForward = (relPosRef - relPosBack):normalized()
---     local vectorUp = (relPosUp - relPosRef):normalized()
---     local vectorLeft = vectorUp:cross(vectorForward):normalized()
-
---     -- local vRef = vec3(v.data.nodes[refNodes.ref].pos)
---     -- local vectorForward = (vRef - vec3(v.data.nodes[refNodes.back].pos)):normalized()
---     -- local vectorUp = (vec3(v.data.nodes[refNodes.up].pos) - vRef):normalized()
---     -- local vectorLeft = vectorUp:cross(vectorForward):normalized()
-
---     -- Wheel processing
---     local wRotators = wheels.wheelRotators
---     local wIds = wheels.wheelRotatorIDs
---     local wheelsData = {
---         FR = wRotators[wIds.FR],
---         FL = wRotators[wIds.FL],
---         RR = wRotators[wIds.RR],
---         RL = wRotators[wIds.RL]
---     }
-
---     -- Mass and position calculations
---     local totalMass = 0
---     local wheelPositions = {FR = nil, FL = nil, RR = nil, RL = nil}
---     local axlePositions = {front = nil, rear = nil}
---     local trackWidths = {left = 0, right = 0}
-
---     for _, node in pairs(v.data.nodes) do
---         totalMass = totalMass + (node.nodeWeight or 0)
-
---         -- Determine wheel positions
---         for wheelName, wheelData in pairs(wheelsData) do
---             if node.cid == wheelData.node1 then
---                 wheelPositions[wheelName] = vec3(node.pos)
---                 if wheelName:sub(1, 1) == 'F' then
---                     -- TODO: Do the actual dot product to determine front/rear
---                     axlePositions.front = node.pos.y
---                     trackWidths.right = node.pos.x
---                 else
---                     axlePositions.rear = node.pos.y
---                     trackWidths.left = node.pos.x
---                 end
---             end
---         end
---     end
-
---     -- Wheel-specific calculations
---     local wheelInfo = {}
---     for wheelName, wheelData in pairs(wheelsData) do
---         local posRel
---         if wheelPositions[wheelName] then
---             posRel = wheelPositions[wheelName] - cogPosRelRef
---         else
---             posRel = vec3()
---         end
---         -- local posRel = wheelPositions[wheelName] and (wheelPositions[wheelName] - cogRel) or vec3()
-
---         wheelInfo[wheelName:lower()] = {
---             mass = getWheelMass(wheelData),
---             pos = posRel:toTable(),
---             -- pos = convertLBUtoFLU(posRel, vectorForward, vectorLeft, vectorUp):toTable(),
---             inertia = wheelData.inertia,
---             radius = wheelData.radius,
---             width = wheelData.tireWidth
---         }
---     end
-
---     -- Final output structure (matches original format)
---     return {
---         vLength = vehLength,
---         vWidth = vehWidth,
---         vHeight = vehHeight,
---         estCogGlobal = estCogGlobal:toTable(),
---         relCog = cogPosRelRef:toTable(),
---         posRef = posRef:toTable(),
---         estCogGlobalV2 = estCogGlobalV2:toTable(),
---         currPos = currPos:toTable(),
---         -- trueRelCog = relCOG:toTable(),
---         -- cogRel = cogRel:toTable(),
---         -- cogGlobal = convertLBUtoFLU(cogRel, vectorForward, vectorLeft, vectorUp):toTable(),
---         cogGlobal = cogGlobal:toTable(), -- In game frame
---         -- cogOther = newCog:toTable(),
---         currDirection = currDirection:toTable(),
---         wheelBase = obj:nodeLength(wheelsData.FR.node1, wheelsData.RR.node1),
---         totalMass = totalMass,
---         cogToFrontAxle = abs(cogPosRelRef.y - axlePositions.front),
---         cogToRearAxle = abs(cogPosRelRef.y - axlePositions.rear),
---         cogToLeftWheelAxle = abs(cogPosRelRef.x - trackWidths.left),
---         cogToRightWheelAxle = abs(cogPosRelRef.x - trackWidths.right),
---         vectorForward = vectorForward:toTable(),
---         vectorUp = vectorUp:toTable(),
---         vectorLeft = vectorLeft:toTable(),
---         vectorForwardWS = vectorForwardWS:toTable(),
---         vectorUpWS = vectorUpWS:toTable(),
---         vectorLeftWS = vectorLeftWS:toTable(),
---         wheel_fr = wheelInfo.fr,
---         wheel_fl = wheelInfo.fl,
---         wheel_rr = wheelInfo.rr,
---         wheel_rl = wheelInfo.rl,
---         vehInertia = {
---             xx = getInertiaOnDiag(1, cogPosRelRef, vectorForward, vectorLeft, vectorUp),
---             yy = getInertiaOnDiag(2, cogPosRelRef, vectorForward, vectorLeft, vectorUp),
---             zz = getInertiaOnDiag(3, cogPosRelRef, vectorForward, vectorLeft, vectorUp),
---             xy = getCrossInertia(1, 2, cogPosRelRef, vectorForward, vectorLeft, vectorUp),
---             xz = getCrossInertia(1, 3, cogPosRelRef, vectorForward, vectorLeft, vectorUp),
---             yz = getCrossInertia(2, 3, cogPosRelRef, vectorForward, vectorLeft, vectorUp)
---         }
---     }
--- end
 
 local function getVehicleProperties(props)
   -- Vehicle dimensions from bounding box
@@ -544,38 +379,42 @@ local function getVehicleProperties(props)
   local vehWidth = obj:getInitialWidth()
   local vehHeight = obj:getInitialHeight()
 
-  -- Center of gravity calculations
-  local worldSpace = props and props.worldSpace or false
+  -- Determine coordinate frame: worldSpace=true uses world coords, false uses local config
+  local useWorldSpace = props and props.worldSpace or true
 
-  local cogGlobal = obj:calcCenterOfGravity(false)
-  local currPos = obj:getPosition()
-  -- local currDirection = obj:getDirectionVector():normalized()
-  local totalMass, cogPosRelRef = relativeCenterOfMass(worldSpace)
+  -- Dynamic COG from BeamNG physics engine (runtime, global coords)
+  local cogDynamicGlobal = obj:calcCenterOfGravity(false)
+  -- local refNodeGlobalPos = obj:getPosition()
+  
+  -- Static COG calculated from node masses
+  local totalMass, cogInSelectedFrame = relativeCenterOfMass(useWorldSpace)
 
-  local refNodes = v.data.refNodes[0] -- Preserved [0] index access
-  -- Extract some of the reference node positions
-  local nodeRef = v.data.nodes[refNodes.ref] -- Assume node ref is on the drvetrain
+  -- Get reference frame nodes
+  local refNodes = v.data.refNodes[0]
+  local nodeRef = v.data.nodes[refNodes.ref]
   local nodeBack = v.data.nodes[refNodes.back]
   local nodeUp = v.data.nodes[refNodes.up]
 
-  -- Get the position of the nodes in the world space
-  local posRef, posBack, posUp
-  if worldSpace then
-    posRef = obj:getNodePosition(nodeRef.cid)
-    posBack = obj:getNodePosition(nodeBack.cid)
-    posUp = obj:getNodePosition(nodeUp.cid)
+  -- Get reference node positions in selected frame
+  -- World space: positions relative to refNode (refNode itself is at origin)
+  -- Local space: initial configuration positions from jbeam
+  local refNodePos, backNodePos, upNodePos
+  if useWorldSpace then
+    refNodePos = obj:getNodePosition(nodeRef.cid)  -- This is vec3(0,0,0)
+    backNodePos = obj:getNodePosition(nodeBack.cid)
+    upNodePos = obj:getNodePosition(nodeUp.cid)
   else
-    posRef = vec3(nodeRef.pos)
-    posBack = vec3(nodeBack.pos)
-    posUp = vec3(nodeUp.pos)
+    refNodePos = vec3(nodeRef.pos)
+    backNodePos = vec3(nodeBack.pos)
+    upNodePos = vec3(nodeUp.pos)
   end
 
-  -- Find the direction
-  local vectorForward = (posRef - posBack):normalized()
-  local vectorUp = (posUp - posRef):normalized()
+  -- Calculate vehicle principal axes from reference nodes
+  local vectorForward = (refNodePos - backNodePos):normalized()
+  local vectorUp = (upNodePos - refNodePos):normalized()
   local vectorLeft = vectorUp:cross(vectorForward):normalized()
 
-  -- Wheel processing
+  -- Get wheel rotator data
   local wRotators = wheels.wheelRotators
   local wIds = wheels.wheelRotatorIDs
   local wheelsData = {
@@ -585,57 +424,50 @@ local function getVehicleProperties(props)
     RL = wRotators[wIds.RL],
   }
 
-  -- Mass and position calculations
+  -- Get wheel positions in selected coordinate frame
   local wheelPositions = { FR = nil, FL = nil, RR = nil, RL = nil }
   for wheelName, wheelData in pairs(wheelsData) do
-    if worldSpace then
+    if useWorldSpace then
       wheelPositions[wheelName] = obj:getNodePosition(wheelData.node1)
     else
       wheelPositions[wheelName] = vec3(v.data.nodes[wheelData.node1].pos)
     end
   end
 
-  -- Wheel-specific calculations
+  -- Calculate wheel properties relative to COG
   local wheelInfo = {}
   for wheelName, wheelData in pairs(wheelsData) do
-    local posRel = wheelPositions[wheelName] - cogPosRelRef
+    local wheelPosToCog = wheelPositions[wheelName] - cogInSelectedFrame
     wheelInfo[wheelName:lower()] = {
       mass = getWheelMass(wheelData),
-      pos = posRel:toTable(),
+      pos = wheelPosToCog:toTable(),
       inertia = wheelData.inertia,
       radius = wheelData.radius,
       width = wheelData.tireWidth,
     }
   end
 
-  -- Extract the distance between the front and rear axles
-  local cogToFR = wheelPositions.FR - cogPosRelRef
-  local cogToRL = wheelPositions.RL - cogPosRelRef
-
-  -- Keep track of the fixed center of gravity instead of dynamic
-  local _useless, cogPosRelLocal = relativeCenterOfMass(false)
-  local refPosRel = vec3(nodeRef.pos)
-  local distCogtoRef = cogPosRelLocal - refPosRel
-  local staticCogPos = currPos + distCogtoRef
-
-  -- Final output structure (matches original format)
+  -- Calculate COG to wheel vectors for axle distances
+  local cogToFrontRight = wheelPositions.FR - cogInSelectedFrame
+  local cogToRearLeft = wheelPositions.RL - cogInSelectedFrame
+  local cogPostionGlobal = obj:getPosition() + cogInSelectedFrame -- COG in global coordinates
+  local coGHeight = wheelInfo.fr.radius + math.abs(wheelInfo.fr.pos[3])
+  -- Return vehicle properties in FLU (Front-Left-Up) frame
   return {
     vehLength = vehLength,
     vehWidth = vehWidth,
     vehHeight = vehHeight,
-    cogPosDynamic = cogGlobal:toTable(), -- In game frame
-    cogPosStatic = staticCogPos:toTable(), -- In game frame
-    cogPosDynamicRel = cogPosRelRef:toTable(),
-    cogPosStaticRel = distCogtoRef:toTable(),
-    refNodePos = currPos:toTable(),
-    -- currDirection = currDirection:toTable(),
-    distFR = obj:nodeLength(wheelsData.FR.node1, wheelsData.RR.node1),
-    distLR = obj:nodeLength(wheelsData.FR.node1, wheelsData.FL.node1),
+    coGHeight = coGHeight,
+    cogPosDynamic = cogDynamicGlobal:toTable(),      -- Runtime COG in global coords
+    cogPosDynamicRel = cogInSelectedFrame:toTable(), -- COG in selected frame
+    cogPos = cogPostionGlobal:toTable(),             -- CoG position in the body frame centered on the ground
+    distFR = obj:nodeLength(wheelsData.FR.node1, wheelsData.RR.node1),  -- Front-rear wheelbase
+    distLR = obj:nodeLength(wheelsData.FR.node1, wheelsData.FL.node1),  -- Left-right track width
     totalMass = totalMass,
-    cogToFrontAxle = cogToFR:dot(vectorForward),
-    cogToRearAxle = -cogToRL:dot(vectorForward),
-    cogToLeftWheelAxle = cogToRL:dot(vectorLeft),
-    cogToRightWheelAxle = -cogToFR:dot(vectorLeft),
+    cogToFrontAxle = cogToFrontRight:dot(vectorForward),
+    cogToRearAxle = -cogToRearLeft:dot(vectorForward),
+    cogToLeftWheelAxle = cogToRearLeft:dot(vectorLeft),
+    cogToRightWheelAxle = -cogToFrontRight:dot(vectorLeft),
     vectorForward = vectorForward:toTable(),
     vectorUp = vectorUp:toTable(),
     vectorLeft = vectorLeft:toTable(),
@@ -644,45 +476,56 @@ local function getVehicleProperties(props)
     wheel_rr = wheelInfo.rr,
     wheel_rl = wheelInfo.rl,
     inertia = {
-      xx = getInertiaOnDiag(1, cogPosRelRef, vectorForward, vectorLeft, vectorUp, worldSpace),
-      yy = getInertiaOnDiag(2, cogPosRelRef, vectorForward, vectorLeft, vectorUp, worldSpace),
-      zz = getInertiaOnDiag(3, cogPosRelRef, vectorForward, vectorLeft, vectorUp, worldSpace),
-      xy = getCrossInertia(1, 2, cogPosRelRef, vectorForward, vectorLeft, vectorUp, worldSpace),
-      xz = getCrossInertia(1, 3, cogPosRelRef, vectorForward, vectorLeft, vectorUp, worldSpace),
-      yz = getCrossInertia(2, 3, cogPosRelRef, vectorForward, vectorLeft, vectorUp, worldSpace),
+      xx = getInertiaOnDiag(1, cogInSelectedFrame, vectorForward, vectorLeft, vectorUp, useWorldSpace),
+      yy = getInertiaOnDiag(2, cogInSelectedFrame, vectorForward, vectorLeft, vectorUp, useWorldSpace),
+      zz = getInertiaOnDiag(3, cogInSelectedFrame, vectorForward, vectorLeft, vectorUp, useWorldSpace),
+      xy = getCrossInertia(1, 2, cogInSelectedFrame, vectorForward, vectorLeft, vectorUp, useWorldSpace),
+      xz = getCrossInertia(1, 3, cogInSelectedFrame, vectorForward, vectorLeft, vectorUp, useWorldSpace),
+      yz = getCrossInertia(2, 3, cogInSelectedFrame, vectorForward, vectorLeft, vectorUp, useWorldSpace),
     },
   }
 end
 
 --[[
-    Gets vehicle's global center of gravity and principal vectors
-    @param withoutWheels: boolean - (Optional) Exclude wheels from COG calculation
-    @return: table - {cogGlobal, vectorForward, vectorUp, vectorLeft}
+    Get vehicle principal axes and center of gravity in global coordinates
+    Uses current world positions to compute runtime orientation and COG
+    @return: table - COG positions, principal axes, and reference positions
 ]]
 local function getVehiclePrincipalAxis()
-  -- Basic reference setup
-  local r = v.data.refNodes[0]
-  local n = v.data.nodes
-  local pos = {
-    ref = vec3(n[r.ref].pos),
-    back = vec3(n[r.back].pos),
-    up = vec3(n[r.up].pos),
-  }
+  -- Get reference frame nodes
+  local refNodes = v.data.refNodes[0]
+  local nodeRef = v.data.nodes[refNodes.ref]
+  local nodeBack = v.data.nodes[refNodes.back]
+  local nodeUp = v.data.nodes[refNodes.up]
 
-  -- Core calculations
-  local forward = (pos.ref - pos.back):normalized()
-  local up = (pos.up - pos.ref):normalized()
+  -- Get world positions (relative to refNode, which is at origin in this frame)
+  local refNodeWorldPos = obj:getNodePosition(nodeRef.cid)   -- vec3(0,0,0)
+  local backNodeWorldPos = obj:getNodePosition(nodeBack.cid)
+  local upNodeWorldPos = obj:getNodePosition(nodeUp.cid)
 
-  -- Center of mass in local space
-  local _useless, cog = relativeCenterOfMass(false)
-  local currPos = obj:getPosition()
-  cog = currPos + (cog - pos.ref)
+  -- Calculate principal axes from current world positions
+  local vectorForward = (refNodeWorldPos - backNodeWorldPos):normalized()
+  local vectorUp = (upNodeWorldPos - refNodeWorldPos):normalized()
+  local vectorLeft = vectorUp:cross(vectorForward):normalized()
+
+  -- Get COG in world space relative to refNode
+  local _, cogWorldRelativeToRef = relativeCenterOfMass(true)
+  local refNodeGlobalPos = obj:getPosition()
+  
+  -- Convert COG to global coordinates
+  local cogGlobal = refNodeGlobalPos + (cogWorldRelativeToRef - refNodeWorldPos)
 
   return {
-    cogPosStatic = cog:toTable(),
-    vectorForward = forward:toTable(),
-    vectorUp = up:toTable(),
-    vectorLeft = up:cross(forward):normalized():toTable(),
+    cogPosStatic = cogGlobal:toTable(),                    -- COG in global coordinates
+    cogPosRel = (cogGlobal - refNodeGlobalPos):toTable(), -- COG relative to refNode global pos
+    vectorForward = vectorForward:toTable(),               -- Forward direction
+    vectorUp = vectorUp:toTable(),                         -- Up direction
+    vectorLeft = vectorLeft:toTable(),                     -- Left direction
+    -- currPos = refNodeGlobalPos:toTable(),                  -- RefNode global position
+    -- forwardVec = obj:getDirectionVector():normalized():toTable(),   -- Vehicle forward from BeamNG
+    -- upVec = obj:getDirectionVectorUp():normalized():toTable(),      -- Vehicle up from BeamNG
+    -- posRef = refNodeWorldPos:toTable(),                    -- RefNode world pos (0,0,0)
+    -- cogRel = cogWorldRelativeToRef:toTable(),              -- COG in world frame rel to refNode
   }
 end
 
@@ -724,19 +567,43 @@ local function getControllerInfos()
   return controllerTypes
 end
 
+local function buildControllerWhitelistLookup(whitelist)
+  local lookup = {}
+  if type(whitelist) ~= 'table' then return lookup end
+
+  for key, value in pairs(whitelist) do
+    if type(key) == 'string' then lookup[key] = true end
+
+    if type(value) == 'string' then
+      lookup[value] = true
+    elseif type(value) == 'table' then
+      if type(value.name) == 'string' then lookup[value.name] = true end
+      if type(value.typeName) == 'string' then lookup[value.typeName] = true end
+    end
+  end
+
+  return lookup
+end
+
 --[[
     Local function to disale all safety modules. Typically, ABS, ESC,
-    and additional modules from drivingDynamics controller
+    and additional modules from drivingDynamics controller.
+    @param whitelist: table|nil - Controllers to preserve, keyed or listed by name/type
+    @return: table - Removed controllers indexed by controller name
 ]]
-local function stopSafetyFeatures()
+local function stopSafetyFeatures(whitelist)
   -- Get all the controllers
   local allControllers = controller.getAllControllers()
   local ctrlToRemove = {}
+  local whitelistLookup = buildControllerWhitelistLookup(whitelist)
   log('I', logTag, '\n-- Stopping safety features --')
   for ctrlName, ctrlObj in pairs(allControllers) do
     local ctrlType = ctrlObj.typeName
     -- Check if drivingDyanmics is a subset of the controller type
     if string.find(ctrlType, 'drivingDynamics') then
+      if whitelistLookup[ctrlName] or whitelistLookup[ctrlType] then
+        log('I', logTag, 'Keeping whitelisted controller: ' .. ctrlName .. ' (' .. ctrlType .. ')')
+      else
       ctrlToRemove[ctrlName] = ctrlType
       log('I', logTag, 'Attempting to remove controller: ' .. ctrlName)
       if ctrlObj.shutdown then
@@ -747,6 +614,7 @@ local function stopSafetyFeatures()
         if ctrlObj.updateGFX then ctrlObj.updateGFX = nil end
         if ctrlObj.isActive then ctrlObj.isActive = nil end
         log('I', logTag, 'Controller ' .. ctrlName .. ' uppdate, updateGFX set to nil')
+      end
       end
     end
   end
@@ -1080,11 +948,11 @@ end
 
 --[[
     Handler for stopping safety features
-    @param request: table - Request parameters
+    @param request: table - Request parameters, optionally containing a whitelist table
     @return: nil
 ]]
 function M.handleStopSafetyFeatures(request)
-  local data = stopSafetyFeatures()
+  local data = stopSafetyFeatures(request and request.whitelist)
   request:sendResponse({
     type = 'StopSafetyFeatures',
     data = data,
@@ -1159,5 +1027,6 @@ end
 
 M.onInit = onInit
 M.onSocketMessage = onSocketMessage
+M.stopSafetyFeatures = stopSafetyFeatures
 
 return M

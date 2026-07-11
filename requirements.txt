@@ -1,0 +1,7 @@
+# Golden-path Python deps (pip). Install before first colcon build:
+#   pip install -r requirements.txt
+beamngpy
+PyYAML
+numpy
+tqdm
+rosbags

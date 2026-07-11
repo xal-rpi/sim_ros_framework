@@ -181,8 +181,9 @@ def interactive_jitter(df, metrics, args):
 def process_file(path, args):
     print(f"\nLoading {path!r} …")
     data = load_pickle(path)
+    if "data" in data:
+        data = data["data"]
     for (veh, sensor), fld_dict in data.items():
-        print(f"\n=== Vehicle: {veh!r}   Sensor: {sensor!r} ===")
         for k, v in fld_dict.items():
             print(f"  - {k:20s} : {len(v)} samples")
         if pd is None:
@@ -312,6 +313,8 @@ def main():
         ):
             print(f"\n→ Loading {pth!r}")
             data = load_pickle(pth)
+            if "data" in data:
+                data = data["data"]
             for (veh, sensor), fld_dict in data.items():
                 print(f"\n=== Vehicle:{veh!r} Sensor:{sensor!r} ===")
                 df = pd.DataFrame(fld_dict)
@@ -326,6 +329,8 @@ def main():
         try:
             process_file(pth, args)
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"ERROR processing {pth!r}: {e}")
 
 

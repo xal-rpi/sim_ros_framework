@@ -1,0 +1,19 @@
+# User preset — absolute spawn coordinates on derby (no new run YAML needed).
+#
+# ``spawn`` supplies cling/yaw defaults from the level preset; ``pos`` replaces
+# the world position.
+#
+# Launch:
+#   ros2 launch bng_bringup simulator.launch.py preset:=derby_custom_pos.yaml
+#
+# Absolute path to your own copy:
+#   ros2 launch bng_bringup simulator.launch.py preset:=/home/you/my_spot.yaml
+#
+# Quick CLI without a preset file:
+#   ros2 launch bng_bringup simulator.launch.py level:=derby spawn:=grid_lane \
+#     pos:="44.05,127.22,79.3"
+
+level: derby
+spawn: grid_lane
+pos: [44.05, 127.22, 79.3]
+yaw: 0

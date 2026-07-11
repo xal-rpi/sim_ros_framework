@@ -1,0 +1,31 @@
+# Two-agent CREATE run — shared spawn preset + lateral offset.
+#
+# Launch:
+#   ros2 launch bng_bringup simulator.launch.py config:=multi_agent.yaml
+#
+# AGENT2 uses same spawn preset as EGO with pos_offset (lineup at origin).
+
+compose:
+  profile: create
+  level: tech_ground
+  vehicles:
+    - id: EGO
+      vehicle: utv_wild
+      spawn: origin
+    - id: AGENT2
+      vehicle: etk800_track
+      spawn: origin
+      pos_offset: [6.0, 0.0, 0.0]
+      yaw: -90
+      port_index: 1
+
+scenario_mode: create
+
+overrides:
+  ros_poll:
+    EGO:
+      gtstate:
+        publish: 0
+    AGENT2:
+      gtstate:
+        publish: 0
