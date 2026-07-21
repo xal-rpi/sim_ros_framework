@@ -14,6 +14,7 @@ This starts `sim_manager_node` + `sensor_dispatcher` (see root README).
 
 ```
 config/
+  OVERRIDES.md       # How to tune LLC, sensors, scenarios (start here)
   runs/              # Thin run files (what you pass to config:=)
   levels/            # Per-map spawn presets (derby, tech_ground, …)
   defaults/          # sim, llc, udp_io, ros_poll fragments
@@ -77,7 +78,8 @@ Or use [mirrored networking](https://learn.microsoft.com/en-us/windows/wsl/wsl-c
 
 ## Reference
 
-- All knobs: `config/runs/compose_reference.yaml`
+- **Overrides guide:** [config/OVERRIDES.md](config/OVERRIDES.md) — LLC, gtState, sensors, merge priority
+- Run-file knobs: `config/runs/compose_reference.yaml`
 - Multi-agent: `config/runs/multi_agent.yaml`
 - Attach mode: `config/runs/attach.yaml`
 

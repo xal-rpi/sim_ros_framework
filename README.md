@@ -121,6 +121,8 @@ You should see `sim_manager_node` spawn the scenario and `sensor_dispatcher` pub
 
 **Config flow:** thin `config/runs/*.yaml` → `scenario_compose` → fragments (`defaults/`, `levels/`, `vehicle_catalog.yaml`).
 
+**Changing scenarios and LLC/sensor settings:** see [bng_bringup/config/OVERRIDES.md](src/bng_xal/bng_bringup/config/OVERRIDES.md) for merge priority, run `overrides`, presets, catalog, and when to edit `defaults/` in place.
+
 ---
 
 ## Control: three ways
@@ -188,11 +190,17 @@ ros2 launch bng_bringup simulator.launch.py
 # Derby preset (no new YAML file)
 ros2 launch bng_bringup simulator.launch.py preset:=derby_grid_lane.yaml
 
-# Overrides
+# Spawn / vehicle shorthand (single-vehicle runs only)
 ros2 launch bng_bringup simulator.launch.py level:=derby spawn:=grid_lane yaw:=0
 ```
 
-Full reference: `bng_bringup/config/runs/compose_reference.yaml`.
+| Doc | Use when |
+|-----|----------|
+| **[OVERRIDES.md](src/bng_xal/bng_bringup/config/OVERRIDES.md)** | Tune LLC, gtState, sensors, or defaults — run `overrides`, presets, catalog |
+| [compose_reference.yaml](src/bng_xal/bng_bringup/config/runs/compose_reference.yaml) | Run-file knobs, launch examples, fragment stack |
+| [bng_bringup README](src/bng_xal/bng_bringup/README.md) | Config layout, presets, WSL networking |
+
+Config YAML edits need no rebuild if `bng_bringup` is symlink-installed (step 4).
 
 ---
 

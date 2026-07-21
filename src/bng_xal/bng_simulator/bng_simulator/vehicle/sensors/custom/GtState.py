@@ -53,10 +53,31 @@ class GtStateWrapper(CommBase):
         is_visualised: bool = True,
         is_snapping_desired: bool = False,
         is_force_inside_triangle: bool = False,
+        # Attach-point vs report-point decoupling (see below).
+        #
+        # The SensorMatrixManager attaches the sensor to the *nearest* vehicle
+        # triangle to `pos`. When `pos` is the CoG (default), that triangle can
+        # be a soft/tilted mesh panel (seats, body shell), which makes the
+        # reconstructed sensor frame wobble and pollutes vy at speed.
+        #
+        # `attach_z_offset` shifts ONLY the attach position along the vehicle
+        # up axis (negative = downward, e.g. onto the stiff floor pan / frame
+        # rails), so a better triangle is selected. The Lua controller then
+        # transports position/velocity/acceleration back to the original
+        # report point (pos, typically the CoG) using the rigid-body transport
+        # equations with the exact angular velocity/acceleration — so the
+        # published state still refers to `pos`, lag-free.
+        # Angular quantities are point-independent and unaffected.
+        attach_z_offset: float = 0.0,
         accel_tau_s: Optional[float] = None,
         gyro_tau_s: Optional[float] = None,
         vel_tau_s: Optional[float] = None,
         wheel_angvel_tau_s: Optional[float] = None,
+        # Sensor FLU (see gtState.lua attitudeStep):
+        #   "triangle"  — legacy raw attach-triangle axes
+        #   "integrate" — propagate q with curl ω, slow pull to triangle
+        attitude_mode: Optional[str] = None,
+        attitude_tau_s: Optional[float] = None,  # pull to triangle [s]; integrate only
         debug_raw: Optional[bool] = None,
         torque_map: Optional[dict] = None,
     ):
@@ -85,10 +106,13 @@ class GtStateWrapper(CommBase):
             is_visualised,
             is_snapping_desired,
             is_force_inside_triangle,
+            attach_z_offset,
             accel_tau_s,
             gyro_tau_s,
             vel_tau_s,
             wheel_angvel_tau_s,
+            attitude_mode,
+            attitude_tau_s,
             debug_raw,
             torque_map
         )
@@ -131,10 +155,13 @@ class GtStateWrapper(CommBase):
         is_visualised: bool,
         is_snapping_desired: bool,
         is_force_inside_triangle: bool,
+        attach_z_offset: float = 0.0,
         accel_tau_s: Optional[float] = None,
         gyro_tau_s: Optional[float] = None,
         vel_tau_s: Optional[float] = None,
         wheel_angvel_tau_s: Optional[float] = None,
+        attitude_mode: Optional[str] = None,
+        attitude_tau_s: Optional[float] = None,
         debug_raw: Optional[bool] = None,
         torque_map: Optional[dict] = None,
     ) -> None:
@@ -144,9 +171,18 @@ class GtStateWrapper(CommBase):
         data["GFXUpdateTime"] = gfx_update_time
         data["physicsUpdateTime"] = physics_update_time
         data["numPhysicsStepsForGFXSave"] = num_physics_steps_for_gfx_save
-        data["pos"] = self.calculate_cog_pos(pos)
+        # Attach position: requested report point shifted by attach_z_offset
+        # along the vehicle up axis (local (fwd, left, up) -> world in
+        # calculate_cog_pos). The triangle search happens around THIS point.
+        attach_pos = (pos[0], pos[1], pos[2] + attach_z_offset)
+        data["pos"] = self.calculate_cog_pos(attach_pos)
         data["dir"] = self.calculate_dir(dir)
         data["left"] = self.calculate_dir(left)
+        # Constant offset from the attach point back to the report point,
+        # expressed in the sensor FLU frame (x=fwd, y=left, z=up). The Lua
+        # controller applies the rigid-body transport with this vector every
+        # physics step, so published pos/vel/accel refer to the report point.
+        data["report_offset"] = (0.0, 0.0, -attach_z_offset)
         data["isAllowWheelNodes"] = is_allow_wheel_nodes
         data["isVisualised"] = is_visualised
         data["isSnappingDesired"] = is_snapping_desired
@@ -160,6 +196,10 @@ class GtStateWrapper(CommBase):
             data["vel_tau_s"] = vel_tau_s
         if wheel_angvel_tau_s is not None:
             data["wheel_angvel_tau_s"] = wheel_angvel_tau_s
+        if attitude_mode is not None:
+            data["attitude_mode"] = attitude_mode
+        if attitude_tau_s is not None:
+            data["attitude_tau_s"] = attitude_tau_s
         if debug_raw is not None:
             data["debug_raw"] = debug_raw
         if torque_map is not None:

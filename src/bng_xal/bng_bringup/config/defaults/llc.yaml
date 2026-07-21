@@ -16,10 +16,22 @@ sensors:
     gfx_update_time: 0.3          # [s] graphics-side save rate
     physics_update_time: 0.005    # [s] physics-side filter step
     num_physics_steps_for_gfx_save: 1
-    accel_tau_s: 0.04             # low-pass time constant on linear accel
+    # [m] Shift of the ATTACH point along vehicle up (negative = down), used
+    # to select a stiffer/flatter attach triangle (e.g. floor pan instead of
+    # soft cabin mesh). Published pos/vel/accel are rigid-body-transported
+    # back to the unshifted report point (CoG) in Lua — exact and lag-free.
+    # With the M^-1 angVel correction and the velocity observer this is not
+    # needed (results are attach-point independent); 0.0 skips the transport.
+    attach_z_offset: 0.0
+    accel_tau_s: 0.01             # low-pass time constant on linear accel
     gyro_tau_s: 0.005
     vel_tau_s: 0.005
     wheel_angvel_tau_s: 0.005
+    # Sensor FLU (attach triangle). Geometric flex fakes vy via v·left.
+    #   triangle  — legacy: raw triangle axes every step
+    #   integrate — propagate q with curl ω, slow pull to triangle (panel frame, no HF flex)
+    attitude_mode: integrate
+    attitude_tau_s: 0.3           # absolute pull to triangle [s]; integrate only
     debug_raw: true               # log raw vs filtered in Lua (verbose)
 
   # AdvancedIMU mounted on roof; dir/up define sensor frame vs body.
@@ -92,14 +104,14 @@ controllers:
       #   full | steering_only | torque_only
       control_mode: full
       # [s] no command → LLC releases to manual control
-      command_timeout: 3.0
+      command_timeout: 4.0
       gains:
         # Rear wheel-speed PI (needs torque_map for actuation).
         pi_enable: 1.0             # 0 = feedforward / throttle_override only
         kp: 4027.676261566621
         ki: 12.951175253199954
-        i_min: -500.0              # anti-windup on integral state [N·m·s]
-        i_max: 500.0
+        i_min: -100.0              # anti-windup on integral state [N·m·s]
+        i_max: 100.0
         t_min: -100.0              # clamp on PI term [N·m], not total tCmd
         t_max: 100.0
         u_smooth: 0.05               # throttle FF low-pass (0..0.99)

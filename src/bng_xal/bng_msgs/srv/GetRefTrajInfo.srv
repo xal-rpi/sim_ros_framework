@@ -1,0 +1,25 @@
+# One-shot identity for viz / logger / analysis clients.
+# Request is empty — response describes the artifact the controller loaded.
+
+---
+bool success
+string artifact_name
+string artifact_dir
+string traj_csv
+string surface_file
+string chart
+string surface_kind
+bool surface_planar
+
+string[] x_labels
+string[] u_labels
+int32 n_stages
+float64[] delta_s
+
+# Vehicle drawer geometry (from artifact meta.vehicle)
+float64 cog_to_front_axle
+float64 cog_to_rear_axle
+float64 cog_to_left_wheel
+float64 cog_to_right_wheel
+
+string message

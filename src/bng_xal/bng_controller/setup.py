@@ -34,6 +34,7 @@ setup(
             "test_vehicle_udp = bng_controller.scripts.test_vehicle_udp:main",
             "test_vehicle_sensor_udp = bng_controller.scripts.test_vehicle_sensor_udp:main",
             "test_llc_wr_torque = bng_controller.scripts.test_llc_wr_torque:main",
+            "plot_gtstate_debug = bng_controller.scripts.plot_gtstate_debug:main",
         ],
     },
 )

@@ -46,10 +46,15 @@ local gtStateManager = nil
 -- add one module under filters.modules and one state under filters.state.
 local filters = {
   params = {
-    accelTauS = 0.03, -- specific-force world acceleration smoothing (2-pass EMA)
-    gyroTauS = 0.01, -- angular velocity smoothing (local frame)
+    accelTauS = 0.005, -- specific-force world acceleration smoothing (2-pass EMA)
+    gyroTauS = 0.005, -- angular velocity smoothing (local frame)
     velTauS = 0.01, -- world velocity smoothing
     wheelAngVelTauS = 0.01, -- only wheel*.angVel is filtered (in-place)
+    -- Sensor-frame attitude (see attitudeStep):
+    --   "triangle"  — legacy: raw attach-triangle FLU every step
+    --   "integrate" — propagate q with curl ω, slow pull to triangle FLU
+    attitudeMode = 'triangle',
+    attitudeTauS = 0.3, -- absolute pull to triangle [s]; integrate only
     debugRaw = true, -- if true, publish additional world-frame raw/filtered fields
   },
   cache = {
@@ -112,6 +117,7 @@ function filters.rebuildCache(dt)
   filters.cache.nominalAlpha.gyro = alphaFromTau(dt, filters.params.gyroTauS)
   filters.cache.nominalAlpha.vel = alphaFromTau(dt, filters.params.velTauS)
   filters.cache.nominalAlpha.wheelAngVel = alphaFromTau(dt, filters.params.wheelAngVelTauS)
+  filters.cache.nominalAlpha.attitudeAbs = alphaFromTau(dt, filters.params.attitudeTauS)
 end
 
 
@@ -201,13 +207,6 @@ local function writeVec3Table(dst, v)
   dst[3] = v.z
 end
 
-local function writeQuatTable(dst, q)
-  dst[1] = q[1]
-  dst[2] = q[2]
-  dst[3] = q[3]
-  dst[4] = q[4]
-end
-
 local function writeWheelInfoTable(dst, src)
   dst.speed = src.speed or 0.0
   dst.angVel = src.angVel or 0.0
@@ -252,6 +251,12 @@ local sensorConfig = {
   signedProjDist = nil, -- Signed distance from the sensor to the triangle plane
   triangleSpaceForward = nil, -- Forward direction vector in triangle space
   triangleSpaceLeft = nil, -- Left direction vector in triangle space
+  -- Optional vector (sensor FLU frame, meters) from the attach point to the
+  -- report point. Set when the sensor was attached away from the desired
+  -- report point (attach_z_offset) to select a stiffer/flatter triangle.
+  -- pos/vel/accel are rigid-body-transported by this offset every physics
+  -- step; angVel/angAccel/quat are point-independent. nil = disabled.
+  reportOffset = nil,
   m1 = 0, m2 = 0, m3 = 0, -- TODO: Assume static mass for now
   inv_m1 = 0, inv_m2 = 0, inv_m3 = 0, -- Inverse masses for the nodes (precomputed for efficiency)
   oneThird = 1.0 / 3.0, -- Constant for averaging over three nodes
@@ -294,10 +299,19 @@ end
 
 
 local function ensureDebugFields(dst)
-  -- World-frame filtered/raw fields.
   dst.velRaw = { 0, 0, 0 }
   dst.accelRaw = { 0, 0, 0 }
+  dst.gravityBody = { 0, 0, 0 }
   dst.angVelRaw = { 0, 0, 0 }
+
+  -- angVelUncorr: legacy curlVel/denom (no M^-1), sensor frame.
+  -- angVelObjRPY: engine getRollPitchYawAngularVelocity() (refNode frame).
+  dst.angVelUncorr = { 0, 0, 0 }
+  dst.angVelObjRPY = { 0, 0, 0 }
+  -- Raw triangle FLU + v_world on those axes (legacy chatty body vel).
+  dst.dirXTri = { 0, 0, 0 }
+  dst.dirYTri = { 0, 0, 0 }
+  dst.velTri = { 0, 0, 0 }
 
   -- Wheel-angle debug fields.
   dst.wheelFR_angleLegacy = 0.0
@@ -357,12 +371,17 @@ local tmpVectors = {
   vec1 = vec3(0, 0, 0), vec2 = vec3(0, 0, 0), vec3 = vec3(0, 0, 0),
   aCenter = vec3(0, 0, 0), vCenter = vec3(0, 0, 0), baryCenter = vec3(0, 0, 0),
   r = vec3(0, 0, 0), curlAcc = vec3(0, 0, 0), curlVel = vec3(0, 0, 0),
-  accelWorld = vec3(0, 0, 0), angVel = vec3(0, 0, 0), angAccel = vec3(0, 0, 0),
+  accelWorld = vec3(0, 0, 0), velSensorRaw = vec3(0, 0, 0),
+  angVel = vec3(0, 0, 0), angAccel = vec3(0, 0, 0),
   edge1 = vec3(0, 0, 0), edge2 = vec3(0, 0, 0),
   edge1Norm = vec3(0, 0, 0), edge2Norm = vec3(0, 0, 0),
   normal = vec3(0, 0, 0), triangleThird = vec3(0, 0, 0),
+  reportOffsetWorld = vec3(0, 0, 0), -- sensorConfig.reportOffset rotated to world, per step
+  accelSpecificRaw = vec3(0, 0, 0), -- debug: unfiltered specific force snapshot (world frame)
   accel1 = vec3(0, 0, 0), accel2 = vec3(0, 0, 0), accel3 = vec3(0, 0, 0),
   steeringRoll = vec3(0, 0, 0),
+  -- Triangle FLU snapshot (debug / velTri) before attitude overwrite.
+  dirTriX = vec3(0, 0, 0), dirTriY = vec3(0, 0, 0), dirTriZ = vec3(0, 0, 0),
 }
 
 -- Group wheel info tables to reduce upvalues
@@ -530,62 +549,103 @@ local function setCustomField(fieldName, value)
   return false
 end
 
---[[
-    Converts local frame unit vectors into a quaternion representing orientation.
-    
-    Parameters:
-        dirX (vec3): The X-direction unit vector in the local frame.
-        dirY (vec3): The Y-direction unit vector in the local frame.
-        dirZ (vec3): The Z-direction unit vector in the local frame.
-    
-    Returns:
-        table: A quaternion represented as {x, y, z, w}.
-]]
-local function getQuaternionFromDir(dirX, dirY, dirZ)
-  -- Extract matrix components from direction vectors
+-- Body→world quat {x,y,z,w} from FLU axes in world (no table alloc).
+local function quatFromAxes(dirX, dirY, dirZ)
   local m00, m01, m02 = dirX.x, dirY.x, dirZ.x
   local m10, m11, m12 = dirX.y, dirY.y, dirZ.y
   local m20, m21, m22 = dirX.z, dirY.z, dirZ.z
-
-  -- Calculate the trace of the matrix
   local trace = m00 + m11 + m22
-
   if trace > 1.0e-6 then
     local s = 0.5 / sqrt(trace + 1.0)
-    return {
-      (m21 - m12) * s,
-      (m02 - m20) * s,
-      (m10 - m01) * s,
-      0.25 / s,
-    }
+    return (m21 - m12) * s, (m02 - m20) * s, (m10 - m01) * s, 0.25 / s
   elseif m00 > m11 and m00 > m22 then
     local s = 2.0 * sqrt(1.0 + m00 - m11 - m22)
-    return {
-      0.25 * s,
-      (m01 + m10) / s,
-      (m02 + m20) / s,
-      (m21 - m12) / s,
-    }
+    return 0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s
   elseif m11 > m22 then
     local s = 2.0 * sqrt(1.0 + m11 - m00 - m22)
-    return {
-      (m01 + m10) / s,
-      0.25 * s,
-      (m12 + m21) / s,
-      (m02 - m20) / s,
-    }
+    return (m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s
   else
     local s = 2.0 * sqrt(1.0 + m22 - m00 - m11)
-    return {
-      (m02 + m20) / s,
-      (m12 + m21) / s,
-      0.25 * s,
-      (m10 - m01) / s,
-    }
+    return (m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s
   end
 end
 
--- Physics step update for this sensor instance.
+-- --------------------------------------------------------------------------
+-- Sensor attitude (attach-triangle frame, HF geometric flex rejected)
+-- --------------------------------------------------------------------------
+-- Curl ω is the rigid rate of the 3 nodes (clean). Triangle axes chatter
+-- geometrically (~30 Hz) and fake sideslip via v·left. With mode=integrate:
+--   predict with ω_world, slow-correct toward the measured triangle quat.
+-- That keeps the sensor/panel frame (slow pose) without the flex mode.
+-- mode=triangle keeps the raw axes (legacy).
+local attitude = {
+  qx = 0.0, qy = 0.0, qz = 0.0, qw = 1.0,
+  qInitialized = false,
+}
+
+function attitude.reset()
+  attitude.qInitialized = false
+  attitude.qx, attitude.qy, attitude.qz, attitude.qw = 0.0, 0.0, 0.0, 1.0
+end
+
+local function attitudeAxesFromQuat(qx, qy, qz, qw, outFwd, outLeft, outUp)
+  local xx, yy, zz = qx * qx, qy * qy, qz * qz
+  local xy, xz, yz = qx * qy, qx * qz, qy * qz
+  local wx, wy, wz = qw * qx, qw * qy, qw * qz
+  outFwd:set(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy))
+  outLeft:set(2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx))
+  outUp:set(2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy))
+  outFwd:normalize()
+  outLeft:normalize()
+  outUp:normalize()
+end
+
+-- Call after curl angVel. Overwrites tv.currentDir / worldLeft / worldThird.
+local function attitudeStep(dt, tv)
+  if filters.params.attitudeMode ~= 'integrate' then
+    return
+  end
+
+  -- Snapshot measured triangle FLU for debug (velTri = v_world on these axes).
+  if filters.params.debugRaw then
+    tv.dirTriX:set(tv.currentDir)
+    tv.dirTriY:set(tv.worldLeft)
+    tv.dirTriZ:set(tv.worldThird)
+  end
+
+  local ax, ay, az, aw = quatFromAxes(tv.currentDir, tv.worldLeft, tv.worldThird)
+  local a = attitude
+  if not a.qInitialized then
+    a.qx, a.qy, a.qz, a.qw = ax, ay, az, aw
+    a.qInitialized = true
+  else
+    -- Predict: q_dot = 0.5 * ω_world ⊗ q  (use pre-update components on RHS).
+    local qx, qy, qz, qw = a.qx, a.qy, a.qz, a.qw
+    local ox, oy, oz = tv.angVel.x, tv.angVel.y, tv.angVel.z
+    local dqX = 0.5 * (ox * qw + oy * qz - oz * qy)
+    local dqY = 0.5 * (oy * qw + oz * qx - ox * qz)
+    local dqZ = 0.5 * (oz * qw + ox * qy - oy * qx)
+    local dqW = 0.5 * (-ox * qx - oy * qy - oz * qz)
+    qx = qx + dt * dqX
+    qy = qy + dt * dqY
+    qz = qz + dt * dqZ
+    qw = qw + dt * dqW
+    -- Correct toward measured triangle quat (sign-aligned).
+    local alpha = filters.cache.nominalAlpha.attitudeAbs or 1.0
+    if qx * ax + qy * ay + qz * az + qw * aw < 0.0 then
+      ax, ay, az, aw = -ax, -ay, -az, -aw
+    end
+    qx = qx + alpha * (ax - qx)
+    qy = qy + alpha * (ay - qy)
+    qz = qz + alpha * (az - qz)
+    qw = qw + alpha * (aw - qw)
+    local invN = 1.0 / (sqrt(qx * qx + qy * qy + qz * qz + qw * qw) + 1e-30)
+    a.qx, a.qy, a.qz, a.qw = qx * invN, qy * invN, qz * invN, qw * invN
+  end
+
+  attitudeAxesFromQuat(a.qx, a.qy, a.qz, a.qw, tv.currentDir, tv.worldLeft, tv.worldThird)
+end
+
 local function update(dtSim)
   -- Cache frequently-accessed tables as locals for performance (reduces hash lookups)
   local rb = ringBuffer
@@ -686,13 +746,28 @@ local function update(dtSim)
 
   tv.r:setSub2(currentPos, tv.baryCenter)
 
-  -- curlAccTmp:set(0, 0, 0)
-  -- curlVelTmp:set(0, 0, 0)
   local denom = 0.0
   local divAcc = 0.0
 
+  -- Accumulators for A = sum_i w_i * r_i * r_i^T (world frame, symmetric 3x3).
+  -- Needed because the curl estimate below is biased when the attach-triangle
+  -- normal is not aligned with the rotation axis: for a rigid triangle,
+  --   curlVel = (denom * I - A) * omega
+  -- so omega components in the triangle plane are attenuated and cross-coupled
+  -- (observed as r being ~71% of truth on the utv, whose nearest attach
+  -- triangle is strongly tilted; the sbr triangle happens to be ~flat).
+  -- Solving the full 3x3 system recovers omega exactly (least-squares rigid
+  -- fit, zero residual for 3 rigid points). Cost: ~70 flops/step, negligible.
+  local a11, a12, a13, a22, a23, a33 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
   -- Node 1 contribution.
   tv.vec1:setSub2(node1, tv.baryCenter) -- r1
+  a11 = a11 + sc.w1 * tv.vec1.x * tv.vec1.x
+  a12 = a12 + sc.w1 * tv.vec1.x * tv.vec1.y
+  a13 = a13 + sc.w1 * tv.vec1.x * tv.vec1.z
+  a22 = a22 + sc.w1 * tv.vec1.y * tv.vec1.y
+  a23 = a23 + sc.w1 * tv.vec1.y * tv.vec1.z
+  a33 = a33 + sc.w1 * tv.vec1.z * tv.vec1.z
   tv.vec2:setSub2(tv.accel1, tv.aCenter) -- aRot1
   tv.vec3:setCross(tv.vec1, tv.vec2)
   tv.vec3:setScaled(sc.w1)
@@ -707,6 +782,12 @@ local function update(dtSim)
 
   -- Node 2 contribution.
   tv.vec1:setSub2(node2, tv.baryCenter) -- r2
+  a11 = a11 + sc.w2 * tv.vec1.x * tv.vec1.x
+  a12 = a12 + sc.w2 * tv.vec1.x * tv.vec1.y
+  a13 = a13 + sc.w2 * tv.vec1.x * tv.vec1.z
+  a22 = a22 + sc.w2 * tv.vec1.y * tv.vec1.y
+  a23 = a23 + sc.w2 * tv.vec1.y * tv.vec1.z
+  a33 = a33 + sc.w2 * tv.vec1.z * tv.vec1.z
   tv.vec2:setSub2(tv.accel2, tv.aCenter) -- aRot2
   tv.vec3:setCross(tv.vec1, tv.vec2)
   tv.vec3:setScaled(sc.w2)
@@ -721,6 +802,12 @@ local function update(dtSim)
 
   -- Node 3 contribution.
   tv.vec1:setSub2(node3, tv.baryCenter) -- r3
+  a11 = a11 + sc.w3 * tv.vec1.x * tv.vec1.x
+  a12 = a12 + sc.w3 * tv.vec1.x * tv.vec1.y
+  a13 = a13 + sc.w3 * tv.vec1.x * tv.vec1.z
+  a22 = a22 + sc.w3 * tv.vec1.y * tv.vec1.y
+  a23 = a23 + sc.w3 * tv.vec1.y * tv.vec1.z
+  a33 = a33 + sc.w3 * tv.vec1.z * tv.vec1.z
   tv.vec2:setSub2(tv.accel3, tv.aCenter) -- aRot3
   tv.vec3:setCross(tv.vec1, tv.vec2)
   tv.vec3:setScaled(sc.w3)
@@ -736,55 +823,154 @@ local function update(dtSim)
   local invDenom = 1.0 / (denom + 1e-30)
 
   -- total accel = aCenter + (curlAcc x r + divAcc * r) * invDenom
+  -- NOTE: kept identical to BeamNG's advancedIMU reconstruction. Its
+  -- rotational term uses the raw (uncorrected) curl; the dominant term is
+  -- aCenter and the lever arm r is small, so we do not re-derive it here.
   tv.vec1:setCross(tv.curlAcc, tv.r)
   tv.vec2:setScaled2(tv.r, divAcc)
   tv.vec3:setAdd2(tv.vec1, tv.vec2)
   tv.vec3:setScaled(invDenom)
   tv.accelWorld:setAdd2(tv.aCenter, tv.vec3)
 
-  tv.angVel:setScaled2(tv.curlVel, invDenom)
-  tv.angAccel:setScaled2(tv.curlAcc, invDenom)
+  -- Angular velocity/acceleration: solve M * omega = curlVel exactly, with
+  -- M = denom * I - A (symmetric 3x3, world frame). The legacy estimate
+  -- curlVel * invDenom drops the A term, i.e. assumes r_i . omega = 0, which
+  -- only holds when the triangle normal is aligned with omega (flat triangle
+  -- + pure yaw). M is invertible for any non-degenerate (non-collinear)
+  -- triangle: eigenvalue denom along the normal, denom - lambda_{1,2} > 0
+  -- in-plane. The det guard below is scale-invariant (det ~ denom^3) and only
+  -- protects against a degenerate attach triangle -> fall back to the legacy
+  -- biased estimate instead of producing NaNs.
+  local m11, m22, m33 = denom - a11, denom - a22, denom - a33
+  local m12, m13, m23 = -a12, -a13, -a23
+  local det = m11 * (m22 * m33 - m23 * m23)
+            - m12 * (m12 * m33 - m23 * m13)
+            + m13 * (m12 * m23 - m22 * m13)
+  if abs(det) > 1e-6 * denom * denom * denom then
+    -- Inverse of symmetric M via cofactors (no allocations).
+    local invDet = 1.0 / det
+    local i11 = (m22 * m33 - m23 * m23) * invDet
+    local i12 = (m13 * m23 - m12 * m33) * invDet
+    local i13 = (m12 * m23 - m13 * m22) * invDet
+    local i22 = (m11 * m33 - m13 * m13) * invDet
+    local i23 = (m12 * m13 - m11 * m23) * invDet
+    local i33 = (m11 * m22 - m12 * m12) * invDet
+    local cvx, cvy, cvz = tv.curlVel.x, tv.curlVel.y, tv.curlVel.z
+    tv.angVel:set(
+      i11 * cvx + i12 * cvy + i13 * cvz,
+      i12 * cvx + i22 * cvy + i23 * cvz,
+      i13 * cvx + i23 * cvy + i33 * cvz
+    )
+    -- Same geometric bias affects the angular acceleration estimate.
+    -- (curlAcc additionally contains centripetal cross-terms that this does
+    -- not remove; that approximation is inherited from the stock advancedIMU.)
+    local cax, cay, caz = tv.curlAcc.x, tv.curlAcc.y, tv.curlAcc.z
+    tv.angAccel:set(
+      i11 * cax + i12 * cay + i13 * caz,
+      i12 * cax + i22 * cay + i23 * caz,
+      i13 * cax + i23 * cay + i33 * caz
+    )
+  else
+    -- Degenerate triangle: legacy estimate (biased but finite).
+    tv.angVel:setScaled2(tv.curlVel, invDenom)
+    tv.angAccel:setScaled2(tv.curlAcc, invDenom)
+  end
 
-  -- v_sensor = vCenter + ω × r
-  tv.vec3:setCross(tv.angVel, tv.r)
-  tv.vec3:setAdd(tv.vCenter)
-  local velWorld = filters.modules.velWorld.step(dt, tv.vec3)
+  -- Published body frame (may replace triangle axes). Uses world angVel above
+  -- for integrate mode; must run before report-offset transport / projections
+  -- so pos/vel/accel/quat share one consistent FLU basis.
+  attitudeStep(dt, tv)
 
-  -- Specific force (F/m), 2-pass EMA — no gravity, no velocity fusion.
-  local accelWorld = filters.modules.accelWorld.step(dt, tv.accelWorld)
+  -- --------------------------------------------------------------------------
+  --        Report-point transport (attach point -> report point)             --
+  -- --------------------------------------------------------------------------
+  -- When the sensor was attached away from the desired report point (e.g.
+  -- attach_z_offset < 0 to select the stiff floor/frame triangle instead of a
+  -- soft cabin panel), transport the point quantities back with the exact
+  -- rigid-body relations, using the corrected omega/alpha (hence placed after
+  -- the M^-1 solve above):
+  --   pos_report = pos_attach + d
+  --   v_report   = v_attach   + omega x d
+  --   a_report   = a_attach   + alpha x d + omega x (omega x d)
+  -- with d = reportOffset (constant in the sensor frame) rotated to world.
+  -- Angular quantities and the quaternion are point-independent: unchanged.
+  -- This is exact and lag-free (~4 cross products); the only approximation is
+  -- that d is treated as rigid (chassis flex between the two points ignored).
+  if sc.reportOffset then
+    local ro = sc.reportOffset
+    -- d (world) = ro.x * forward + ro.y * left + ro.z * up.
+    tv.reportOffsetWorld:setScaled2(tv.currentDir, ro.x)
+    tv.vec1:setScaled2(tv.worldLeft, ro.y)
+    tv.reportOffsetWorld:setAdd(tv.vec1)
+    tv.vec1:setScaled2(tv.worldThird, ro.z)
+    tv.reportOffsetWorld:setAdd(tv.vec1)
+
+    -- Position. NOTE: tv.sensorPos also feeds getSensorData().currentPos, so
+    -- the debug sphere now visualises the REPORT point (e.g. the CoG), not
+    -- the attach point on the mesh.
+    tv.sensorPos:setAdd(tv.reportOffsetWorld)
+
+    -- Acceleration (inertial, world frame; gravity handling happens below):
+    -- Euler term (alpha x d) + centripetal term (omega x (omega x d)).
+    tv.vec1:setCross(tv.angAccel, tv.reportOffsetWorld)
+    tv.accelWorld:setAdd(tv.vec1)
+    tv.vec1:setCross(tv.angVel, tv.reportOffsetWorld)
+    tv.vec2:setCross(tv.angVel, tv.vec1)
+    tv.accelWorld:setAdd(tv.vec2)
+  end
+
+  -- v_sensor = vCenter + ω × r (evaluated at the attach point; the report
+  -- offset adds ω × d on top, see transport block above).
+  tv.velSensorRaw:setCross(tv.angVel, tv.r)
+  tv.velSensorRaw:setAdd(tv.vCenter)
+  if sc.reportOffset then
+    tv.vec1:setCross(tv.angVel, tv.reportOffsetWorld)
+    tv.velSensorRaw:setAdd(tv.vec1)
+  end
+  local velWorld = filters.modules.velWorld.step(dt, tv.velSensorRaw)
+
+  -- tv.accelWorld is the TRUE inertial acceleration v_dot (zero at rest: node
+  -- forces already include gravity); convert to IMU-style specific force: f = a - g.
+  tv.vec1:setSub2(tv.accelWorld, vs.currVeh:getGravityVector())
+  -- Snapshot the raw specific force NOW for the debugRaw block: tv.vec1 is a
+  -- shared scratch vector and gets overwritten by wheelAngleAtan2Rad() before
+  -- the debug writes run (this used to make accelRaw log wheel-axis garbage).
+  if filters.params.debugRaw then tv.accelSpecificRaw:set(tv.vec1) end
+  local accelWorld = filters.modules.accelWorld.step(dt, tv.vec1)
 
   -- Cache latestReading locally for frequent writes (reduces hash lookups)
   local latest = rb.latestReading
 
-  -- Transform quantities in the local frame (avoid per-step vec3 allocations).
-  -- Below store the quantities in the latestReading structure in local frame.
+  -- Transform quantities in the published local frame.
   latest.accel[1] = accelWorld:dot(tv.currentDir)
   latest.accel[2] = accelWorld:dot(tv.worldLeft)
   latest.accel[3] = accelWorld:dot(tv.worldThird)
+
+  tv.angVelLocalRaw:set(tv.angVel:dot(tv.currentDir), tv.angVel:dot(tv.worldLeft), tv.angVel:dot(tv.worldThird))
 
   latest.vel[1] = velWorld:dot(tv.currentDir)
   latest.vel[2] = velWorld:dot(tv.worldLeft)
   latest.vel[3] = velWorld:dot(tv.worldThird)
 
-  tv.angVelLocalRaw:set(tv.angVel:dot(tv.currentDir), tv.angVel:dot(tv.worldLeft), tv.angVel:dot(tv.worldThird))
   local angVelLocal = filters.modules.gyroLocal.step(dt, tv.angVelLocalRaw)
   latest.angVel[1] = angVelLocal.x
   latest.angVel[2] = angVelLocal.y
   latest.angVel[3] = angVelLocal.z
 
-  -- Raw vaues for ang accel
   latest.angAccel[1] = tv.angAccel:dot(tv.currentDir)
   latest.angAccel[2] = tv.angAccel:dot(tv.worldLeft)
   latest.angAccel[3] = tv.angAccel:dot(tv.worldThird)
-  -- -----------------------------------------------------------------------
 
-  -- ------------------------------------------------------------------------
-  --                     Quaternion/Orientation Calculation                --
-  -- -----------------------------------------------------------------------
-
-  -- Compute the orientation of the sensor.
-  -- qx, qy, qz, qw
-  writeQuatTable(latest.quat, getQuaternionFromDir(tv.currentDir, tv.worldLeft, tv.worldThird))
+  -- Quaternion: integrated state when available (matches ω kinematically).
+  if filters.params.attitudeMode == 'integrate' and attitude.qInitialized then
+    latest.quat[1] = attitude.qx
+    latest.quat[2] = attitude.qy
+    latest.quat[3] = attitude.qz
+    latest.quat[4] = attitude.qw
+  else
+    latest.quat[1], latest.quat[2], latest.quat[3], latest.quat[4] =
+      quatFromAxes(tv.currentDir, tv.worldLeft, tv.worldThird)
+  end
 
   -- Derived kinematics (consumed by controller_manager control_state packet).
   local vx, vy = latest.vel[1], latest.vel[2]
@@ -869,17 +1055,50 @@ local function update(dtSim)
 
   -- Update fields for debugging non-filtered raw values if enabled.
   if filters.params.debugRaw then
-    latest.accelRaw[1] = tv.accelWorld:dot(tv.currentDir)
-    latest.accelRaw[2] = tv.accelWorld:dot(tv.worldLeft)
-    latest.accelRaw[3] = tv.accelWorld:dot(tv.worldThird)
+    local g = vs.currVeh:getGravityVector()
+    latest.gravityBody[1] = g:dot(tv.currentDir)
+    latest.gravityBody[2] = g:dot(tv.worldLeft)
+    latest.gravityBody[3] = g:dot(tv.worldThird)
+
+    -- Unfiltered specific force (snapshot right after f = a - g; tv.vec1 is
+    -- stale here — clobbered by wheel-angle helpers).
+    latest.accelRaw[1] = tv.accelSpecificRaw:dot(tv.currentDir)
+    latest.accelRaw[2] = tv.accelSpecificRaw:dot(tv.worldLeft)
+    latest.accelRaw[3] = tv.accelSpecificRaw:dot(tv.worldThird)
 
     latest.angVelRaw[1] = tv.angVelLocalRaw.x
     latest.angVelRaw[2] = tv.angVelLocalRaw.y
     latest.angVelRaw[3] = tv.angVelLocalRaw.z
 
-    latest.velRaw[1] = tv.vec3:dot(tv.currentDir)
-    latest.velRaw[2] = tv.vec3:dot(tv.worldLeft)
-    latest.velRaw[3] = tv.vec3:dot(tv.worldThird)
+    -- Legacy curlVel/denom (no M^-1); vs angVelRaw isolates tilted-triangle bias.
+    latest.angVelUncorr[1] = tv.curlVel:dot(tv.currentDir) * invDenom
+    latest.angVelUncorr[2] = tv.curlVel:dot(tv.worldLeft) * invDenom
+    latest.angVelUncorr[3] = tv.curlVel:dot(tv.worldThird) * invDenom
+
+    -- Engine all-node p,q,r (refNode frame) — offline cross-check only.
+    local rollAV, pitchAV, yawAV = vs.currVeh:getRollPitchYawAngularVelocity()
+    latest.angVelObjRPY[1] = rollAV
+    latest.angVelObjRPY[2] = pitchAV
+    latest.angVelObjRPY[3] = yawAV
+
+    latest.velRaw[1] = tv.velSensorRaw:dot(tv.currentDir)
+    latest.velRaw[2] = tv.velSensorRaw:dot(tv.worldLeft)
+    latest.velRaw[3] = tv.velSensorRaw:dot(tv.worldThird)
+
+    -- Triangle axes / triangle-projected vel (legacy chatty body vs published).
+    if filters.params.attitudeMode ~= nil and filters.params.attitudeMode ~= 'triangle' then
+      writeVec3Table(latest.dirXTri, tv.dirTriX)
+      writeVec3Table(latest.dirYTri, tv.dirTriY)
+      latest.velTri[1] = tv.velSensorRaw:dot(tv.dirTriX)
+      latest.velTri[2] = tv.velSensorRaw:dot(tv.dirTriY)
+      latest.velTri[3] = tv.velSensorRaw:dot(tv.dirTriZ)
+    else
+      writeVec3Table(latest.dirXTri, tv.currentDir)
+      writeVec3Table(latest.dirYTri, tv.worldLeft)
+      latest.velTri[1] = latest.velRaw[1]
+      latest.velTri[2] = latest.velRaw[2]
+      latest.velTri[3] = latest.velRaw[3]
+    end
 
     latest.wheelFR_angVelRaw = filters.state.wheelsAngVel.rawFr
     latest.wheelFL_angVelRaw = filters.state.wheelsAngVel.rawFl
@@ -997,6 +1216,24 @@ local function init(data)
   sensorConfig.triangleSpaceForward = data.triangleSpaceForward
   sensorConfig.triangleSpaceLeft = data.triangleSpaceLeft
 
+  -- Report-point offset (sensor FLU frame): {x=fwd, y=left, z=up} vector from
+  -- the attach point to the point where pos/vel/accel must be reported
+  -- (typically back up to the CoG when attach_z_offset was used to pick a
+  -- stiffer attach triangle). Disabled (nil) when absent or ~zero, so the
+  -- default configuration is bit-identical to the previous behaviour.
+  sensorConfig.reportOffset = nil
+  if data.reportOffset ~= nil then
+    local ox = tonumber(data.reportOffset[1]) or 0.0
+    local oy = tonumber(data.reportOffset[2]) or 0.0
+    local oz = tonumber(data.reportOffset[3]) or 0.0
+    if (ox * ox + oy * oy + oz * oz) > 1e-12 then
+      sensorConfig.reportOffset = vec3(ox, oy, oz)
+      log('I', logTag, string.format(
+        'Report-point transport enabled | offset (sensor FLU) = [%.3f, %.3f, %.3f] m',
+        ox, oy, oz))
+    end
+  end
+
   -- Timing configuration
   ringBuffer.physicsUpdateTime = data.physicsUpdateTime or 0.005 -- Default to 200Hz
   ringBuffer.numPhysicsStepsForGFXSave = max(1, tonumber(data.numPhysicsStepsForGFXSave) or 1)
@@ -1006,14 +1243,21 @@ local function init(data)
   filters.params.gyroTauS = tonumber(data.gyroTauS or data.gyro_tau_s) or filters.params.gyroTauS
   filters.params.velTauS = tonumber(data.velTauS or data.vel_tau_s) or filters.params.velTauS
   filters.params.wheelAngVelTauS = tonumber(data.wheelAngVelTauS or data.wheel_angvel_tau_s) or filters.params.wheelAngVelTauS
+  local attMode = data.attitudeMode or data.attitude_mode
+  if type(attMode) == 'string' and attMode ~= '' then
+    filters.params.attitudeMode = attMode
+  end
+  filters.params.attitudeTauS = tonumber(data.attitudeTauS or data.attitude_tau_s) or filters.params.attitudeTauS
   filters.params.debugRaw = (data.debugRaw == true) or (data.debug == true) or (data.debug_raw == true)
 
   log('I', logTag, string.format(
-    'Filter config | accelTauS=%.3f gyroTauS=%.3f velTauS=%.3f wheelAngVelTauS=%.3f debugRaw=%s',
+    'Filter config | accelTauS=%.3f gyroTauS=%.3f velTauS=%.3f wheelAngVelTauS=%.3f attitudeMode=%s attitudeTauS=%.3f debugRaw=%s',
     filters.params.accelTauS,
     filters.params.gyroTauS,
     filters.params.velTauS,
     filters.params.wheelAngVelTauS,
+    tostring(filters.params.attitudeMode),
+    filters.params.attitudeTauS,
     tostring(filters.params.debugRaw)
   ))
 
@@ -1021,8 +1265,9 @@ local function init(data)
   filters.cache.nominalDt = 0 -- default physics update time
   filters.rebuildCache(ringBuffer.physicsUpdateTime)
 
-  -- Reset all filter states for this sensor.
+  -- Reset all filter / attitude states for this sensor.
   filters.resetAll()
+  attitude.reset()
 
   -- Initialize timing state
   ringBuffer.physicsTimer = 0.0

@@ -52,11 +52,16 @@ local function createGtState(vid, args)
     signedProjDist = attachData['signedProjDist'],
     triangleSpaceForward = attachData['triangleSpaceForward'],
     triangleSpaceLeft = attachData['triangleSpaceUp'],
+    -- Offset (sensor FLU frame) from the attach point to the report point.
+    -- Kept as a plain {x, y, z} array for lpack transport to vlua.
+    reportOffset = args.report_offset,
     isVisualised = args.isVisualised,
     accel_tau_s = args.accel_tau_s,
     gyro_tau_s = args.gyro_tau_s,
     vel_tau_s = args.vel_tau_s,
     wheel_angvel_tau_s = args.wheel_angvel_tau_s,
+    attitude_mode = args.attitude_mode,
+    attitude_tau_s = args.attitude_tau_s,
     debug_raw = args.debug_raw,
     torque_map = args.torque_map,
   }

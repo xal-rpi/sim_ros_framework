@@ -12,8 +12,13 @@ sensors:
     gfx_update_time: 0.15
     physics_update_time: 0.01
     num_physics_steps_for_gfx_save: 1
+    # [m] attach-triangle selection offset along vehicle up (see llc.yaml).
+    attach_z_offset: 0.0
     accel_tau_s: 0.04
     gyro_tau_s: 0.005
     vel_tau_s: 0.005
     wheel_angvel_tau_s: 0.005
+    # Sensor FLU (see llc.yaml): triangle | integrate
+    attitude_mode: integrate
+    attitude_tau_s: 0.3
     debug_raw: true

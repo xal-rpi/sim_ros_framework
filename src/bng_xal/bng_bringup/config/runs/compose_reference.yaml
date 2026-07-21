@@ -65,6 +65,7 @@ scenario_mode: create
 
 # -----------------------------------------------------------------------------
 # overrides — deep-merged onto composed config after fragment assembly.
+# Full guide (LLC, sensors, catalog, defaults): ../OVERRIDES.md
 # -----------------------------------------------------------------------------
 overrides:
   # beamng:

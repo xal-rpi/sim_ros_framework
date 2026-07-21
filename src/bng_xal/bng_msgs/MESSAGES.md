@@ -106,3 +106,31 @@ Example: `valid_fields = FIELD_TORQUE | FIELD_STEERING_INPUT`
 Topic: `/<vehicle>/control/cmd` (`sensor_dispatcher` subscriber).
 
 **Note:** Only one process should own high-rate `control_listen` sends per vehicle.
+
+---
+
+## Drive trajopt tracking (high-level MPC)
+
+### `VehicleOnSurface`
+
+Chart localization + world pose at sensor rate. Numeric only — artifact / labels via `GetRefTrajInfo`.
+
+Default topic (controller node): `~/vehicle_on_surface`
+
+### `MpcHorizon`
+
+Primal horizon `x`/`u`, targets `x_tgt`/`u_tgt`, and world `pose_*` for viz / bags. Labels once via service.
+
+Default topic: `~/mpc_horizon`
+
+### `GtPath`
+
+Optional socket-plant ground-truth path for PlotJuggler overlays. Not used on BeamNG/PX4.
+
+Default topic: `~/debug/gt_path` (only when `gt_*` present on the sensor)
+
+### `GetRefTrajInfo`
+
+One-shot artifact identity, channel labels, and vehicle drawer geometry.
+
+Service: `~/get_ref_traj_info`
