@@ -39,7 +39,7 @@ float64 gear_ratio
 float64 we                      # engine angular speed [rad/s]
 float64 pb                      # boost pressure [Pa]
 
-# Torque envelope (from torque_map forward estimate + bracket)
+# Torque envelope (legacy: live T(u=0/1); occupancy_rail: invert rails from gtState)
 float64 rear_wheel_torque_est   # [N·m]
-float64 torque_min              # [N·m] at throttle=0
-float64 torque_max              # [N·m] at throttle=1
+float64 torque_min              # [N·m]
+float64 torque_max              # [N·m]

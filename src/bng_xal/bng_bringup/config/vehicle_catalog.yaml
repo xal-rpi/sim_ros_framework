@@ -10,6 +10,7 @@
 #   yaw_offset_deg      — utv body→gtState: beamng_spawn = xlab_yaw - offset (default 90)
 #   steering_to_input   — roadwheel_rad / steering_input scale (LLC)
 #   torque_map          — luamod lib stem; omit if no drivetrain map exists
+#   torque_map_api      — legacy (default) | occupancy_rail; must match the stem
 #   io.port_index       — UDP port slot (0=EGO base ports, 1=+port_stride, …)
 
 defaults:
@@ -23,6 +24,54 @@ catalog:
       port_index: 0
     steering_to_input: -0.5948683325943701
     torque_map: utv_wild_drivetrain
+    # torque_map_api defaults to legacy
+
+  # Same plant as utv_wild; occupancy-rail map (opt-in test, does not replace default).
+  utv_wild_occupancy:
+    model: utv
+    part_config: /vehicles/utv/wild.pc
+    io:
+      port_index: 0
+    steering_to_input: -0.5948683325943701
+    torque_map: utv_wild_v2_wheel_torque
+    torque_map_api: occupancy_rail
+
+  utv_canam_x3_loaded:
+    model: utv
+    part_config: /vehicles/utv/canam_x3_loaded.pc
+    io:
+      port_index: 0
+    steering_to_input: -0.683809
+
+  utv_canam_x3_1g:
+    model: utv
+    part_config: /vehicles/utv/canam_x3_1g.pc
+    io:
+      port_index: 0
+    steering_to_input: -0.68172
+
+  utv_canam_x3_highcg:
+    model: utv
+    part_config: /vehicles/utv/canam_x3_highcg.pc
+    io:
+      port_index: 0
+    steering_to_input: -0.682111
+
+  utv_canam_x3_r322:
+    model: utv
+    part_config: /vehicles/utv/canam_x3_r322.pc
+    io:
+      port_index: 0
+    steering_to_input: -0.668394
+
+  utv_canam_x3_r322_easylift:
+    model: utv
+    part_config: /vehicles/utv/canam_x3_r322_easylift.pc
+    io:
+      port_index: 0
+    steering_to_input: -0.665825
+    torque_map: utv_canam_r322_lift_wheel_torque
+    torque_map_api: occupancy_rail
 
   etk800_track:
     model: etk800

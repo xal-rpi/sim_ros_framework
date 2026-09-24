@@ -12,9 +12,8 @@ geometry_msgs/Vector3 dir_y
 geometry_msgs/Vector3 vel
 geometry_msgs/Vector3 accel
 
-# Angular velocity (rad/s) and acceleration (rad/s^2) in the local frame
+# Angular velocity (rad/s) in the local frame
 geometry_msgs/Vector3 ang_vel
-geometry_msgs/Vector3 ang_accel
 
 # Position in the global frame (meters)
 geometry_msgs/Vector3 pos

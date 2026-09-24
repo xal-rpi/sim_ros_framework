@@ -406,93 +406,168 @@ class SimulationController:
         vehicle_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Generate comprehensive vehicle configuration file.
+        Generate a body-frame plant YAML (no world poses).
         
-        This extracts all relevant vehicle parameters including kinematics,
-        engine, gearbox, powertrain, and controller information.
-        
-        Args:
-            output_path: Path to save YAML config (if None, returns dict only)
-            vehicle_name: Name of the vehicle
-            
-        Returns:
-            Complete vehicle configuration dictionary
+        Settles the vehicle, measures wet kinematics, mid-range
+        steering_to_input (|u|≈0.3), hydro lock at u=±1, and a 0→1 τ,
+        then writes engine / gearbox / powertrain / controllers as today.
         """
         print("Gathering vehicle configuration...")
-        
-        # Get simulation config for vehicle part identification
+        req_args = {}
+        if vehicle_name:
+            req_args["vehicle_name"] = vehicle_name
+        long_timeout = max(self.timeout, 60.0)
+
         _vehicle_config = send_request(
-            "get_vehicle_part_config", {}, 
+            "get_vehicle_part_config", req_args,
             timeout_sec=self.timeout
         )
-        
-        # Kinematics properties
+
+        print("  - Settle")
+        settle = send_request("settle_vehicle", req_args, timeout_sec=long_timeout)
+        print(f"    elapsed={settle.get('elapsed_s')} |v|={settle.get('speed')}")
+
         print("  - Kinematics properties")
-        kin_args = {"world_space": True}
-        if vehicle_name:
-            kin_args["vehicle_name"] = vehicle_name
-        kin_props = send_request("get_vehicle_properties", kin_args, 
+        kin_props = send_request("get_vehicle_properties", req_args,
                                 timeout_sec=self.timeout)
-        
-        # Engine information
+        if kin_props.get("error"):
+            raise RuntimeError(f"get_vehicle_properties failed: {kin_props['error']}")
+
+        a = float(kin_props["cogToFrontAxle"])
+        b = float(kin_props["cogToRearAxle"])
+        L = float(kin_props["distFR"])
+        mass = float(kin_props["totalMass"])
+        h = float(kin_props["coGHeight"])
+        y = float(kin_props.get("cogToCentralAxle", 0.0))
+        z_axle = kin_props.get("cogAboveAxle")
+        z_s = "" if z_axle is None else f"  cogAboveAxle={float(z_axle):+.4f}"
+        R = float(kin_props["wheelRadius"])
+        iw = kin_props.get("wheelInertia")
+        iw_sim = kin_props.get("wheelInertiaSim")
+        iw_s = "—" if iw is None else f"{float(iw):.4f}"
+        iw_sim_s = "—" if iw_sim is None else f"{float(iw_sim):.4f}"
+        print(
+            f"    mass={mass:.3f}  a={a:.4f}  b={b:.4f}  L=a+b={L:.4f}  "
+            f"h={h:.4f}  cogToCentralAxle={y:+.4f} (+left){z_s}  "
+            f"R={R:.4f}  Iw={iw_s}  IwSim={iw_sim_s}"
+        )
+
+        print("  - steering (slope |u|≈0.3, lock u=±1)")
+        steer = send_request("measure_steering_to_input", req_args, timeout_sec=long_timeout)
+        sti = steer.get("steering_to_input")
+        for row in steer.get("samples") or []:
+            k = row.get("k")
+            k_s = "—" if k is None else f"{k:+.6f}"
+            print(
+                f"    u={row['u']:+.3f}  δ={row['delta']:+.4f}  "
+                f"δ_l={row['delta_l']:+.4f}  δ_r={row['delta_r']:+.4f}  "
+                f"k={k_s}  wait={row.get('wait_s')}"
+            )
+        lock = steer.get("steering") or {}
+        d0 = lock.get("roadwheel_at_u0_rad")
+        if d0 is not None and abs(float(d0)) > 0.03:
+            print(
+                f"    WARNING |roadwheel_at_u0|={float(d0):+.4f} rad "
+                "— forward axis still wrong; not applying an offset"
+            )
+        if sti is None:
+            print("    steering_to_input=null  — run steering_input_sweep.py")
+            if steer.get("error"):
+                print(f"    ({steer.get('error')})")
+        else:
+            print(f"    steering_to_input={sti:+.6f}  (mid-range, not lock)")
+            print(
+                f"    lock  δ(u=-1)={lock.get('roadwheel_min_rad')}  "
+                f"δ(u=+1)={lock.get('roadwheel_max_rad')}"
+            )
+        print(
+            f"    τ (0→1)  delay5%={steer.get('steering_delay_s')}  "
+            f"τ63%={steer.get('steering_tau_s')}  t95={steer.get('steering_t95_s')}  "
+            f"δ0={steer.get('delta_0')}  δss={steer.get('delta_ss')}"
+        )
+
         print("  - Engine information")
-        engine_args = {}
-        if vehicle_name:
-            engine_args["vehicle_name"] = vehicle_name
-        engine_infos = send_request("get_engine_infos", engine_args, 
+        engine_infos = send_request("get_engine_infos", req_args,
                                     timeout_sec=self.timeout)
-        
-        # Gearbox information
+
         print("  - Gearbox information")
         gear_infos = self.extract_gear_infos(vehicle_name)
-        
-        # Powertrain structure
+
         print("  - Powertrain structure")
         powertrain_infos = self.get_powertrain_info(vehicle_name)
-        
-        # Controller information
+
         print("  - Controller information")
-        controller_args = {}
-        if vehicle_name:
-            controller_args["vehicle_name"] = vehicle_name
-        controllers_infos = send_request("get_controller_infos", controller_args,
+        controllers_infos = send_request("get_controller_infos", req_args,
                                         timeout_sec=self.timeout)
         controllers_infos = dict(sorted(controllers_infos.items()))
-        
-        # Assemble final configuration
+
+        plant_keys = (
+            "totalMass",
+            "cogToFrontAxle",
+            "cogToRearAxle",
+            "cogToCentralAxle",
+            "cogAboveAxle",
+            "coGHeight",
+            "distFR",
+            "trackFront",
+            "trackRear",
+            "wheelRadius",
+            "wheelRadiusNominal",
+            "wheelInertia",
+            "wheelInertiaSim",
+            "inertia",
+            "cogPosRel",
+            "bbox",
+        )
+        plant = {k: kin_props[k] for k in plant_keys if k in kin_props}
+        plant = round_dict_values(plant)
+        if lock:
+            steering_out = {}
+            for key, val in lock.items():
+                if val is None:
+                    steering_out[key] = None
+                elif key in ("input_min", "input_max"):
+                    steering_out[key] = float(val)
+                elif key == "steering_to_input":
+                    steering_out[key] = round(float(val), 6)
+                else:
+                    steering_out[key] = round(float(val), 6)
+            plant["steering"] = steering_out
+        else:
+            plant["steering"] = None
+        for key in ("steering_tau_s", "steering_delay_s", "steering_t95_s"):
+            val = steer.get(key)
+            plant[key] = None if val is None else round(float(val), 4)
+
+        forbidden = ("cogPos", "cogPosDynamic", "cogPosStatic", "cogPosStaticRel",
+                     "cogPosDynamicRel", "plantError", "plantResidual")
+        for key in forbidden:
+            plant.pop(key, None)
+
         final_config = {
-            **round_dict_values(kin_props),
+            **plant,
             "engine": round_dict_values(engine_infos),
             "gearbox": gear_infos,
             "powertrain": powertrain_infos,
             "controllers": controllers_infos,
         }
-        
-        # Save to file
-        # Get vehicle part config info
-        vehicle_part = _vehicle_config["partConfigFilename"] #of the form /xx/xxx.pc
+
+        vehicle_part = _vehicle_config["partConfigFilename"]
         vehicle_model_name = _vehicle_config["model"]
-        # extract the pc part
         vehicle_part = vehicle_part.split("/")[-1].replace(".pc", "")
         out_name = f"{vehicle_model_name}_{vehicle_part}.yaml"
-        
+
         if output_path is None or output_path.lower() == "" or len(output_path.strip()) == 0:
             print("\nNo output path provided, returning config as dictionary.")
             return final_config
-        
-        if output_path is not None:
-            if os.path.isdir(output_path):
-                output_path = os.path.join(output_path, out_name)
-            else:
-                output_path = output_path
-        else:
-            output_path = "../config/vehicles/" + out_name
-        
-        if output_path:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            save_yaml(final_config, output_path, sort_keys=False)
-            print(f"\nConfiguration saved to: {output_path}")
-        
+
+        if os.path.isdir(output_path):
+            output_path = os.path.join(output_path, out_name)
+
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        save_yaml(final_config, output_path, sort_keys=False)
+        print(f"\nConfiguration saved to: {output_path}")
+
         return final_config
 
 

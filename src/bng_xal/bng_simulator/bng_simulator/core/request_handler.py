@@ -6,6 +6,7 @@ import traceback
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import bng_simulator.core.vehicle_properties as vehicle_queries
+import bng_simulator.core.calibration as plant_calibration
 
 if TYPE_CHECKING:
     from bng_simulator.core.simulation_manager import SimulationManager
@@ -436,6 +437,31 @@ class SimulationRequestHandler:
                 "spawnPoints": spawn_points,
             },
         }
+
+    def settle_vehicle(self, vehicle_name: Optional[str] = None, attach_mode: Optional[bool] = None) -> Dict[str, Any]:
+        """Wait for the vehicle to come to rest before plant / gtState samples."""
+        if vehicle_name is None:
+            vehicle_name = self._sim.default_vehicle_name
+        vehicle = self._sim.vehicles[vehicle_name].vehicle
+        if attach_mode is None:
+            attach_mode = str(self._sim.config.get("scenario_mode", "create")).lower() != "create"
+        return plant_calibration.settle_vehicle(
+            vehicle,
+            beamng=self._sim.beamng,
+            attach_mode=attach_mode,
+            logger=self._logger,
+        )
+
+    def measure_steering_to_input(self, vehicle_name: Optional[str] = None) -> Dict[str, Any]:
+        """Calibrate signed steering_to_input from xlab (no LLC)."""
+        if vehicle_name is None:
+            vehicle_name = self._sim.default_vehicle_name
+        vehicle = self._sim.vehicles[vehicle_name].vehicle
+        return plant_calibration.measure_steering_to_input(
+            vehicle,
+            beamng=self._sim.beamng,
+            logger=self._logger,
+        )
 
     def execute_request(self, func_name: str, **func_args):
         """

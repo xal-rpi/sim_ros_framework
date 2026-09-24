@@ -1,36 +1,48 @@
-totalMass: 874.929
-cogToFrontAxle: 1.465
-cogToRearAxle: 1.122
-coGHeight: 0.591
-distFR: 2.587
-trackFront: 1.554
-trackRear: 1.537
-wheelRadius: 0.378
-wheelRadiusNominal: 0.395
-wheelInertia: 1.612
-wheelInertiaSim: 0.605
+totalMass: 912.723
+cogToFrontAxle: 1.389
+cogToRearAxle: 1.208
+cogToCentralAxle: -0.001
+cogAboveAxle: 0.299
+coGHeight: 0.618
+distFR: 2.596
+trackFront: 1.381
+trackRear: 1.372
+wheelRadius: 0.324
+wheelRadiusNominal: 0.322
+wheelInertia: 0.984
+wheelInertiaSim: 0.511
 inertia:
-  xx: 334.973
-  xy: -0.359
-  xz: -15.947
-  yy: 1158.666
-  yz: 0.673
-  zz: 1320.146
+  xx: 330.631
+  xy: 117.362
+  xz: 32.654
+  yy: 1319.437
+  yz: 3.203
+  zz: 1419.394
 cogPosRel:
-- 0.688
-- -0.231
-- 0.269
+- 0.535
+- 0.366
+- 0.34
 bbox:
-  vehHeight: 1.62
-  vehLength: 3.615
-  vehWidth: 1.835
-steering_to_input: -0.589013
-steering_tau_s: 0.1844
-steering_delay_s: 0.0848
-steering_t95_s: 0.2234
+  vehHeight: 1.547
+  vehLength: 3.496
+  vehWidth: 2.058
+steering:
+  input_max: 1.0
+  input_min: -1.0
+  roadwheel_FL_at_umax_rad: -0.624225
+  roadwheel_FL_at_umin_rad: 0.740336
+  roadwheel_FR_at_umax_rad: -0.739919
+  roadwheel_FR_at_umin_rad: 0.620741
+  roadwheel_at_u0_rad: -0.000188
+  roadwheel_max_rad: -0.682072
+  roadwheel_min_rad: 0.680539
+  steering_to_input: -0.665825
+steering_tau_s: 0.1851
+steering_delay_s: 0.0843
+steering_t95_s: 0.2538
 engine:
   fuelCapacity: 25.0
-  fuelVolume: 24.997
+  fuelVolume: 24.994
   idleRPM: 1400.0
   maxRPM: 8000.0
   superchargerBoostMax: -1.0
@@ -71,10 +83,10 @@ powertrain:
         gearRatio: 3.5
         rangebox:
           type: rangeBox
-          gearRatio: 2.23
+          gearRatio: 1.874
           gearRatios:
-            0.0: 2.23
-            1.0: 4.56
+            0.0: 1.874
+            1.0: 3.832
           availableModes:
           - high
           - low
@@ -161,5 +173,7 @@ controllers:
   singleAxisLever: propAnimation/singleAxisLever
   transfercaseControl: driveModes
   twoStepLaunch: twoStepLaunch
+  utv/canam/r322CmdGate: utv/canam/r322CmdGate
+  utv/canam/r322TorqueShape: utv/canam/r322TorqueShape
   utv_naviscreen_accessory: beamNavigator
   vehicleController: vehicleController/vehicleController

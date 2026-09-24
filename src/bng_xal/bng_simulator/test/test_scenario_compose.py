@@ -68,6 +68,47 @@ def test_compose_multi_agent_ports_and_offset() -> None:
     assert agent2["spawn"]["xlab_yaw_deg"] == -90.0
 
 
+@pytest.mark.parametrize(
+    "vehicle, part_config, steering_to_input",
+    [
+        ("utv_canam_x3_loaded", "/vehicles/utv/canam_x3_loaded.pc", -0.683809),
+        ("utv_canam_x3_r322", "/vehicles/utv/canam_x3_r322.pc", -0.668394),
+        (
+            "utv_canam_x3_r322_easylift",
+            "/vehicles/utv/canam_x3_r322_easylift.pc",
+            -0.665825,
+        ),
+    ],
+)
+def test_compose_canam_catalog(
+    vehicle: str, part_config: str, steering_to_input: float
+) -> None:
+    cfg = compose_scenario("gridworld.yaml", {"vehicle": vehicle})
+    ego = cfg["vehicles"]["EGO"]
+    assert ego["model_args"]["model"] == "utv"
+    assert ego["model_args"]["part_config"] == part_config
+    sti = ego["controllers"]["LowLevelController"]["calibration"]["gains"]["steering_to_input"]
+    assert sti == pytest.approx(steering_to_input)
+
+
+def test_compose_easylift_uses_r322_lift_map() -> None:
+    lift = compose_scenario("gridworld.yaml", {"vehicle": "utv_canam_x3_r322_easylift"})
+    cal = lift["vehicles"]["EGO"]["controllers"]["LowLevelController"]["calibration"]
+    assert cal["torque_map"] == "utv_canam_r322_lift_wheel_torque"
+    assert cal["torque_map_api"] == "occupancy_rail"
+    assert lift["vehicles"]["EGO"]["sensors"]["gtstate"]["torque_map"]["field_name"] == (
+        "rear_wheel_torque_est"
+    )
+
+    sibling = compose_scenario("gridworld.yaml", {"vehicle": "utv_canam_x3_r322"})
+    sib_cal = sibling["vehicles"]["EGO"]["controllers"]["LowLevelController"]["calibration"]
+    assert "torque_map" not in sib_cal
+
+    wild = compose_scenario("gridworld.yaml", {"vehicle": "utv_wild"})
+    wild_cal = wild["vehicles"]["EGO"]["controllers"]["LowLevelController"]["calibration"]
+    assert wild_cal["torque_map"] == "utv_wild_drivetrain"
+
+
 def test_compose_yaw_offset_utv() -> None:
     cfg = compose_scenario("gridworld.yaml")
     spawn = cfg["vehicles"]["EGO"]["spawn"]

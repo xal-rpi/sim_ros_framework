@@ -10,25 +10,19 @@ import numpy as np
 
 from beamngpy.connection import CommBase
 from beamngpy.logging import LOGGER_ID
-from beamngpy.types import Float3, StrDict
+from beamngpy.types import StrDict
 
 from beamngpy.beamng import BeamNGpy
 from beamngpy.vehicle import Vehicle
 
-from bng_simulator.core.vehicle_properties import get_vehicle_principal_axis
 from bng_simulator.vehicle.sensors import SensorBase, SensorRegistry
 
-# Import ROS message type
 from bng_msgs.msg import GtStateMsg
 from bng_simulator.utils.services_utils import convert_time_to_header
 
 
 class GtStateWrapper(CommBase):
-    """
-    An interactive, automated sensor that extract all useful state from the
-    Beamng simulator.  This sensor is a custom sensor that is not part of the
-    Beamng.tech sensor suite.  It is designed to be used in conjunction with ...
-    """
+    """xlab GtState: COM + RPY path. Lua owns the report point."""
 
     def __init__(
         self,
@@ -38,105 +32,41 @@ class GtStateWrapper(CommBase):
         gfx_update_time: float = 0.05,
         physics_update_time: float = 0.01,
         num_physics_steps_for_gfx_save: int = 1,
-        pos: Float3 = (0, 0, 0),
-        dir: Float3 = (
-            1,
-            0,
-            0,
-        ),  # vector relative to the vehicle's forward direction, local frame
-        left: Float3 = (
-            0,
-            1,
-            0,
-        ),  # vector relative to the vehicle's left direction, local frame
-        is_allow_wheel_nodes: bool = False,
         is_visualised: bool = True,
-        is_snapping_desired: bool = False,
-        is_force_inside_triangle: bool = False,
-        # Attach-point vs report-point decoupling (see below).
-        #
-        # The SensorMatrixManager attaches the sensor to the *nearest* vehicle
-        # triangle to `pos`. When `pos` is the CoG (default), that triangle can
-        # be a soft/tilted mesh panel (seats, body shell), which makes the
-        # reconstructed sensor frame wobble and pollutes vy at speed.
-        #
-        # `attach_z_offset` shifts ONLY the attach position along the vehicle
-        # up axis (negative = downward, e.g. onto the stiff floor pan / frame
-        # rails), so a better triangle is selected. The Lua controller then
-        # transports position/velocity/acceleration back to the original
-        # report point (pos, typically the CoG) using the rigid-body transport
-        # equations with the exact angular velocity/acceleration — so the
-        # published state still refers to `pos`, lag-free.
-        # Angular quantities are point-independent and unaffected.
-        attach_z_offset: float = 0.0,
         accel_tau_s: Optional[float] = None,
         gyro_tau_s: Optional[float] = None,
         vel_tau_s: Optional[float] = None,
         wheel_angvel_tau_s: Optional[float] = None,
-        # Sensor FLU (see gtState.lua attitudeStep):
-        #   "triangle"  — legacy raw attach-triangle axes
-        #   "integrate" — propagate q with curl ω, slow pull to triangle
-        attitude_mode: Optional[str] = None,
-        attitude_tau_s: Optional[float] = None,  # pull to triangle [s]; integrate only
         debug_raw: Optional[bool] = None,
         torque_map: Optional[dict] = None,
+        **_ignored,
     ):
         super().__init__(beamng, vehicle)
-
         self.logger = getLogger(f"{LOGGER_ID}.GtState")
-
-        # Cache some properties we will need later.
         self.name = name
         self.vehicle = vehicle
-
-        # Cache additional vehicle properties.
-        self.extract_vehicle_properties()
-
-        # Create and initialise this sensor in the simulation.
         self._open_gt_state(
             name,
             vehicle,
             gfx_update_time,
             physics_update_time,
             num_physics_steps_for_gfx_save,
-            pos,
-            dir,
-            left,
-            is_allow_wheel_nodes,
             is_visualised,
-            is_snapping_desired,
-            is_force_inside_triangle,
-            attach_z_offset,
             accel_tau_s,
             gyro_tau_s,
             vel_tau_s,
             wheel_angvel_tau_s,
-            attitude_mode,
-            attitude_tau_s,
             debug_raw,
-            torque_map
+            torque_map,
         )
-
-        # Fetch the unique Id number (in the simulator)
-        # for this sensor.  We will need this later.
         self.sensorId = self._get_gt_state_id()
 
     def remove(self) -> None:
-        """
-        Removes this sensor from the simulation.
-        """
-        # Remove this sensor from the simulation.
         self._close_gt_state()
         self.logger.info("GtState - sensor removed: " f"{self.name}")
 
     def poll(self) -> StrDict:
-        """
-        Gets the most-recent readings for this sensor.
-        Returns:
-        """
-        # Send and receive a request for readings data from this sensor.
-        readings_data = self._poll_gt_state_ge()
-        return readings_data
+        return self._poll_gt_state_ge()
 
     def _get_gt_state_id(self) -> int:
         return int(self.send_recv_ge(type="GetGtStateId", name=self.name)["data"])
@@ -148,20 +78,11 @@ class GtStateWrapper(CommBase):
         gfx_update_time: float,
         physics_update_time: float,
         num_physics_steps_for_gfx_save: int,
-        pos: Float3,
-        dir: Float3,
-        left: Float3,
-        is_allow_wheel_nodes: bool,
         is_visualised: bool,
-        is_snapping_desired: bool,
-        is_force_inside_triangle: bool,
-        attach_z_offset: float = 0.0,
         accel_tau_s: Optional[float] = None,
         gyro_tau_s: Optional[float] = None,
         vel_tau_s: Optional[float] = None,
         wheel_angvel_tau_s: Optional[float] = None,
-        attitude_mode: Optional[str] = None,
-        attitude_tau_s: Optional[float] = None,
         debug_raw: Optional[bool] = None,
         torque_map: Optional[dict] = None,
     ) -> None:
@@ -171,23 +92,7 @@ class GtStateWrapper(CommBase):
         data["GFXUpdateTime"] = gfx_update_time
         data["physicsUpdateTime"] = physics_update_time
         data["numPhysicsStepsForGFXSave"] = num_physics_steps_for_gfx_save
-        # Attach position: requested report point shifted by attach_z_offset
-        # along the vehicle up axis (local (fwd, left, up) -> world in
-        # calculate_cog_pos). The triangle search happens around THIS point.
-        attach_pos = (pos[0], pos[1], pos[2] + attach_z_offset)
-        data["pos"] = self.calculate_cog_pos(attach_pos)
-        data["dir"] = self.calculate_dir(dir)
-        data["left"] = self.calculate_dir(left)
-        # Constant offset from the attach point back to the report point,
-        # expressed in the sensor FLU frame (x=fwd, y=left, z=up). The Lua
-        # controller applies the rigid-body transport with this vector every
-        # physics step, so published pos/vel/accel refer to the report point.
-        data["report_offset"] = (0.0, 0.0, -attach_z_offset)
-        data["isAllowWheelNodes"] = is_allow_wheel_nodes
         data["isVisualised"] = is_visualised
-        data["isSnappingDesired"] = is_snapping_desired
-        data["isForceInsideTriangle"] = is_force_inside_triangle
-        data["isDirWorldSpace"] = True # True
         if accel_tau_s is not None:
             data["accel_tau_s"] = accel_tau_s
         if gyro_tau_s is not None:
@@ -196,10 +101,6 @@ class GtStateWrapper(CommBase):
             data["vel_tau_s"] = vel_tau_s
         if wheel_angvel_tau_s is not None:
             data["wheel_angvel_tau_s"] = wheel_angvel_tau_s
-        if attitude_mode is not None:
-            data["attitude_mode"] = attitude_mode
-        if attitude_tau_s is not None:
-            data["attitude_tau_s"] = attitude_tau_s
         if debug_raw is not None:
             data["debug_raw"] = debug_raw
         if torque_map is not None:
@@ -213,9 +114,7 @@ class GtStateWrapper(CommBase):
         self.send_ack_ge(**args)
         self.logger.info(f"Opened GtState sensor: {name} \n{data}")
 
-    def _close_gt_state(
-        self,
-    ) -> None:
+    def _close_gt_state(self) -> None:
         self.send_ack_ge(
             type="CloseGtState",
             ack="ClosedGtState",
@@ -227,127 +126,60 @@ class GtStateWrapper(CommBase):
     def _poll_gt_state_ge(self) -> StrDict:
         return self.send_recv_ge(type="PollGtStateGE", name=self.name)["data"]
 
-    def extract_vehicle_properties(self):
-        """
-        Extracts the coordinates of the principal axis of the vehicles as
-        well as the vehicle's center of mass.
-        """
-        veh_prop = get_vehicle_principal_axis(self.vehicle)
-        self.cogPos = veh_prop["cogPosRel"] # Position relative to the vehicle's ref point
-        self.vectorForward = tuple(veh_prop["vectorForward"]) # Forward vector in world coordinates
-        self.vectorLeft = tuple(veh_prop["vectorLeft"]) # Left vector in world coordinates
-        self.vectorUp = veh_prop["vectorUp"] # Up vector in world coordinates
-        self.logger.info(f"Vehicle properties extracted: \n{veh_prop}")
-
-    def calculate_cog_pos(self, pos: Float3) -> Float3:
-        """
-        Calculates the center of gravity position in world coordinates.
-        """
-        return (
-            self.cogPos[0]
-            + pos[0] * self.vectorForward[0]
-            + pos[1] * self.vectorLeft[0]
-            + pos[2] * self.vectorUp[0],
-            self.cogPos[1]
-            + pos[0] * self.vectorForward[1]
-            + pos[1] * self.vectorLeft[1]
-            + pos[2] * self.vectorUp[1],
-            self.cogPos[2]
-            + pos[0] * self.vectorForward[2]
-            + pos[1] * self.vectorLeft[2]
-            + pos[2] * self.vectorUp[2],
-        )
-
-    def calculate_dir(self, dir: Float3) -> Float3:
-        """
-        Calculates the direction vector in world coordinates.
-        """
-        return (
-            dir[0] * self.vectorForward[0]
-            + dir[1] * self.vectorLeft[0]
-            + dir[2] * self.vectorUp[0],
-            dir[0] * self.vectorForward[1]
-            + dir[1] * self.vectorLeft[1]
-            + dir[2] * self.vectorUp[1],
-            dir[0] * self.vectorForward[2]
-            + dir[1] * self.vectorLeft[2]
-            + dir[2] * self.vectorUp[2],
-        )
-
 
 @SensorRegistry.register("GtState")
 class GtState(SensorBase):
-    """
-    The custom ground truth state sensor.
-    """
+    """The custom ground truth state sensor."""
 
     def __init__(self, name: str, vehicle: Vehicle, beamng: BeamNGpy, config: dict):
         super().__init__(name, vehicle, beamng, config)
         cfg = dict(config)
-        cfg.pop("is_using_gravity", None)
-        cfg.pop("kf_predict_gain", None)
+        for dead in (
+            "is_using_gravity",
+            "kf_predict_gain",
+            "attach_z_offset",
+            "attitude_mode",
+            "attitude_tau_s",
+            "is_force_inside_triangle",
+            "is_snapping_desired",
+            "is_allow_wheel_nodes",
+            "pos",
+            "dir",
+            "left",
+        ):
+            cfg.pop(dead, None)
         self._sensor = GtStateWrapper(name, vehicle, beamng, **cfg)
         self.__DEG_TO_RAD = np.pi / 180.0
 
     def poll(self):
-        """
-        Poll the sensor for the latest data.
-        """
-        # Poll the sensor for the latest data.
         all_readings = self._sensor.poll()
-
-        # If there is no data, set the last data to None.
         if len(all_readings) == 0:
             self._last_data = None
             self._all_data = []
             return
-
-        # If single data or list of data, convert to list of data.
         if type(all_readings) == dict:
             assert 0.0 not in all_readings, "0.0 in all_readings"
-            self._all_data = [
-                all_readings,
-            ]
+            self._all_data = [all_readings]
         else:
             assert type(all_readings) == list, "all_readings is not a list"
             self._all_data = all_readings
-
         self.process_data()
         self._last_data = self._all_data[-1]
 
     def process_data(self):
-        """
-        Process the sensor data.
-        """
-        # Process the sensor data.
         for data in self._all_data:
-            # Let's convert the steering to radians
             data["steering"] = data["steering"] * self.__DEG_TO_RAD
 
     def ros_msg_type(self):
-        """
-        Get the ROS message type.
-
-        Returns:
-            Any: The ROS message type.
-        """
         return GtStateMsg
 
     def to_ros_msg(self, data: Optional[dict] = None, frame_id="map"):
-        """
-        Convert the basic sensor state to a ROS message.
-
-        Returns:
-            Any: The ROS message.
-        """
         if data is None:
             data = self._last_data
-
         if self._last_data is None:
             return None
 
         header = convert_time_to_header(data["time"], frame_id)
-
         msg = GtStateMsg()
         msg.header = header
         msg.time = data["time"]
@@ -356,11 +188,9 @@ class GtState(SensorBase):
         msg.vel.x, msg.vel.y, msg.vel.z = data["vel"]
         msg.accel.x, msg.accel.y, msg.accel.z = data["accel"]
         msg.ang_vel.x, msg.ang_vel.y, msg.ang_vel.z = data["angVel"]
-        msg.ang_accel.x, msg.ang_accel.y, msg.ang_accel.z = data["angAccel"]
         msg.pos.x, msg.pos.y, msg.pos.z = data["pos"]
         msg.quat.x, msg.quat.y, msg.quat.z, msg.quat.w = data["quat"]
 
-        # Cache wheel data
         wheelFR = data["wheelFR"]
         wheelFL = data["wheelFL"]
         wheelRR = data["wheelRR"]

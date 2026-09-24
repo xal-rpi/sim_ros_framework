@@ -214,6 +214,7 @@ def _catalog_entry(
 def _apply_torque_map_rules(
     vehicle_cfg: Dict[str, Any],
     torque_map: Optional[str],
+    torque_map_api: Optional[str] = None,
 ) -> None:
     """Inject or strip torque_map on LLC + gtstate depending on catalog entry."""
     llc = vehicle_cfg.setdefault("controllers", {}).setdefault("LowLevelController", {})
@@ -221,12 +222,17 @@ def _apply_torque_map_rules(
 
     if torque_map:
         calibration["torque_map"] = torque_map
+        if torque_map_api:
+            calibration["torque_map_api"] = str(torque_map_api)
+        else:
+            calibration.setdefault("torque_map_api", "legacy")
         gtstate = vehicle_cfg.setdefault("sensors", {}).setdefault("gtstate", {})
         gtstate["torque_map"] = {
             "field_name": "rear_wheel_torque_est",
         }
     else:
         calibration.pop("torque_map", None)
+        calibration.pop("torque_map_api", None)
         sensors = vehicle_cfg.get("sensors", {})
         if "gtstate" in sensors:
             sensors["gtstate"].pop("torque_map", None)
@@ -244,7 +250,11 @@ def _apply_catalog_to_vehicle(
         gains = llc.setdefault("calibration", {}).setdefault("gains", {})
         gains["steering_to_input"] = steering_to_input
 
-    _apply_torque_map_rules(vehicle_cfg, catalog_entry.get("torque_map"))
+    _apply_torque_map_rules(
+        vehicle_cfg,
+        catalog_entry.get("torque_map"),
+        catalog_entry.get("torque_map_api"),
+    )
 
     vehicle_cfg["frame"] = {
         "yaw_offset_deg": catalog_entry.get("yaw_offset_deg", 0),
@@ -828,6 +838,7 @@ def summarize_config(
         llc = vehicle_cfg.get("controllers", {}).get("LowLevelController", {})
         calibration = llc.get("calibration", {})
         torque_map = calibration.get("torque_map", "—")
+        torque_map_api = calibration.get("torque_map_api", "legacy")
         control_mode = calibration.get("control_mode", "—")
         timeout = calibration.get("command_timeout", "—")
         gains = calibration.get("gains", {})
@@ -835,7 +846,8 @@ def summarize_config(
         steer_pi = "on" if gains.get("steer_pi_enable", 0) else "off"
         llc_verbose = calibration.get("verbose", False)
         lines.append(
-            f"  llc:        torque_map={torque_map} control_mode={control_mode} "
+            f"  llc:        torque_map={torque_map} api={torque_map_api} "
+            f"control_mode={control_mode} "
             f"timeout={timeout}s verbose={llc_verbose} "
             f"steering_to_input={steering_to_input} steer_pi={steer_pi}"
         )

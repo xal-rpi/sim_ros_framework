@@ -202,4 +202,5 @@ class ScenarioBuilder:
         for vehicle_name, vehicle_manager in self._sim.vehicles.items():
             self._sim.replace_vehicle(vehicle_manager)
 
+        # Settle + sensors happen in setup_vehicle_runtime (after replace, before GtState).
         self._logger.info("✓ CREATE mode initialization complete")

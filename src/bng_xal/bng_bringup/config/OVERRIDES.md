@@ -70,17 +70,16 @@ User presets merge **before** launch args: `base run → preset → launch args`
 
 Best for experiment-specific tweaks. Add an `overrides:` block to your run YAML (or to a user preset).
 
-### Sensor tuning (gtState filters, attitude, debug)
+### Sensor tuning (gtState filters, debug)
 
 Field names match [defaults/llc.yaml](defaults/llc.yaml) / [defaults/attach_sensors.yaml](defaults/attach_sensors.yaml) under `sensors.gtstate`.
+
+Lua reports at the frozen wet COM after settle (COM + RPY path). Dead triangle keys (`attach_z_offset`, `attitude_mode`, `pos`/`dir`/`left`) are ignored.
 
 | Key | Role |
 |-----|------|
 | `accel_tau_s` / `gyro_tau_s` / `vel_tau_s` / `wheel_angvel_tau_s` | EMA time constants [s] |
-| `attitude_mode` | `triangle` (raw attach axes) or `integrate` (curl ω + slow pull to triangle; kills HF flex on `vy`/quat) |
-| `attitude_tau_s` | Absolute pull to triangle [s]; used only when `attitude_mode: integrate` |
-| `attach_z_offset` | [m] shift attach search along vehicle up (usually `0.0`; non-zero enables report-point transport) |
-| `debug_raw` | Extra Lua fields (`velRaw`, `velTri`, `angVelUncorr`, …) for offline plots |
+| `debug_raw` | Extra Lua fields (`velRaw`, `velRef`, `angVelObjRPY`, `rGeom`, …) for offline plots |
 | `physics_update_time` | Physics-side filter step [s] |
 
 ```yaml
@@ -102,9 +101,6 @@ overrides:
           gyro_tau_s: 0.005
           vel_tau_s: 0.005
           physics_update_time: 0.005
-          attitude_mode: integrate   # or triangle for legacy axes
-          attitude_tau_s: 0.3
-          attach_z_offset: 0.0
           debug_raw: true            # then: ros2 run bng_controller plot_gtstate_debug
 ```
 
@@ -216,6 +212,9 @@ catalog:
     part_config: /vehicles/utv/wild.pc
     steering_to_input: -0.5948683325943701   # → LLC gains.steering_to_input
     torque_map: utv_wild_drivetrain          # → LLC + gtstate torque_map
+    # torque_map_api: occupancy_rail         # pair with a matching stem (default legacy)
+  # also: utv_canam_x3_loaded, utv_canam_x3_1g, utv_canam_x3_highcg,
+  #       utv_canam_x3_r322, utv_canam_x3_r322_easylift
     llc_overrides:
       LowLevelController:
         calibration:

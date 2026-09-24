@@ -1,0 +1,141 @@
+totalMass: 953.987
+cogToFrontAxle: 1.514
+cogToRearAxle: 1.079
+cogToCentralAxle: -0.013
+cogAboveAxle: 0.33
+coGHeight: 0.683
+distFR: 2.593
+trackFront: 1.383
+trackRear: 1.376
+wheelRadius: 0.364
+wheelRadiusNominal: 0.38
+wheelInertia: 1.286
+wheelInertiaSim: 0.511
+inertia:
+  xx: 355.014
+  xy: 91.289
+  xz: -23.542
+  yy: 1084.218
+  yz: -11.591
+  zz: 1163.97
+cogPosRel:
+- 0.707
+- -0.3
+- 0.381
+bbox:
+  vehHeight: 1.605
+  vehLength: 3.551
+  vehWidth: 2.026
+steering:
+  input_max: 1.0
+  input_min: -1.0
+  roadwheel_FL_at_umax_rad: -0.629849
+  roadwheel_FL_at_umin_rad: 0.744267
+  roadwheel_FR_at_umax_rad: -0.743087
+  roadwheel_FR_at_umin_rad: 0.629937
+  roadwheel_at_u0_rad: 3.6e-05
+  roadwheel_max_rad: -0.686468
+  roadwheel_min_rad: 0.687102
+  steering_to_input: -0.683809
+steering_tau_s: 0.1862
+steering_delay_s: 0.0859
+steering_t95_s: 0.2519
+engine:
+  fuelCapacity: 25.0
+  fuelVolume: 24.988
+  idleRPM: 1350.0
+  maxRPM: 8300.0
+  superchargerBoostMax: -1.0
+  turboBoostMax: 14.8
+gearbox:
+  R:
+    index: -1
+    mode_index: 0.4
+    gear_ratio: 4.7
+    mode: reverse
+    indexCmd: -1
+  N:
+    index: 0
+    mode_index: 0.55
+    gear_ratio: 4.7
+    mode: neutral
+    indexCmd: 0
+  P:
+    index: 0
+    mode_index: 0.0
+    gear_ratio: 4.7
+    mode: park
+    indexCmd: 1
+  D:
+    index: 1
+    mode_index: 0.78
+    gear_ratio: 4.7
+    mode: drive
+    indexCmd: 2
+powertrain:
+  mainEngine:
+    type: canamX3CombustionEngine
+    clutch:
+      type: canamX3PrimaryCurve
+      gearRatio: 1.0
+      gearbox:
+        type: cvtGearbox
+        gearRatio: 4.7
+        transfercase:
+          type: shaft
+          gearRatio: 2.07
+          availableModes:
+          - connected
+          differential_R:
+            type: differential
+            gearRatio: 3.43
+            availableModes:
+            - locked
+            diffTorqueSplit: 0.5
+            wheelaxleRL:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+              spindleRL:
+                type: shaft
+                gearRatio: 1.0
+                availableModes:
+                - connected
+            wheelaxleRR:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+              spindleRR:
+                type: shaft
+                gearRatio: 1.0
+                availableModes:
+                - connected
+  spindleFL:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+  spindleFR:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+controllers:
+  4wd: 4wd
+  door_L_coupler: advancedCouplerControl
+  door_R_coupler: advancedCouplerControl
+  frontBypass: bypassDampers
+  gauge: gauges/genericGauges
+  gauges/customModules/combustionEngineData: gauges/customModules/combustionEngineData
+  gauges/customModules/environmentData: gauges/customModules/environmentData
+  gtState0: xlab/gtState
+  rearBypass: bypassDampers
+  singleAxisLever: propAnimation/singleAxisLever
+  twoStepLaunch: twoStepLaunch
+  utv/audit/ecoThrottleMap: utv/audit/ecoThrottleMap
+  utv/canam/airpathTelemetry: utv/canam/airpathTelemetry
+  utv/canam/cvtAggressionFromThrottle: utv/canam/cvtAggressionFromThrottle
+  utv_naviscreen_accessory: beamNavigator
+  vehicleController: vehicleController/vehicleController

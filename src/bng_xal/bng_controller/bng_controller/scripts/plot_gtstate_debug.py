@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot gtState accel / vel / angVel / angAccel (+ debug cross-checks) from a run log.
+"""Plot gtState accel / vel / angVel (+ debug cross-checks) from a run log.
 
 Loads pickle timeseries via ``bng_simulator.utils.logger_utils.load_run_data``
 (rosbag ignored). Edit the hyperparameters block below, then:
@@ -10,11 +10,11 @@ Loads pickle timeseries via ``bng_simulator.utils.logger_utils.load_run_data``
 
 Useful comparisons when ``debug_raw`` was enabled in Lua:
   - angVel vs angVelRaw         : filter effect
-  - angVelRaw vs angVelUncorr   : tilted-triangle M^-1 correction
-  - angVelRaw vs angVelObjRPY   : sensor estimate vs engine all-node p,q,r
-  - dirY vs dirYTri             : published left vs raw triangle left (attitudeMode)
-  - velRaw vs velTri            : same v_world in published vs triangle FLU
-  - attitude figure             : dirs + vel overlay + PSD (enable SHOW_ATTITUDE_FIG)
+  - angVelRaw vs angVelObjRPY   : ω_FLU vs raw RPY (q,r flip when A≈B)
+  - vel vs velRaw               : filter effect on v_COM
+  - velRef vs velRaw            : getVelocity() vs v_ref + ω×r
+  - rGeom vs angVelRaw_z        : geometric yaw rate vs unfiltered r
+  - transport figure            : velRef / velOmegaR / remapped RPY (SHOW_ATTITUDE_FIG)
 """
 
 from __future__ import annotations
@@ -29,9 +29,11 @@ import numpy as np
 # =============================================================================
 
 # Run location: provide either RUN_PATH, or (ROOT_DIR + RUN_NUMBER).
-ROOT_DIR = "~/beamng_log_data/px4_replay_sysid_new"
+# New logs: ~/beamng_log_data/<vehicle>/run_XXX  (set VEHICLE or RUN_PATH).
+ROOT_DIR = "~/beamng_log_data"
 RUN_NUMBER = 1  # -> run_001
-RUN_PATH: Optional[str] = None  # e.g. "~/beamng_log_data/px4_replay_sysid_v3/run_001"
+RUN_PATH: Optional[str] = None  # e.g. "~/beamng_log_data/utv_wild/run_001"
+VEHICLE: Optional[str] = None  # e.g. "utv_wild" or "utv_canam_x3_loaded"
 
 # Sensor key after load_run_data flattening: "/<vehicle>/<sensor>"
 SENSOR_KEY = "/EGO/gtstate"
@@ -47,16 +49,16 @@ PLOT_STRIDE = 5
 AXES = (0, 1, 2)
 AXIS_NAMES = ("x / p", "y / q", "z / r")
 
-# Optional per-axis sign for engine ObjRPY (refNode frame may differ from
-# sensor FLU). Start with +1; flip an axis if scatter slope is clearly negative.
+# Raw getRollPitchYawAngularVelocity scalars (do not remap here).
+# On FLU, p=+rollAV, q=−pitchAV, r=−yawAV when (A)≈(B). That is fixed.
 OBJ_RPY_SIGN = (1.0, 1.0, 1.0)
+FLU_FROM_RPY_SIGN = (1.0, -1.0, -1.0)
 
 # Series groups to plot (field prefix without _x/_y/_z).
 # Each entry: (label, field_prefix, linestyle, linewidth)
 ANGVEL_SERIES = (
     ("angVel (filt)", "angVel", "-", 1.4),
-    ("angVelRaw (corr)", "angVelRaw", "-", 1.0),
-    ("angVelUncorr", "angVelUncorr", "--", 1.0),
+    ("angVelRaw", "angVelRaw", "--", 1.0),
     ("angVelObjRPY", "angVelObjRPY", ":", 1.6),
 )
 ACCEL_SERIES = (
@@ -65,31 +67,25 @@ ACCEL_SERIES = (
 )
 VEL_SERIES = (
     ("vel (published)", "vel", "-", 1.4),
-    ("velRaw (published)", "velRaw", "--", 1.0),
-    # Legacy: same v_world on attach-triangle axes (chatty vy).
-    ("velTri (raw triangle body)", "velTri", ":", 1.2),
-)
-ANGACCEL_SERIES = (
-    ("angAccel", "angAccel", "-", 1.2),
+    ("velRaw", "velRaw", "--", 1.0),
+    ("velRef (getVelocity)", "velRef", ":", 1.0),
 )
 
 # Correlation pairs printed + scatter-plotted: (x_prefix, y_prefix, title)
 CORR_PAIRS = (
-    ("angVelUncorr", "angVelRaw", "Uncorr vs Corrected (M^-1)"),
-    ("angVelRaw", "angVelObjRPY", "Corrected vs ObjRPY (engine)"),
-    ("angVelUncorr", "angVelObjRPY", "Uncorr vs ObjRPY (engine)"),
     ("angVel", "angVelRaw", "Filtered vs Raw angVel"),
+    ("angVelRaw", "angVelObjRPY", "ω_FLU vs raw ObjRPY (expect q,r flip)"),
     ("vel", "velRaw", "Filtered vs Raw vel"),
-    ("velRaw", "velTri", "Published velRaw vs raw-triangle velTri"),
+    ("velRef", "velRaw", "getVelocity vs v_COM"),
     ("accel", "accelRaw", "Filtered vs Raw accel"),
+    ("dirX", "dirXBody", "Published x vs debug copy"),
 )
 
-# Attitude / frame figure (published vs triangle). Needs debug_raw + a non-triangle
-# attitude_mode so Lua logs dir*Tri / velTri.
+# COM / transport figure (needs debug_raw: velRef, velOmegaR, angVelObjRPY).
 SHOW_ATTITUDE_FIG = True
 # 25–35 Hz band share is printed for these vel prefixes (axis = y / lateral).
 ATTITUDE_BAND_HZ = (25.0, 35.0)
-ATTITUDE_VEL_COMPARE = ("velRaw", "velTri", "vel")
+ATTITUDE_VEL_COMPARE = ("velRaw", "vel", "velRef")
 
 # Display
 SHOW_PLOTS = True
@@ -292,7 +288,7 @@ def _print_attitude_band_table(data: Dict, mask: np.ndarray, t_rel: np.ndarray) 
                 f"{share:10.3f} {np.sqrt(np.mean(v[:, ax] ** 2)):10.4g}"
             )
     # dirY world-x is the usual flex carrier on the utv.
-    for pref in ("dirY", "dirYTri"):
+    for pref in ("dirY",):
         key = pref + "_x"
         if key not in data:
             print(f"{pref}_x SKIP (missing)")
@@ -306,111 +302,99 @@ def _print_attitude_band_table(data: Dict, mask: np.ndarray, t_rel: np.ndarray) 
 
 
 def _plot_attitude_frame(data: Dict, mask: np.ndarray, t_rel: np.ndarray):
-    """Published vs triangle frame: dirs, lateral vel, and vy spectra."""
+    """COM transport + remapped RPY vs published ω."""
     import matplotlib.pyplot as plt
-
-    has_tri = all((f"dirYTri{_suffix(i)}") in data for i in range(3)) and all(
-        (f"velTri{_suffix(i)}") in data for i in range(3)
-    )
-    if not has_tri:
-        print("Attitude figure SKIP (need dirYTri_* and velTri_* from a non-triangle run)")
-        return None
 
     idx = np.arange(t_rel.size)[:: max(1, int(PLOT_STRIDE))]
     t_p = t_rel[idx]
-    dt = float(np.median(np.diff(t_rel))) if t_rel.size > 1 else 0.005
-    f0, f1 = ATTITUDE_BAND_HZ
 
-    dir_y = _get_vec(data, "dirY", mask)
-    dir_y_tri = _get_vec(data, "dirYTri", mask)
-    vel_raw = _get_vec(data, "velRaw", mask)
-    vel_tri = _get_vec(data, "velTri", mask)
+    try:
+        vel_raw = _get_vec(data, "velRaw", mask)
+        vel_ref = _get_vec(data, "velRef", mask)
+    except KeyError as exc:
+        print(f"Transport figure SKIP ({exc})")
+        return None
+
     try:
         vel_pub = _get_vec(data, "vel", mask)
     except KeyError:
         vel_pub = None
+    try:
+        vel_wr = _get_vec(data, "velOmegaR", mask)
+    except KeyError:
+        vel_wr = None
+    try:
+        w_raw = _get_vec(data, "angVelRaw", mask)
+        w_rpy = _get_vec(data, "angVelObjRPY", mask, signs=FLU_FROM_RPY_SIGN)
+    except KeyError:
+        w_raw, w_rpy = None, None
 
     fig, axes = plt.subplots(3, 3, figsize=(14, 9), dpi=DPI)
-    fig.suptitle(
-        "Attitude / frame — published vs triangle (flex check)",
-        fontsize=12,
-    )
+    fig.suptitle("COM transport / remapped RPY", fontsize=12)
 
-    # Row 0: dirY world components
-    world_names = ("dirY·êx", "dirY·êy", "dirY·êz")
-    for col in range(3):
-        ax = axes[0, col]
-        ax.plot(t_p, dir_y[idx, col], "-", lw=1.2, label="dirY (published)")
-        ax.plot(t_p, dir_y_tri[idx, col], "--", lw=1.0, label="dirYTri (triangle)")
-        ax.set_title(world_names[col])
-        ax.grid(True, alpha=0.3)
-        if col == 0:
-            ax.set_ylabel("direction [-]")
-        ax.set_xlabel("t - t0 [s]")
-    axes[0, 0].legend(loc="upper right", fontsize=8)
-
-    # Row 1: body velocity (highlight y)
     for col, axis in enumerate(AXES):
-        ax = axes[1, col]
-        ax.plot(t_p, vel_raw[idx, axis], "-", lw=1.2, label="velRaw (new body)")
-        ax.plot(t_p, vel_tri[idx, axis], "--", lw=1.0, label="velTri (old triangle body)")
+        ax = axes[0, col]
         if vel_pub is not None:
-            ax.plot(t_p, vel_pub[idx, axis], ":", lw=1.4, label="vel (new, filt)")
+            ax.plot(t_p, vel_pub[idx, axis], "-", lw=1.3, label="vel (filt)")
+        ax.plot(t_p, vel_raw[idx, axis], "--", lw=1.0, label="velRaw")
+        ax.plot(t_p, vel_ref[idx, axis], ":", lw=1.0, label="velRef")
+        if vel_wr is not None:
+            ax.plot(t_p, vel_wr[idx, axis], "-.", lw=1.0, label="ω×r")
         ax.set_title(f"vel {AXIS_NAMES[axis]}")
         ax.grid(True, alpha=0.3)
         if col == 0:
             ax.set_ylabel("vel [m/s]")
         ax.set_xlabel("t - t0 [s]")
+    axes[0, 0].legend(loc="upper right", fontsize=8)
+
+    for col, axis in enumerate(AXES):
+        ax = axes[1, col]
+        if w_raw is not None:
+            ax.plot(t_p, w_raw[idx, axis], "-", lw=1.2, label="angVelRaw")
+        if w_rpy is not None:
+            ax.plot(t_p, w_rpy[idx, axis], "--", lw=1.0, label="RPY→FLU")
+        ax.set_title(f"ω {AXIS_NAMES[axis]}")
+        ax.grid(True, alpha=0.3)
+        if col == 0:
+            ax.set_ylabel("angVel [rad/s]")
+        ax.set_xlabel("t - t0 [s]")
     axes[1, 0].legend(loc="upper right", fontsize=8)
 
-    # Row 2: spectra of lateral velocity (+ dirY_x as the carrier)
-    def _plot_psd(ax, series: np.ndarray, label: str, ls: str = "-") -> None:
-        series = series - series.mean()
-        freqs = np.fft.rfftfreq(series.size, dt)
-        psd = (np.abs(np.fft.rfft(series)) ** 2) / max(series.size, 1)
-        ax.semilogy(freqs, psd + 1e-30, ls, lw=1.1, label=label)
-
     ax = axes[2, 0]
-    _plot_psd(ax, vel_raw[:, 1], "velRaw_y")
-    _plot_psd(ax, vel_tri[:, 1], "velTri_y", "--")
-    if vel_pub is not None:
-        _plot_psd(ax, vel_pub[:, 1], "vel_y", ":")
-    ax.axvspan(f0, f1, color="C3", alpha=0.15, label=f"{f0:.0f}-{f1:.0f} Hz")
-    ax.set_xlim(0, min(50.0, 0.5 / dt))
-    ax.set_title("PSD vel_y")
-    ax.set_xlabel("f [Hz]")
-    ax.set_ylabel("power")
-    ax.grid(True, alpha=0.3, which="both")
-    ax.legend(fontsize=7, loc="upper right")
+    if "rGeom" in data and "angVelRaw_z" in data:
+        rg = _as_array(data["rGeom"])[mask]
+        rf = _as_array(data["angVelRaw_z"])[mask]
+        ax.plot(t_p, rg[idx], "-", lw=1.2, label="rGeom")
+        ax.plot(t_p, rf[idx], "--", lw=1.0, label="angVelRaw.r")
+        ax.legend(loc="upper right", fontsize=8)
+    ax.set_title("rGeom vs unfiltered r")
+    ax.set_xlabel("t - t0 [s]")
+    ax.set_ylabel("[rad/s]")
+    ax.grid(True, alpha=0.3)
 
     ax = axes[2, 1]
-    _plot_psd(ax, dir_y[:, 0], "dirY_x (pub)")
-    _plot_psd(ax, dir_y_tri[:, 0], "dirYTri_x", "--")
-    ax.axvspan(f0, f1, color="C3", alpha=0.15, label=f"{f0:.0f}-{f1:.0f} Hz")
-    ax.set_xlim(0, min(50.0, 0.5 / dt))
-    ax.set_title("PSD dirY world-x (flex carrier)")
-    ax.set_xlabel("f [Hz]")
-    ax.grid(True, alpha=0.3, which="both")
-    ax.legend(fontsize=7, loc="upper right")
+    if "yawAtoB" in data:
+        yaw = _as_array(data["yawAtoB"])[mask]
+        ax.plot(t_p, yaw[idx], "-", lw=1.2)
+        ax.set_title("yawAtoB (A vs B)")
+    else:
+        ax.set_title("yawAtoB SKIP")
+    ax.set_xlabel("t - t0 [s]")
+    ax.set_ylabel("[rad]")
+    ax.grid(True, alpha=0.3)
 
     ax = axes[2, 2]
-    # Same-run residual: triangle lateral minus published-frame lateral.
-    dy = vel_tri[:, 1] - vel_raw[:, 1]
-    ax.plot(t_p, dy[idx], "-", lw=1.0, color="C3")
-    ax.set_title("velTri_y − velRaw_y (flex leak)")
+    if vel_wr is not None:
+        residual = vel_raw - vel_ref - vel_wr
+        for axis in AXES:
+            ax.plot(t_p, residual[idx, axis], lw=1.0, label=AXIS_NAMES[axis])
+        ax.legend(loc="upper right", fontsize=8)
+        ax.set_title("velRaw − velRef − ω×r")
+    else:
+        ax.set_title("transport residual SKIP")
     ax.set_xlabel("t - t0 [s]")
     ax.set_ylabel("[m/s]")
     ax.grid(True, alpha=0.3)
-    share = _band_share(dy, dt, f0, f1)
-    ax.text(
-        0.02,
-        0.95,
-        f"band share={share:.2f}\nrms={np.sqrt(np.mean(dy**2)):.3f}",
-        transform=ax.transAxes,
-        va="top",
-        fontsize=8,
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
-    )
 
     fig.tight_layout()
     return fig
@@ -422,12 +406,13 @@ def main() -> int:
     run_path = os.path.expanduser(RUN_PATH) if RUN_PATH else None
     print(
         f"Loading run: path={run_path!r} root={ROOT_DIR!r} number={RUN_NUMBER} "
-        f"(pickle only)"
+        f"vehicle={VEHICLE!r} (pickle only)"
     )
     merged = load_run_data(
         run_number=None if run_path else RUN_NUMBER,
         run_path=run_path,
         root_dir=ROOT_DIR,
+        vehicle=VEHICLE,
         include_pickle=True,
         include_rosbag=False,
     )
@@ -455,16 +440,45 @@ def main() -> int:
     # Quick availability of debug fields.
     for pref in (
         "angVelRaw",
-        "angVelUncorr",
         "angVelObjRPY",
         "velRaw",
-        "velTri",
+        "velRef",
+        "velOmegaR",
         "accelRaw",
-        "dirY",
-        "dirYTri",
+        "dirXBody",
+        "rFlu",
     ):
         ok = all((pref + _suffix(i)) in data for i in range(3))
         print(f"  field {pref}_*: {'OK' if ok else 'MISSING'}")
+    if "yawAtoB" in data:
+        yaw = _as_array(data["yawAtoB"])[mask]
+        print(
+            f"  yawAtoB [rad]: mean={float(np.mean(yaw)):+.4f}  "
+            f"rms={float(np.sqrt(np.mean(yaw**2))):.4f}  "
+            f"maxabs={float(np.max(np.abs(yaw))):.4f}"
+        )
+    if "rGeom" in data and "angVelRaw_z" in data:
+        rg = _as_array(data["rGeom"])[mask]
+        rf = _as_array(data["angVelRaw_z"])[mask]
+        r = _pearson(rg, rf)
+        a = _fit_scale(rg, rf)
+        print(
+            f"  rGeom vs angVelRaw_z: pearson={r:+.4f}  scale={a:+.4f}  "
+            f"rms_geom={float(np.sqrt(np.mean(rg**2))):.4f}  "
+            f"rms_r={float(np.sqrt(np.mean(rf**2))):.4f}"
+        )
+    if all((f"angVelObjRPY{_suffix(i)}") in data for i in range(3)) and all(
+        (f"angVelRaw{_suffix(i)}") in data for i in range(3)
+    ):
+        rpy = _get_vec(data, "angVelObjRPY", mask, signs=FLU_FROM_RPY_SIGN)
+        flu = _get_vec(data, "angVelRaw", mask)
+        print("  remapped ObjRPY (+p,−q,−r) vs angVelRaw:")
+        for ax in AXES:
+            rr = _pearson(rpy[:, ax], flu[:, ax])
+            aa = _fit_scale(rpy[:, ax], flu[:, ax])
+            print(
+                f"    {AXIS_NAMES[ax]:<8} pearson={rr:+.4f}  scale={aa:+.4f}"
+            )
 
     _print_corr_table(data, mask)
     _print_attitude_band_table(data, mask, t_rel)
@@ -474,12 +488,11 @@ def main() -> int:
 
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(4, len(AXES), figsize=FIGSIZE, dpi=DPI, sharex=True)
+    fig, axes = plt.subplots(3, len(AXES), figsize=FIGSIZE, dpi=DPI, sharex=True)
     fig.suptitle(f"gtState debug — {SENSOR_KEY} @ {ROOT_DIR} run_{RUN_NUMBER:03d}", fontsize=12)
     _plot_group(axes[0], t_rel, data, mask, ANGVEL_SERIES, "angVel [rad/s]")
-    _plot_group(axes[1], t_rel, data, mask, ANGACCEL_SERIES, "angAccel [rad/s²]")
-    _plot_group(axes[2], t_rel, data, mask, VEL_SERIES, "vel [m/s]")
-    _plot_group(axes[3], t_rel, data, mask, ACCEL_SERIES, "accel [m/s²]")
+    _plot_group(axes[1], t_rel, data, mask, VEL_SERIES, "vel [m/s]")
+    _plot_group(axes[2], t_rel, data, mask, ACCEL_SERIES, "accel [m/s²]")
     fig.tight_layout()
 
     fig2 = _plot_scatter_corr(data, mask)

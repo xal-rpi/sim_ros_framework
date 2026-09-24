@@ -3,7 +3,7 @@
 Interactive Logger Starter
 
 This script:
-- Ensures that a run folder (e.g., run_001) exists under ~/beamng_log_data.
+- Ensures that a run folder exists under ~/beamng_log_data/<vehicle>/run_XXX.
 - Determines the new run folder and proposes the log file (data.pkl).
 - Asks the user to confirm the file name.
 - Starts the ROS services (StartLogger and StopLogger) with a provided max_queue_size.
@@ -32,7 +32,9 @@ from bng_simulator.utils.log_session import (
     begin_run,
     end_run,
     get_next_run_folder,
+    vehicle_slug_from_config,
 )
+from bng_simulator.utils.services_utils import send_request
 
 # Color utilities for terminal output
 class Colors:
@@ -344,31 +346,29 @@ def main(args=None):
     )
     parsed_args, unknown = parser.parse_known_args(args)
 
-    # Determine the run folder and log file path.
     data_root = os.path.expanduser("~/beamng_log_data")
-    run_folder = get_next_run_folder(data_root)
-    # Update global variable for cleanup handler
-    globals()['run_folder'] = run_folder
-    file_path = os.path.join(run_folder, "data")
-    
-    # Create a timestamp-based subdirectory name for the bag
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    bag_folder = os.path.join(run_folder, f"rosbag_{timestamp}")
-    # Don't create the directory - let ros2 bag do it
-
-    # Inform the user of the file that will be used.
-    print("\nLogger will use the following file for logging data:")
-    print(f"  {file_path}")
-    confirm = input("Proceed? (y/n): ").strip().lower()
-    if confirm != "y":
-        # Delete the created run folder if user aborts.
-        if os.path.exists(run_folder):
-            shutil.rmtree(run_folder)
-        sys.exit("Aborted by user.\n")
 
     rclpy.init(args=args)
     client = LoggerClient()
     globals()['client'] = client
+
+    scenario_infos = send_request("get_sim_config", node_ros=client) or {}
+    vehicle_slug = vehicle_slug_from_config(scenario_infos)
+    run_folder = get_next_run_folder(data_root, vehicle=vehicle_slug)
+    globals()['run_folder'] = run_folder
+    file_path = os.path.join(run_folder, "data")
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    bag_folder = os.path.join(run_folder, f"rosbag_{timestamp}")
+
+    print("\nLogger will use the following file for logging data:")
+    print(f"  vehicle: {vehicle_slug}")
+    print(f"  {file_path}")
+    confirm = input("Proceed? (y/n): ").strip().lower()
+    if confirm != "y":
+        if os.path.exists(run_folder):
+            shutil.rmtree(run_folder)
+        sys.exit("Aborted by user.\n")
 
     print_info("Starting logger service...")
     try:
@@ -376,6 +376,7 @@ def main(args=None):
             client,
             data_root,
             run_folder=run_folder,
+            scenario_infos=scenario_infos,
             max_queue_size=parsed_args.max_queue_size,
             flush_interval=parsed_args.flush_interval,
         )

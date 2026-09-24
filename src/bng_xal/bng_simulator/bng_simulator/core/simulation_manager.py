@@ -116,8 +116,37 @@ class SimulationManager:
         Set up sensors and controllers for a vehicle.
         
         Called by managers after vehicle creation/attachment.
+        CREATE: runs after replace_vehicle. ATTACH: warns if the car is still moving.
+        Settle before GtState so the report point is the wet, settled COM.
         """
+        from bng_simulator.core.calibration import settle_vehicle
+        from bng_simulator.core.vehicle_properties import get_vehicle_properties
+
+        attach_mode = str(self.config.get("scenario_mode", "create")).lower() != "create"
         for vehicle_name, vehicle_manager in self.vehicles.items():
+            self.logger.info(f"Settling {vehicle_name} before sensors (attach={attach_mode})")
+            settle = settle_vehicle(
+                vehicle_manager.vehicle,
+                beamng=self.beamng,
+                attach_mode=attach_mode,
+                logger=self.logger,
+            )
+            self.logger.info(f"Settle {vehicle_name}: {settle}")
+            try:
+                kin = get_vehicle_properties(vehicle_manager.vehicle)
+                a = float(kin["cogToFrontAxle"])
+                b = float(kin["cogToRearAxle"])
+                h = float(kin["coGHeight"])
+                y = float(kin.get("cogToCentralAxle", 0.0))
+                z_axle = kin.get("cogAboveAxle")
+                z_s = "" if z_axle is None else f"  cogAboveAxle={float(z_axle):+.4f}"
+                self.logger.info(
+                    f"{vehicle_name} plant  mass={float(kin['totalMass']):.3f}  "
+                    f"a={a:.4f}  b={b:.4f}  L={float(kin['distFR']):.4f}  "
+                    f"h={h:.4f}  cogToCentralAxle={y:+.4f} m (+left){z_s}"
+                )
+            except Exception as exc:
+                self.logger.warn(f"{vehicle_name} plant measure failed: {exc}")
             self.logger.info(f"Setting up sensors/controllers for: {vehicle_name}")
             vehicle_manager.setup_all_sensors()
             vehicle_manager.setup_controllers()

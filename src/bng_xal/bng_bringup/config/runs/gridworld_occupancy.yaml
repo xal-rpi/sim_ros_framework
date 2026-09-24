@@ -1,0 +1,13 @@
+# Occupancy-rail torque map on the same wild plant as gridworld.yaml.
+# Default catalog (utv_wild / utv_wild_drivetrain) is unchanged.
+#
+#   ros2 launch bng_bringup simulator.launch.py config:=gridworld_occupancy.yaml
+#   # or: config:=gridworld.yaml vehicle:=utv_wild_occupancy
+
+compose:
+  vehicle: utv_wild_occupancy
+  vehicle_id: EGO
+  level: tech_ground
+  spawn: origin
+
+scenario_mode: create

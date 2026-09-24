@@ -1,5 +1,7 @@
 """
-Implement additional functionalities for BeamNGpy
+Thin BeamNG / xlab request wrappers (get/set one-shots).
+
+Settle + steering_to_input sweeps live in calibration.py.
 """
 
 from typing import Optional
@@ -144,42 +146,27 @@ def get_diff_lock_state(vehicle: Vehicle, diff: str = "front") -> dict:
 
 
 def get_vehicle_properties(vehicle: Vehicle, world_space: bool = False) -> dict:
-    """
-    Get comprehensive vehicle properties.
+    """Body-frame plant after settle (wet COM, axle-center kinematics).
 
-    Args:
-        vehicle (Vehicle): The target vehicle.
-        world_space (bool): True to retrieve properties in world space; False for local space.
+    ``world_space`` is ignored: always live ref-node frame. No world poses.
 
     Returns:
-        dict: Vehicle properties containing:
-            - vLength (float): Vehicle length (meters).
-            - vWidth (float): Vehicle width (meters).
-            - vHeight (float): Vehicle height (meters).
-            - estCogGlobal (dict): Estimated global center of gravity in FLU space {x, y, z}.
-            - relCog (dict): Relative center of gravity based on the reference node.
-            - posRef (dict): Position of the reference node.
-            - estCogGlobalV2 (dict): Secondary estimation of global center of gravity {x, y, z}.
-            - currPos (dict): Current vehicle position {x, y, z}.
-            - cogGlobal (dict): Center of gravity in game coordinates {x, y, z}.
-            - currDirection (dict): Current vehicle direction vector {x, y, z}.
-            - wheelBase (float): Distance between front and rear axles (meters).
-            - totalMass (float): Total vehicle mass (kg).
-            - cogToFrontAxle (float): Distance from COG to front axle (meters).
-            - cogToRearAxle (float): Distance from COG to rear axle (meters).
-            - cogToLeftWheelAxle (float): Lateral distance from COG to left wheel axle (meters).
-            - cogToRightWheelAxle (float): Lateral distance from COG to right wheel axle (meters).
-            - vectorForward (dict): Forward direction vector in the vehicle frame {x, y, z}.
-            - vectorUp (dict): Upward direction vector in the vehicle frame {x, y, z}.
-            - vectorLeft (dict): Left direction vector in the vehicle frame {x, y, z}.
-            - vectorForwardWS (dict): Forward direction vector in world space {x, y, z}.
-            - vectorUpWS (dict): Upward direction vector in world space {x, y, z}.
-            - vectorLeftWS (dict): Left direction vector in world space {x, y, z}.
-            - wheel_fr (dict): Per-wheel data for the front right wheel (includes mass, position, inertia, radius, width).
-            - wheel_fl (dict): Per-wheel data for the front left wheel (includes mass, position, inertia, radius, width).
-            - wheel_rr (dict): Per-wheel data for the rear right wheel (includes mass, position, inertia, radius, width).
-            - wheel_rl (dict): Per-wheel data for the rear left wheel (includes mass, position, inertia, radius, width).
-            - vehInertia (dict): Inertia tensor components with keys: xx, yy, zz, xy, xz, yz.
+        dict:
+            totalMass (float): wet mass [kg]
+            cogToFrontAxle (float): a, COM to front axle along wheelbase [m]
+            cogToRearAxle (float): b, COM to rear axle along wheelbase [m]
+            cogToCentralAxle (float): COM vs vehicle centerline, +left [m]
+            cogAboveAxle (float): COM above the front/rear axle line, +up [m]
+            distFR (float): L = a + b [m]
+            trackFront / trackRear (float): wheel-center track [m]
+            coGHeight (float): h, COM above contact along body z [m]
+            wheelRadius (float): mean dynamicRadius [m]
+            wheelRadiusNominal (float): mean wd.radius [m]
+            wheelInertia (float): catalog I_w prior from geometry [kg·m²]
+            wheelInertiaSim (float): mean wd.inertia (rotator / invert F_x) [kg·m²]
+            inertia (dict): xx,yy,zz,xy,xz,yz about COM, FLU, wet
+            cogPosRel (list): wet COM in ref-node frame
+            bbox (dict): vehLength, vehWidth, vehHeight
     """
     veh_root = vehicle._root
     data = dict(type="GetVehicleProperties", worldSpace=world_space)
@@ -187,19 +174,28 @@ def get_vehicle_properties(vehicle: Vehicle, world_space: bool = False) -> dict:
 
 
 def get_vehicle_principal_axis(vehicle: Vehicle) -> dict:
-    """
-    Get vehicle's principal axis information
-    Args:
-        vehicle: Target vehicle
+    """Live wet CoG (ref-node frame) and principal axes.
+
     Returns:
-        dict: Principal axis data with keys:
-            - cogPosStatic (dict): Global COG position {x,y,z}
-            - vectorForward (dict): Forward direction vector {x,y,z}
-            - vectorUp (dict): Up direction vector {x,y,z}
-            - vectorLeft (dict): Left direction vector {x,y,z}
+        dict: ``cogPosRel``, ``vectorForward``, ``vectorLeft``, ``vectorUp``.
+        ``debug_cog_world`` is optional and must not be written to YAML.
     """
     veh_root = vehicle._root
     data = dict(type="GetVehiclePrincipalAxis")
+    return veh_root._send(data).recv()["data"]
+
+
+def get_settle_state(vehicle: Vehicle) -> dict:
+    """Linear speed, angular rate, and world CG z for the settle gate."""
+    veh_root = vehicle._root
+    data = dict(type="GetSettleState")
+    return veh_root._send(data).recv()["data"]
+
+
+def get_front_roadwheel_steer(vehicle: Vehicle) -> dict:
+    """Front roadwheel heading [rad] vs body wheelbase (same δ as gtState / LLC)."""
+    veh_root = vehicle._root
+    data = dict(type="GetFrontRoadwheelSteer")
     return veh_root._send(data).recv()["data"]
 
 
@@ -327,6 +323,7 @@ def control_vehicle(
     brake: Optional[float] = None,
     clutch: Optional[float] = None,
     steering: Optional[float] = None,
+    steering_input: Optional[float] = None,
     parkingbrake: Optional[bool] = None,
     gear: Optional[int] = None,
 ):
@@ -342,7 +339,8 @@ def control_vehicle(
             throttle,
             brake,
             clutch,
-            steering,
+            steering,          # BeamNG input.event('steering')
+            steering_input,    # electrics.values.steering_input [-1, 1] (LLC / k=δ/u)
             parkingbrake,
             gear.
 
@@ -359,8 +357,10 @@ def control_vehicle(
         dict_inputs["clutch"] = clutch
     if steering is not None:
         dict_inputs["steering"] = steering
+    if steering_input is not None:
+        dict_inputs["steering_input"] = steering_input
     if parkingbrake is not None:
-        dict_inputs["parkingbrake"] = parkingbrake
+        dict_inputs["parkingbrake"] = 1.0 if parkingbrake else 0.0
     if gear is not None:
         dict_inputs["gear"] = gear
     dict_inputs["filter"] = filter

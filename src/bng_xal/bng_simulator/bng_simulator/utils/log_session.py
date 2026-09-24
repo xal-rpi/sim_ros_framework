@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -32,13 +33,44 @@ from bng_simulator.utils.services_utils import send_request
 MSG_VERSION = "1.0"
 
 
-def get_next_run_folder(root_dir: str | os.PathLike) -> str:
-    """Create and return the next ``run_XXX`` folder under *root_dir*."""
+def safe_log_slug(name: str) -> str:
+    """Filesystem-safe vehicle folder name."""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", str(name).strip())
+    return slug.strip("._") or "unknown"
+
+
+def vehicle_slug_from_config(scenario_infos: Optional[Dict[str, Any]]) -> str:
+    """Catalog-style id from ``get_sim_config`` ``vehicles_part`` (e.g. ``utv_wild``)."""
+    parts = (scenario_infos or {}).get("vehicles_part") or {}
+    if not isinstance(parts, dict) or not parts:
+        return "unknown"
+    if parts.get("EGO"):
+        return safe_log_slug(parts["EGO"])
+    names = [str(v) for v in parts.values() if v]
+    if not names:
+        return "unknown"
+    if len(set(names)) == 1:
+        return safe_log_slug(names[0])
+    return safe_log_slug("__".join(sorted(set(names))))
+
+
+def get_next_run_folder(
+    root_dir: str | os.PathLike,
+    *,
+    vehicle: Optional[str] = None,
+) -> str:
+    """Create and return the next ``run_XXX`` folder.
+
+    With *vehicle*, logs go under ``<root>/<vehicle>/run_XXX`` so models do not
+    share one counter. Without it, ``<root>/run_XXX`` (legacy).
+    """
     root_dir = os.path.expanduser(str(root_dir))
+    if vehicle:
+        root_dir = os.path.join(root_dir, safe_log_slug(vehicle))
     os.makedirs(root_dir, exist_ok=True)
     runs = [d for d in os.listdir(root_dir) if d.startswith("run_")]
     if runs:
-        nums = [int(d.split("_")[1]) for d in runs if d.split("_")[1].isdigit()]
+        nums = [int(d.split("_")[1]) for d in runs if len(d.split("_")) > 1 and d.split("_")[1].isdigit()]
         next_num = max(nums) + 1 if nums else 1
     else:
         next_num = 1
@@ -166,10 +198,16 @@ def build_metadata(
     """Build metadata dict the same way ``start_logs`` does."""
     scenario_infos = run.scenario_infos or {}
     vehicles_part = scenario_infos.get("vehicles_part", {})
+    log_root = os.path.abspath(os.path.expanduser("~/beamng_log_data"))
+    abs_run = os.path.abspath(run.run_folder)
+    try:
+        run_label = os.path.relpath(abs_run, log_root)
+    except ValueError:
+        run_label = os.path.basename(run.run_folder)
     metadata: Dict[str, Any] = {
         "map_name": map_name,
         "additional_info": additional_info,
-        "run_folder": os.path.basename(run.run_folder),
+        "run_folder": run_label,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "msg_version": MSG_VERSION,
         **vehicles_part,
@@ -189,21 +227,25 @@ def begin_run(
     root_dir: str | os.PathLike = "~/beamng_log_data",
     *,
     run_folder: Optional[str | os.PathLike] = None,
+    scenario_infos: Optional[Dict[str, Any]] = None,
     max_queue_size: int = 5000,
     flush_interval: float = 5.0,
 ) -> LoggedRun:
     """
-    Allocate ``run_XXX`` (unless *run_folder* given), start ``start_logger``.
+    Allocate ``<vehicle>/run_XXX`` (unless *run_folder* given), start ``start_logger``.
 
     Raises ``RuntimeError`` if the logger service fails to start (folder removed).
     """
+    if scenario_infos is None:
+        scenario_infos = send_request("get_sim_config", node_ros=client) or {}
     if run_folder is None:
-        run_folder = get_next_run_folder(root_dir)
+        run_folder = get_next_run_folder(
+            root_dir, vehicle=vehicle_slug_from_config(scenario_infos)
+        )
     else:
         run_folder = str(run_folder)
         os.makedirs(run_folder, exist_ok=True)
     data_path = os.path.join(run_folder, "data")
-    scenario_infos = send_request("get_sim_config", node_ros=client) or {}
     start_resp = client.start_logging(data_path, max_queue_size, flush_interval)
     if not start_resp or not start_resp.success:
         shutil.rmtree(run_folder, ignore_errors=True)

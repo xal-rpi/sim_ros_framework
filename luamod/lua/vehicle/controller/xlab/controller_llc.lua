@@ -4,10 +4,14 @@
 --   1. throttle_override  — direct [0,1], bypasses torque map + PI
 --   2. torque map + inverse — needs ffi lib; skipped if no map
 --
+-- torque_map_api (calibration, default legacy):
+--   legacy          — 4-arg NN (we, boost, wr_ms, T/u); gtState live T(u=0/1)
+--   occupancy_rail  — rwd_struct T(we, u, boost, ww_rads); bisect invert at live x
+--
 -- Torque / wheel-speed composition (when not in throttle override):
 --   torque_des     — feedforward torque [N·m] → inverse (nil = 0 FF)
 --   omega_des      — rear wheel speed [m/s]; PI adds piTerm [N·m]
---   tCmd           = torque_des + clip(piTerm, t_min, t_max)
+--   tCmd           = torque_des + clip(piTerm, t_min, t_max)  (unclamped if wr < 2 m/s)
 --   piTerm         = pi_enable * (kp*e + ki*∫e), e = omega_des - omega
 --   Omitting a scalar field clears it (replace semantics on each cmd).
 --
@@ -49,18 +53,56 @@ local trajectoryPick = TRAJECTORY_PICK.next
 
 -- ---------------------------------------------------------------------------
 -- Torque map (ffi) — loaded once from OpenController payload (common.torqueMapPath)
+-- cdef is chosen once from torque_map_api (signatures collide if both are declared).
 -- ---------------------------------------------------------------------------
 
-ffi.cdef([[
+local TORQUE_MAP_API = {
+  legacy = 'legacy',
+  occupancy_rail = 'occupancy_rail',
+}
+
+local CDEF_LEGACY = [[
   float drivetrain_inverse_throttle(float engine_speed_rads, float boost_pressure,
                                     float rear_wheelspeed_ms, float torque_cmd);
   float drivetrain_forward_torque(float engine_speed_rads, float boost_pressure,
                                   float rear_wheelspeed_ms, float throttle_cmd);
   extern const float drivetrain_wheel_gain;
-]])
+]]
+
+local CDEF_OCCUPANCY = [[
+  float drivetrain_forward_torque(float engine_speed_rads, float throttle_cmd,
+                                  float boost_pressure, float rear_wheelspeed_rads);
+  float drivetrain_inverse_throttle(float engine_speed_rads, float boost_pressure,
+                                    float rear_wheelspeed_rads, float torque_cmd);
+  float drivetrain_inverse_throttle_knots(float engine_speed_rads, float boost_pressure,
+                                          float rear_wheelspeed_rads, float torque_cmd);
+  int drivetrain_heads(float engine_speed_rads, float boost_pressure, float rear_wheelspeed_rads,
+                       float *g_out, float *F_out);
+  extern const float drivetrain_r_kin;
+]]
 
 local torqueMapLib = nil
 local torqueMapStem = nil
+local torqueMapApi = TORQUE_MAP_API.legacy
+local torqueMapCdefDone = false
+local torqueMapRKin = 0.38
+local invertSanityLogged = false
+local railU = ffi.new('float[1]')
+local railThat = ffi.new('float[1]')
+
+local function isOccupancyRail()
+  return torqueMapApi == TORQUE_MAP_API.occupancy_rail
+end
+
+local function bindTorqueMapApi(api)
+  if torqueMapCdefDone then return end
+  if api == TORQUE_MAP_API.occupancy_rail then
+    ffi.cdef(CDEF_OCCUPANCY)
+  else
+    ffi.cdef(CDEF_LEGACY)
+  end
+  torqueMapCdefDone = true
+end
 
 local function loadTorqueMap(libPath)
   if torqueMapLib then return true end
@@ -69,13 +111,45 @@ local function loadTorqueMap(libPath)
     log('W', logTag, 'No torqueMapPath; torque / wheel-speed control disabled')
     return false
   end
+  bindTorqueMapApi(torqueMapApi)
   local ok, lib = pcall(ffi.load, libPath)
   if not ok or not lib then
     log('E', logTag, 'ffi.load failed: ' .. tostring(lib))
     return false
   end
   torqueMapLib = lib
-  log('I', logTag, 'Loaded torque map from ' .. tostring(libPath))
+  if isOccupancyRail() then
+    local r = tonumber(lib.drivetrain_r_kin)
+    if r and r > 0.05 then
+      torqueMapRKin = r
+    end
+  end
+  log(
+    'I',
+    logTag,
+    string.format(
+      'Loaded torque map from %s api=%s r_kin=%.5f',
+      tostring(libPath),
+      torqueMapApi,
+      torqueMapRKin
+    )
+  )
+  if isOccupancyRail() and not invertSanityLogged then
+    invertSanityLogged = true
+    local boost = 0.0
+    local t0a = tonumber(lib.drivetrain_forward_torque(444.0, 0.0, boost, 18.0))
+    local t0b = tonumber(lib.drivetrain_forward_torque(671.0, 0.0, boost, 68.0))
+    local ua = tonumber(lib.drivetrain_inverse_throttle(444.0, boost, 18.0, -300.0))
+    local ub = tonumber(lib.drivetrain_inverse_throttle(671.0, boost, 68.0, -300.0))
+    log(
+      'I',
+      logTag,
+      string.format(
+        'rwd_struct invert sanity T(444,0,18)=%.1f u(-300)=%.3f  T(671,0,68)=%.1f u(-300)=%.3f',
+        t0a or 0, ua or 0, t0b or 0, ub or 0
+      )
+    )
+  end
   return true
 end
 
@@ -92,6 +166,9 @@ end
 
 local function wheelGain()
   if not torqueMapLib then return 1 end
+  if isOccupancyRail() then
+    return torqueMapRKin
+  end
   return tonumber(torqueMapLib.drivetrain_wheel_gain)
 end
 
@@ -273,7 +350,31 @@ local function inverseThrottleBracketed(plant, torqueCmd)
   end
   local uLin = (torqueCmd - tMin) / span
   return clip(max(uMlp, uLin), 0, 1)
-  -- return clip(max(uMlp, uLin), 0, 1)
+end
+
+-- Occupancy: rwd_struct bisect invert at live (we, boost, ww). Rails T(0)=g, T(1)=g+ΣF.
+local MAP_WHEEL_SPEED_MIN_MS = 1.0
+-- Below this rear speed, i_min/i_max and t_min/t_max are not applied (launch).
+local PI_UNBOUND_BELOW_MS = 2.0
+
+local function occupancyWheelRads(rearWheelspeedMs)
+  local r = torqueMapRKin
+  if not r or r < 0.05 then r = 0.38 end
+  local v = rearWheelspeedMs
+  if v < MAP_WHEEL_SPEED_MIN_MS then v = MAP_WHEEL_SPEED_MIN_MS end
+  return v / r
+end
+
+local function inverseOccupancyRails(plant, torqueCmd)
+  local tMin = plant.torque_min or 0
+  local tMax = plant.torque_max or 0
+  ctrlState.last_torque_min = tMin
+  ctrlState.last_torque_max = tMax
+  local ww = occupancyWheelRads(plant.rear_wheelspeed_ms)
+  local u = tonumber(torqueMapLib.drivetrain_inverse_throttle(
+    plant.engine_speed_rads, plant.boost_pressure or 0, ww, torqueCmd
+  ))
+  return clip(u or 0, 0, 1)
 end
 
 local function stepTorqueLoop(plant, sp, dt)
@@ -300,16 +401,23 @@ local function stepTorqueLoop(plant, sp, dt)
   local e = 0
 
   if omegaDes ~= nil and gains.pi_enable ~= 0 then
+    local launchUnbound = omega < PI_UNBOUND_BELOW_MS
     e = omegaDes - omega
     integral = integral + e * dt
-    integral = clip(integral, gains.i_min, gains.i_max)
+    if not launchUnbound then
+      integral = clip(integral, gains.i_min, gains.i_max)
+    end
     local kpEff, kiEff = scaledTorqueGains(dt)
     local piTermRaw = gains.pi_enable * (kpEff * e + kiEff * integral)
-    piTerm = clip(piTermRaw, gains.t_min, gains.t_max)
-    -- Anti-windup when piTerm saturates (back off integral for this step).
-    if piTerm ~= piTermRaw then
-      if (piTerm >= gains.t_max and e > 0) or (piTerm <= gains.t_min and e < 0) then
-        integral = integral - e * dt
+    if launchUnbound then
+      piTerm = piTermRaw
+    else
+      piTerm = clip(piTermRaw, gains.t_min, gains.t_max)
+      -- Anti-windup when piTerm saturates (back off integral for this step).
+      if piTerm ~= piTermRaw then
+        if (piTerm >= gains.t_max and e > 0) or (piTerm <= gains.t_min and e < 0) then
+          integral = integral - e * dt
+        end
       end
     end
     ctrlState.integral_omega = integral
@@ -319,7 +427,12 @@ local function stepTorqueLoop(plant, sp, dt)
 
   local tCmd = torqueDes + piTerm
 
-  local uFfRaw = inverseThrottleBracketed(plant, tCmd)
+  local uFfRaw
+  if isOccupancyRail() then
+    uFfRaw = inverseOccupancyRails(plant, tCmd)
+  else
+    uFfRaw = inverseThrottleBracketed(plant, tCmd)
+  end
 
   local alpha = clip(gains.u_smooth, 0, 0.99)
   local uFf
@@ -337,11 +450,12 @@ local function stepTorqueLoop(plant, sp, dt)
   -- Throttle saturation anti-windup (cannot push harder into the plant).
   if omegaDes ~= nil and gains.pi_enable ~= 0 then
     if (uCmd >= 1 and e > 0) or (uCmd <= 0 and e < 0) then
-      ctrlState.integral_omega = clip(
-        ctrlState.integral_omega - e * dt,
-        gains.i_min,
-        gains.i_max
-      )
+      local integralUw = ctrlState.integral_omega - e * dt
+      if omega < PI_UNBOUND_BELOW_MS then
+        ctrlState.integral_omega = integralUw
+      else
+        ctrlState.integral_omega = clip(integralUw, gains.i_min, gains.i_max)
+      end
     end
   end
 
@@ -592,9 +706,10 @@ function M.applySetpoints(plant, sp, dt, step)
       'I',
       logTag,
       string.format(
-        'SimTime=%.3f mode=%s wr_t=%.2f wr=%.2f tor_des=%.2f tCmd=%.2f piT=%.2f Tmin=%.2f Tmax=%.2f steer_t=%.3f delta=%.3f thr=%.3f brk=%.3f wg=%.4f lat=%.1fms loop=%.3fms',
+        'SimTime=%.3f mode=%s api=%s wr_t=%.2f wr=%.2f tor_des=%.2f tCmd=%.2f piT=%.2f Tmin=%.2f Tmax=%.2f steer_t=%.3f delta=%.3f thr=%.3f brk=%.3f mapc=%.4f lat=%.1fms loop=%.3fms',
         step.nowSim or nowSim,
         cmdMode,
+        torqueMapApi,
         sp.omega_des or 0,
         plant.rear_wheelspeed_ms,
         (sp.torque_des or 0),
@@ -755,6 +870,20 @@ function M.calibrate(params)
     tuneKeys[#tuneKeys + 1] = 'torque_map'
   end
 
+  if params.torque_map_api ~= nil then
+    local api = tostring(params.torque_map_api)
+    if TORQUE_MAP_API[api] then
+      if torqueMapCdefDone and api ~= torqueMapApi then
+        log('W', logTag, 'torque_map_api ignored after lib load (' .. torqueMapApi .. ')')
+      else
+        torqueMapApi = api
+        tuneKeys[#tuneKeys + 1] = 'torque_map_api'
+      end
+    else
+      log('W', logTag, 'unknown torque_map_api=' .. api .. ' (legacy|occupancy_rail)')
+    end
+  end
+
   if params.control_mode ~= nil then
     local mode = params.control_mode
     if type(mode) == 'string' and CONTROL_AUTHORITY[mode] then
@@ -836,7 +965,7 @@ function M.init(c)
   loadTorqueMap(common.torqueMapPath)
 
   if torqueMapLib and gtStateController.setTorqueMapLib then
-    gtStateController.setTorqueMapLib(torqueMapLib)
+    gtStateController.setTorqueMapLib(torqueMapLib, torqueMapApi)
   elseif not torqueMapLib then
     log('W', logTag, 'No torque map lib; gtState forward torque estimate unavailable')
   end
@@ -844,8 +973,8 @@ function M.init(c)
   local wg = wheelGain()
   common.drivetrainWheelGain = wg
   log('I', logTag, string.format(
-    'LLC init torque_map=%s wheel_gain=%.4f authority=%s torque_ctrl=%s verbose=%s',
-    tostring(torqueMapStem), wg, controlAuthority, tostring(hasTorqueMap()),
+    'LLC init torque_map=%s api=%s mapc=%.4f authority=%s torque_ctrl=%s verbose=%s',
+    tostring(torqueMapStem), torqueMapApi, wg, controlAuthority, tostring(hasTorqueMap()),
     tostring(verboseEnabled)
   ))
   return true
@@ -905,6 +1034,7 @@ function M.getStatus()
     controlAuthority = controlAuthority,
     trajectoryPick = trajectoryPick,
     torqueMapStem = torqueMapStem,
+    torqueMapApi = torqueMapApi,
     hasTorqueMap = hasTorqueMap(),
     gains = gains,
     ctrlState = ctrlState,

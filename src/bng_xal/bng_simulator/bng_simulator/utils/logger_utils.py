@@ -4,12 +4,11 @@ Helpers to load experiment logs produced by the sim framework.
 
 The run folder layout is expected to look like:
 
-- run_XXX/
+- <vehicle>/run_XXX/          # current (e.g. utv_wild/run_001)
     - metadata.yaml
     - data/data.pkl
     - rosbag_YYYYMMDD_HHMMSS/
-        - metadata.yaml
-        - *.mcap
+- run_XXX/                    # legacy (flat under the log root)
 
 This module provides:
 - legacy helpers: :func:`load_metadata`, :func:`load_consolidated_data`, :func:`load_log_data`
@@ -29,13 +28,46 @@ from typing import Any, Dict, Optional, Tuple, Union, List, Iterable
 from bng_simulator.utils.io_dict_utils import load_yaml
 
 
-def load_metadata(run_number, root_dir="~/beamng_log_data"):
+def _run_dir_name(run_number: int) -> str:
+    return f"run_{int(run_number):03d}"
+
+
+def find_run_folder(
+    run_number: int,
+    root_dir: Union[str, os.PathLike] = "~/beamng_log_data",
+    *,
+    vehicle: Optional[str] = None,
+) -> Path:
+    """Resolve ``run_XXX`` under a vehicle subdir, or the legacy flat path."""
+    root = Path(os.path.expanduser(str(root_dir))).resolve()
+    name = _run_dir_name(run_number)
+    if vehicle:
+        nested = root / re.sub(r"[^A-Za-z0-9._-]+", "_", str(vehicle).strip()) / name
+        if nested.is_dir():
+            return nested
+    legacy = root / name
+    if legacy.is_dir():
+        return legacy
+    matches = sorted(p for p in root.glob(f"*/{name}") if p.is_dir())
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        listed = ", ".join(str(p) for p in matches)
+        raise FileNotFoundError(
+            f"Ambiguous {name} under {root}: {listed}. "
+            "Pass run_path or vehicle=."
+        )
+    raise FileNotFoundError(f"Run folder not found: {root / name}")
+
+
+def load_metadata(run_number, root_dir="~/beamng_log_data", vehicle=None):
     """
     Load metadata from the specified run number.
 
     Args:
         run_number (int): The run number (e.g., 1 for run_001).
         root_dir (str): The root directory where run folders are stored (default: ~/beamng_log_data).
+        vehicle (str): Optional catalog id (looks in ``<root>/<vehicle>/run_XXX``).
 
     Returns:
         dict: The metadata dictionary loaded from metadata.yaml.
@@ -43,7 +75,7 @@ def load_metadata(run_number, root_dir="~/beamng_log_data"):
     Raises:
         FileNotFoundError: If the metadata file does not exist.
     """
-    run_folder = os.path.join(os.path.expanduser(root_dir), f"run_{run_number:03d}")
+    run_folder = find_run_folder(run_number, root_dir, vehicle=vehicle)
     metadata_path = os.path.join(run_folder, "metadata.yaml")
     if not os.path.exists(metadata_path):
         raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
@@ -51,13 +83,14 @@ def load_metadata(run_number, root_dir="~/beamng_log_data"):
     return metadata
 
 
-def load_consolidated_data(run_number, root_dir="~/beamng_log_data"):
+def load_consolidated_data(run_number, root_dir="~/beamng_log_data", vehicle=None):
     """
     Load consolidated log data from the specified run number.
 
     Args:
         run_number (int): The run number (e.g., 1 for run_001).
         root_dir (str): The root directory where run folders are stored (default: ~/beamng_log_data).
+        vehicle (str): Optional catalog id (looks in ``<root>/<vehicle>/run_XXX``).
 
     Returns:
         dict: The consolidated log data loaded from data.pkl.
@@ -65,7 +98,7 @@ def load_consolidated_data(run_number, root_dir="~/beamng_log_data"):
     Raises:
         FileNotFoundError: If the consolidated data file does not exist.
     """
-    run_folder = os.path.join(os.path.expanduser(root_dir), f"run_{run_number:03d}")
+    run_folder = find_run_folder(run_number, root_dir, vehicle=vehicle)
     data_file = os.path.join(run_folder, "data", "data.pkl")
     if not os.path.exists(data_file):
         raise FileNotFoundError(f"Consolidated data file not found: {data_file}")
@@ -79,6 +112,7 @@ def _resolve_run_path(
     run_number: Optional[int] = None,
     run_path: Optional[Union[str, os.PathLike]] = None,
     root_dir: Union[str, os.PathLike] = "~/beamng_log_data",
+    vehicle: Optional[str] = None,
 ) -> Path:
     if (run_number is None) == (run_path is None):
         raise ValueError("Provide exactly one of run_number or run_path")
@@ -86,7 +120,7 @@ def _resolve_run_path(
     if run_path is not None:
         path = Path(os.path.expanduser(str(run_path))).resolve()
     else:
-        path = Path(os.path.expanduser(str(root_dir))).resolve() / f"run_{run_number:03d}"
+        path = find_run_folder(run_number, root_dir, vehicle=vehicle)
 
     if not path.exists():
         raise FileNotFoundError(f"Run folder not found: {path}")
@@ -479,6 +513,7 @@ def load_run_data(
     run_number: Optional[int] = None,
     run_path: Optional[Union[str, os.PathLike]] = None,
     root_dir: Union[str, os.PathLike] = "~/beamng_log_data",
+    vehicle: Optional[str] = None,
     include_pickle: bool = True,
     include_rosbag: bool = True,
     decode_rosbag_messages: bool = True,
@@ -496,6 +531,7 @@ def load_run_data(
         run_number: Run number (e.g., 1 for run_001)
         run_path: Direct path to run folder (alternative to run_number)
         root_dir: Root directory containing run folders
+        vehicle: Optional catalog id (``<root>/<vehicle>/run_XXX``)
         include_pickle: Whether to load pickle data
         include_rosbag: Whether to load rosbag/MCAP data
         decode_rosbag_messages: Whether to deserialize rosbag messages
@@ -507,7 +543,9 @@ def load_run_data(
         Dictionary with pickle and rosbag data merged
     """
 
-    run_dir = _resolve_run_path(run_number=run_number, run_path=run_path, root_dir=root_dir)
+    run_dir = _resolve_run_path(
+        run_number=run_number, run_path=run_path, root_dir=root_dir, vehicle=vehicle
+    )
 
     merged: Dict[Union[str, Tuple[Any, Any]], Any] = {}
 
@@ -578,7 +616,7 @@ def load_run_data(
     return merged
 
 
-def load_log_data(run_number, root_dir="~/beamng_log_data"):
+def load_log_data(run_number, root_dir="~/beamng_log_data", vehicle=None):
     """
     Load log data and metadata from the specified run number.
 
@@ -592,6 +630,6 @@ def load_log_data(run_number, root_dir="~/beamng_log_data"):
     Raises:
         FileNotFoundError: If the run folder or log data file does not exist.
     """
-    metadata = load_metadata(run_number, root_dir)
-    data = load_consolidated_data(run_number, root_dir)
+    metadata = load_metadata(run_number, root_dir, vehicle=vehicle)
+    data = load_consolidated_data(run_number, root_dir, vehicle=vehicle)
     return metadata, data

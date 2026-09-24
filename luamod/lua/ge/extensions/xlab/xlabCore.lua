@@ -30,23 +30,11 @@ M.handleOpenGtState = function(request)
   args.GFXUpdateTime = request['GFXUpdateTime']
   args.physicsUpdateTime = request['physicsUpdateTime']
   args.numPhysicsStepsForGFXSave = request['numPhysicsStepsForGFXSave']
-  args.pos = vec3(request['pos'][1], request['pos'][2], request['pos'][3])
-  args.dir = vec3(request['dir'][1], request['dir'][2], request['dir'][3])
-  args.left = vec3(request['left'][1], request['left'][2], request['left'][3])
   args.isVisualised = request['isVisualised']
-  args.isSnappingDesired = request['isSnappingDesired']
-  args.isForceInsideTriangle = request['isForceInsideTriangle']
-  args.isDirWorldSpace = request['isDirWorldSpace']
-  args.isAllowWheelNodes = request['isAllowWheelNodes']
-  -- Sensor-frame (FLU) offset from attach point to report point; the vlua
-  -- controller transports pos/vel/accel by this vector (see gtState.lua).
-  args.report_offset = request['report_offset']
   args.accel_tau_s = request['accel_tau_s']
   args.gyro_tau_s = request['gyro_tau_s']
   args.vel_tau_s = request['vel_tau_s']
   args.wheel_angvel_tau_s = request['wheel_angvel_tau_s']
-  args.attitude_mode = request['attitude_mode']
-  args.attitude_tau_s = request['attitude_tau_s']
   args.debug_raw = request['debug_raw']
   args.torque_map = request['torque_map']
 

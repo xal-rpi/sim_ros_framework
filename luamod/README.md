@@ -254,7 +254,12 @@ YAML:
 ```yaml
 calibration:
   torque_map: utv_wild_drivetrain   # stem → lib/utv_wild_drivetrain.{so,dll}
+  torque_map_api: legacy            # legacy | occupancy_rail (must match the stem)
 ```
+
+`legacy` is the original 4-arg NN (`we`, boost, `wr` m/s). `occupancy_rail` is rwd_struct
+(`we`, `u`, boost, `ww` rad/s) with live-x invert. Catalog ids: `utv_wild_occupancy`
+(`utv_wild_v2_wheel_torque`), `utv_canam_x3_r322_easylift` (`utv_canam_r322_lift_wheel_torque`).
 
 Without `calibration.torque_map`, LLC still runs but torque / wheel-speed control via the map is
 disabled.
