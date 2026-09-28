@@ -23,10 +23,10 @@ catalog:
     io:
       port_index: 0
     steering_to_input: -0.5948683325943701
-    torque_map: utv_wild_drivetrain
-    # torque_map_api defaults to legacy
+    torque_map: utv_wild_v2_wheel_torque
+    torque_map_api: occupancy_rail
 
-  # Same plant as utv_wild; occupancy-rail map (opt-in test, does not replace default).
+  # Same plant + map as utv_wild (kept so existing occupancy run files still resolve).
   utv_wild_occupancy:
     model: utv
     part_config: /vehicles/utv/wild.pc

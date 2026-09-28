@@ -106,7 +106,8 @@ def test_compose_easylift_uses_r322_lift_map() -> None:
 
     wild = compose_scenario("gridworld.yaml", {"vehicle": "utv_wild"})
     wild_cal = wild["vehicles"]["EGO"]["controllers"]["LowLevelController"]["calibration"]
-    assert wild_cal["torque_map"] == "utv_wild_drivetrain"
+    assert wild_cal["torque_map"] == "utv_wild_v2_wheel_torque"
+    assert wild_cal["torque_map_api"] == "occupancy_rail"
 
 
 def test_compose_yaw_offset_utv() -> None:
