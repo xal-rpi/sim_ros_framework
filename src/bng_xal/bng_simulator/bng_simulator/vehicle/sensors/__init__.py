@@ -11,3 +11,4 @@ from .base import SensorRegistry
 from .builtin.basic_state import BasicState
 from .builtin.advanced_imu import AdvancedIMU
 from .custom.GtState import GtState
+#from .custom.RoadsSensor import BngRoadsSensor  # Registering your new sensor
