@@ -1,0 +1,233 @@
+{
+  "checkpoint": "/home/franck/Documents/xal_rpi/xal_vehicle_models/xal_vehicle_models/generated/identification/easylift_confirmation_v2/models/torque",
+  "step": 1800,
+  "library_stem": "utv_canam_r322_lift_wheel_torque_identified_20261028",
+  "lua_api": "occupancy_rail",
+  "catalog": "/home/franck/Documents/xal_rpi/xal_vehicle_models/xal_vehicle_models/generated/identification/easylift_confirmation_v2/catalogs/torque",
+  "catalog_r_kin": 0.32469767,
+  "model_r_kin": 0.32469767,
+  "ratio_q": [
+    1.0,
+    99.0
+  ],
+  "layout": "rwd_struct",
+  "feature_names": [
+    "engine_speed_rads",
+    "boost_pressure",
+    "rear_wheelspeed_rads"
+  ],
+  "struct_k": 4,
+  "n_params": 101,
+  "bytes_f32": 404,
+  "torque_scale": 1000.0,
+  "r": 0.32401257,
+  "r_kin": 0.32469767,
+  "j_eff": 14.592795193331822,
+  "brake_coeff_rear": 6621.360378486953,
+  "brake_torque_rear": "T_hub = R * brake * brake_coeff_rear",
+  "n_bisect": 12,
+  "ratio_i_ww": {
+    "ww": [
+      5.007697219267406,
+      9.065860851819965,
+      13.611719814373167,
+      19.044546128769742,
+      24.61977184339529,
+      29.619117101511673,
+      34.98228790387448,
+      41.44925947247477,
+      48.061237864924884,
+      53.53651026029529,
+      58.12648340143163,
+      63.66465410921013,
+      70.49825102669394,
+      77.07589601625381,
+      84.78627602374905,
+      103.5806941560082
+    ],
+    "lo": [
+      20.754847578134644,
+      13.146635259649775,
+      11.948978705684969,
+      12.389610926058868,
+      11.211750208881583,
+      10.362736980485954,
+      9.503233627548825,
+      8.75593895706245,
+      8.2422671373119,
+      7.934838515434056,
+      7.687480869792138,
+      7.403852668066567,
+      7.200766936098937,
+      7.1255131203778275,
+      7.128724545868829,
+      7.0140427570344865
+    ],
+    "hi": [
+      71.54859168917282,
+      33.25461267993429,
+      25.551063235649533,
+      25.702142667588063,
+      25.141528152625238,
+      24.505292235208316,
+      23.52386062092245,
+      21.214575329140303,
+      18.143268043246415,
+      15.605814372365401,
+      13.937877921496266,
+      12.534719703339432,
+      10.59555224177775,
+      8.732923906628233,
+      7.591242224365658,
+      7.232991258604545
+    ],
+    "use": "given \u03c9_w: \u03c9_e \u2208 [i_lo, i_hi]\u00b7\u03c9_w"
+  },
+  "ratio_i_we": {
+    "we": [
+      144.12832641601562,
+      189.75497436523438,
+      260.13682556152344,
+      316.4678421020508,
+      376.2197723388672,
+      430.29872131347656,
+      466.8805847167969,
+      490.4330139160156,
+      515.5005798339844,
+      541.1881866455078,
+      565.3913421630859,
+      587.5169830322266,
+      614.5224304199219,
+      653.8287963867188,
+      715.9528350830078,
+      798.9965057373047
+    ],
+    "lo": [
+      12.040747291559903,
+      12.958573958067081,
+      11.777093249539014,
+      9.802149290387627,
+      8.47077793670311,
+      7.759236230553187,
+      7.5268448490059665,
+      7.344635827418266,
+      7.210322974002799,
+      7.142921484584418,
+      7.127906738475667,
+      7.132713269869824,
+      7.131960363876854,
+      7.127260550479182,
+      7.122466283091315,
+      7.022481820780955
+    ],
+    "hi": [
+      45.94004090450262,
+      71.54349466740587,
+      55.45302959769728,
+      25.541015046525786,
+      25.420504076607614,
+      25.40258167777448,
+      25.48140313837235,
+      25.525510312858998,
+      25.562716883862045,
+      25.408381691392194,
+      25.11144833971425,
+      25.027981392215985,
+      24.912168639045177,
+      24.72292081571155,
+      24.48051551569826,
+      23.674184666559068
+    ],
+    "use": "given \u03c9_e: \u03c9_w \u2208 [\u03c9_e/i_hi, \u03c9_e/i_lo]"
+  },
+  "occupancy_catalog": "/home/franck/Documents/xal_rpi/xal_vehicle_models/xal_vehicle_models/generated/identification/easylift_confirmation_v2/catalogs/torque",
+  "ratio_trust": {
+    "ww_rad_s": [
+      9.065860851819965,
+      84.78627602374905
+    ],
+    "we_rad_s": [
+      189.75497436523438,
+      715.9528350830078
+    ],
+    "note": "rails are thin / clutch-dominated outside these spans"
+  },
+  "n_u_knots": 9,
+  "policy": "One MLP eval \u2192 g, F_k. T(u)=g+\u03a3 I_k(u) F_k. inverse: bisect 12; inverse_knots: 9-knot first-increasing. Tcmd<=g \u2192 0; Tcmd>=g+\u03a3F \u2192 1.",
+  "check": {
+    "n_states": 200,
+    "n_queries": 600,
+    "catalog": "/home/franck/Documents/xal_rpi/xal_vehicle_models/xal_vehicle_models/generated/identification/easylift_confirmation_v2/catalogs/torque",
+    "max_abs_T_c_py": 0.0008536211506680047,
+    "mean_abs_T_c_py": 8.956253765770583e-05,
+    "max_abs_T_c_jax": 0.001023375837007734,
+    "mean_abs_T_c_jax": 0.00010364834714675197,
+    "max_abs_T_py_jax": 0.000535441340161924,
+    "max_abs_u_c_py": 0.00024414031249997414,
+    "mean_abs_u_c_py": 8.95193806000802e-06,
+    "max_abs_u_knots_c_py": 4.569669155296552e-07,
+    "max_abs_u_knots_vs_bisect": 0.006995461687250293,
+    "max_abs_u_roundtrip": 0.0001220703125,
+    "mean_abs_u_roundtrip": 3.819803008809686e-05,
+    "status_mismatch": 32,
+    "endpoint_roundoff_status_mismatch": 32,
+    "nonboundary_status_mismatch": 0,
+    "knots_status_mismatch": 32,
+    "sat_neg_ok": 198,
+    "sat_neg_n": 200
+  },
+  "plots": {
+    "n_plot": 63401,
+    "n_rail_knots": 12,
+    "rail_json": "tmin_tmax_ww.json",
+    "Tmin_median_range": [
+      -223.28852431666755,
+      -931.8398270597152
+    ],
+    "Tmax_median_range": [
+      1778.0359597328597,
+      547.8745079136353
+    ],
+    "T0_p05": -919.3222980078021,
+    "T0_p50": -512.1534590054866,
+    "T0_p95": -230.93440286000634,
+    "T1_p05": 166.22399167978415,
+    "T1_p50": 1274.9400759986233,
+    "T1_p95": 1984.3406744034787
+  },
+  "provenance": {
+    "checkpoint_config_sha256": "504a9ac0f76bf0a2013cbf81b21f1b90c76f0a5ef6739cbdd73c61fe04a4798e",
+    "checkpoint_file_sha256": {
+      "_CHECKPOINT_METADATA": "105ea791e7436a64f2c9fd037661b3e4a211a42c39f1e00f96bb276bbceb1b11",
+      "metrics/metrics": "4def8a2030b7248248e4502a13dd51e627ab7cb1442391082a50c96941b1f27f",
+      "default/_METADATA": "089bc157ff5e9fcfffbaefa704b8f64e212648afd52f7e0f9e51605f5bd2062d",
+      "default/manifest.ocdbt": "dc46dd2fa8647ffdd3cd70af93130462f462143e02803fa4f3836f744cae8825",
+      "default/ocdbt.process_0/manifest.ocdbt": "9cf3f63e580ef7177d8a6ce3932da7a06bfce34a8ff224c7f10ee38b38f802bd",
+      "default/ocdbt.process_0/d/973d9939a608ae36566b433325d600d1": "3aab7cb34c324adde828c1f131a0940e297c179b3ae4654d3bda645e0f5677a6",
+      "default/ocdbt.process_0/d/57d837f14ce6a6f63c94bfeec867e716": "f5c097882816b7bad0e639e7feb8c76c0bcc62b6204044ce03d62b524dbe79e4",
+      "default/ocdbt.process_0/d/1fefeb5de4316e82eebf8154dbfef8de": "fa247379163f29f4a75e963c82c5a7a405100c7c8af29de2b304298e272e4b94",
+      "default/ocdbt.process_0/d/2e9ac7852f3ed3ad667de5196de85c65": "9dc9d26e503df26237a50688ab57d2615aefdee6017b0e252f83e0ac80cede8c",
+      "default/ocdbt.process_0/d/a09982924e8cef253317f9cf6a9df8fe": "e838b217b4a3ec3ff6ed0dbcbdef4d733fc8611f197ba2bcaf7a5d186c35ea42",
+      "default/d/c9b864d6bd4b389eb0bab23de7172765": "60ec450f63d3ac48c98264d71469474496b2709fb260da9ecf3dea53522f99df"
+    },
+    "generated_file_sha256": {
+      "tw_vs_ww_throttle.png": "91264f02aef9d5eadcb61215905185c0dbba1ebeca55f2e07c7626d05a763e99",
+      "utv_canam_r322_lift_wheel_torque_identified_20261028.c": "3d3a35bd3bc2ed756f28968bc0bad7932370a1d6b92339718b9a33afbf58db48",
+      "tent_tw_vs_ww.png": "7337007f699bca36edc0997742abaf32aa36e8c318ae524888a1b6959b2992ff",
+      "i_vs_ww_throttle.png": "5321843d3831126a3aae740776d11425040d86e280fd22b73779dcc5198388d0",
+      "tw_vs_ww_boost.png": "969f75ff6b599d0adce928ffa69bce62fb089f1088203c19547cfa4c7766c747",
+      "tu_slices.png": "f762a577363ac6b99cedcc17d3c004f9e5c987faa3699ac1be63d221dfa46802",
+      "tmin_tmax_ww.json": "8126f5bc65d3ad8cac687e33d7f873c120f634ab1769d51bcd565a1c898ba2f6",
+      "tmin_tmax_ww.png": "4aa87f26739ac21f18c3936a4a2da50e9ec3a87487023ba383287d8bcadb8624",
+      "i_vs_we_throttle.png": "228d9f692191470a1279f18d6160fb40184750266bf2e5480789c40b8bd8b5fc",
+      "utv_canam_r322_lift_wheel_torque_identified_20261028.h": "6c20abe35426f95c16cae132e5bda1168e709799bd56e49f3efb667dc9ce3bdf"
+    },
+    "not_deployed": false
+  },
+  "staging": {
+    "source_export": "/home/franck/Documents/xal_rpi/xal_vehicle_models/xal_vehicle_models/generated/analysis/torque_table/utv_canam_r322_lift_wheel_torque_identified_20261028/nn",
+    "library_stem": "utv_canam_r322_lift_wheel_torque_identified_20261028",
+    "lua_api": "occupancy_rail",
+    "default_enabled": false
+  }
+}

@@ -15,8 +15,9 @@ names alone do not pin a reproducible version.
 - ROS/Lua implementation, configuration, interfaces, tests and documentation.
 - Road geometry tools, browser assets and their three test files.
 - Saved Track Builder definitions, environment package metadata and builders.
-- Active torque-map C/header/provenance bundles and the complete staged native
-  vehicle source export, including its common runtime and source-hash manifest.
+- Selected and alternative torque-map C/header/provenance bundles and the complete
+  staged native vehicle source export, including its common runtime and source-hash
+  manifest.
 
 The native sources are generated or staged by the companion tooling but serve as
 build inputs here. Keeping the selected snapshots makes the Lua mod compilable
@@ -25,11 +26,10 @@ hashes before compilation. Ownership and regeneration remain upstream; this
 repository compiles/packages the staged sources for Linux or Windows BeamNG.
 
 Build outputs, shared libraries, ZIPs, caches, road captures and screenshots stay
-ignored. The optional `utv_canam_r322_lift_wheel_torque_identified_20261028` bundle
-is not part of this checkpoint. A local copy is retained outside the auto-compiled
-policy directory under ignored `local_exports/torque_maps/`. Selecting that map
-requires explicitly staging its C/header/provenance files into the policy inputs
-and rebuilding the mod.
+ignored. The alternative `utv_canam_r322_lift_wheel_torque_identified_20261028`
+bundle is versioned alongside `utv_canam_r322_lift_wheel_torque`. Packaging compiles
+both; each vehicle's `torque_map` setting selects the one loaded at runtime.
+The catalog continues to select `utv_canam_r322_lift_wheel_torque` by default.
 
 ## Validation and limits
 
@@ -38,7 +38,8 @@ and LuaJIT syntax checks for the staged Lua files. Linux and Windows mod builds
 and environment packaging passed using the selected source set. The staged
 native source hashes and ZIP integrity were verified, and no generated output
 or binary files were staged. Build destinations were temporary outputs, not
-installed mods.
+installed mods. Both UTV torque-map libraries are present with verified binary
+hashes in the Linux and Windows packages.
 
 The [live Derby report](road_geometry_validation_20261101.md) records browser
 save/reopen, native corridor extraction, reverse-route export and actual trajgen
