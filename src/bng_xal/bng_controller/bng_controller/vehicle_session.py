@@ -15,7 +15,7 @@ Session sources
 
 3. **Offline / pre-launch** — compose run YAML (source='config')::
 
-    session = VehicleSession.from_run_config("EGO", "gridworld.yaml")
+    session = VehicleSession.from_run_config("EGO", "single_vehicle.yaml")
 
 4. **Known LLC dict** (offline / tests)::
 
@@ -51,14 +51,14 @@ Scalar control from Python (prefer ROS ``BngControlCmd`` for loops)::
 
     from bng_msgs.msg import BngControlCmd
 
-    # Calibrated roadwheel [rad] (uses catalog steering_to_input)
+    # Calibrated roadwheel [rad] (uses the catalog measured steering map)
     cmd = BngControlCmd()
     cmd.valid_fields = BngControlCmd.FIELD_TORQUE | BngControlCmd.FIELD_STEERING
     cmd.torque = 80.0
     cmd.steering = 0.05
     session.send_control_cmd(cmd)
 
-    # Unknown steering_to_input — command BeamNG input directly [-1, 1]
+    # Explicit calibration input — command BeamNG input directly [-1, 1]
     cal = BngControlCmd()
     cal.valid_fields = (
         BngControlCmd.FIELD_TORQUE | BngControlCmd.FIELD_STEERING_INPUT

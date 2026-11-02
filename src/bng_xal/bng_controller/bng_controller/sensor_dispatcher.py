@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from rclpy.publisher import Publisher
 
 from bng_msgs.msg import BngControlCmd
@@ -340,15 +341,21 @@ class SensorDispatcher(Node):
 
 
 def main(args=None) -> None:
-    rclpy.init(args=args)
+    from rclpy.signals import SignalHandlerOptions
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    import signal
+    stopping = threading.Event()
+    previous = {sig: signal.signal(sig, lambda *_: stopping.set())
+                for sig in (signal.SIGINT, signal.SIGTERM)}
     node = None
     exit_code = 0
 
     try:
         node = SensorDispatcher()
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt caught, cleaning up sensor dispatcher...")
+        while not stopping.is_set() and rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        print("ROS spin stopped, cleaning up sensor dispatcher...")
     except Exception as exc:
         print(f"Uncaught exception: {exc}")
         import traceback
@@ -359,10 +366,13 @@ def main(args=None) -> None:
         if node is not None:
             try:
                 node.destroy_node()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Sensor dispatcher cleanup failed: {exc}")
+                exit_code = 1
 
-    rclpy.shutdown()
+    rclpy.try_shutdown()
+    for sig, handler in previous.items():
+        signal.signal(sig, handler)
     raise SystemExit(exit_code)
 
 

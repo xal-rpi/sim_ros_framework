@@ -245,6 +245,43 @@ def _hold_steering(vehicle: Vehicle, u: float, logger=None) -> dict:
     }
 
 
+def fit_front_steering(samples, degree=1):
+    """Fit linear/quadratic wheel headings from their arithmetic mean [rad].
+
+    Fit the half-difference so both laws preserve the mean exactly. Full-lock
+    samples are excluded by the caller and used for validation separately.
+    """
+    import numpy as np
+
+    if degree not in (1, 2):
+        raise ValueError("front steering fit degree must be 1 or 2")
+    rows = np.asarray([(float(row["delta_l"]), float(row["delta_r"]))
+                       for row in samples])
+    if len(rows) < 3 or not np.isfinite(rows).all():
+        raise ValueError("front steering fit needs at least three finite samples")
+    mean = (rows[:, 0] + rows[:, 1]) / 2
+    split = (rows[:, 0] - rows[:, 1]) / 2
+    if np.ptp(mean) < 1e-6:
+        raise ValueError("front steering fit needs distinct mean angles")
+    design = np.polynomial.polynomial.polyvander(mean, degree)
+    coeff, _, rank, _ = np.linalg.lstsq(design, split, rcond=None)
+    if rank != degree + 1:
+        raise ValueError("front steering fit needs distinct mean angles")
+    offset, slope = float(coeff[0]), float(coeff[1])
+    law = {"fl": {"gain": 1 + slope, "offset_rad": offset},
+           "fr": {"gain": 1 - slope, "offset_rad": -offset}}
+    if degree == 2:
+        law["fl"]["quadratic_per_rad"] = float(coeff[2])
+        law["fr"]["quadratic_per_rad"] = -float(coeff[2])
+    errors = split - design @ coeff
+    diagnostics = {"sample_count": len(rows),
+                   "mean_min_rad": float(mean.min()), "mean_max_rad": float(mean.max()),
+                   "rmse_rad": float(np.sqrt(np.mean(errors**2))),
+                   "max_abs_error_rad": float(np.max(np.abs(errors)))}
+    return law, diagnostics
+
+
+
 def measure_steering_to_input(
     vehicle: Vehicle,
     beamng=None,
@@ -252,11 +289,15 @@ def measure_steering_to_input(
     lock_inputs: Sequence[float] = (-1.0, 1.0),
     hold_s: float = 1.0,
     logger=None,
+    fit_inputs: Sequence[float] = (-0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,
+                                   0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
 ) -> dict:
     """Measure mid-range slope and hydro lock after the roadwheel has stopped.
 
     ``steering_to_input`` is mean(δ_avg / u) at |u| ≈ 0.3, not at lock.
-    Lock is the settled average at u = ±1 (Ackermann included).
+    Front wheel laws use neutral plus a dense bidirectional fit_inputs sweep.
+    The scalar steering_to_input still uses only slope_inputs (default ±0.3).
+    Lock is the settled average at u = ±1 (Ackermann included), held out of the fit.
     Also steps 0→1 (parked) for a first-order τ / 5% delay.
     ``hold_s`` is unused; wait is |dδ/dt| gated.
     """
@@ -284,17 +325,37 @@ def measure_steering_to_input(
             )
 
         slope_k = []
+        samples_by_u = {0.0: row0}
         for u in slope_inputs:
             if abs(u) < 1e-6:
                 continue
             row = _hold_steering(vehicle, u, logger=_log)
             details.append(row)
             slope_k.append(row["k"])
+            samples_by_u[float(u)] = row
             _log.info(
                 f"steer slope u={u:+.3f}  δ_l={row['delta_l']:+.4f}  "
                 f"δ_r={row['delta_r']:+.4f}  δ={row['delta']:+.4f}  "
                 f"k=δ/u={row['k']:+.6f}  wait={row['wait_s']:.2f}s"
             )
+
+        for u in fit_inputs:
+            if float(u) in samples_by_u:
+                continue
+            row = _hold_steering(vehicle, u, logger=_log)
+            details.append(row)
+            samples_by_u[float(u)] = row
+            _log.info(f"steer fit u={u:+.3f} δ_l={row['delta_l']:+.6f} "
+                      f"δ_r={row['delta_r']:+.6f} δ={row['delta']:+.6f}")
+        fit_samples = [samples_by_u[u] for u in sorted(samples_by_u)]
+        if any(row["timed_out"] for row in fit_samples):
+            raise RuntimeError("front steering fit samples did not settle")
+        front_steering, fit_info = fit_front_steering(fit_samples)
+        quadratic, quadratic_info = fit_front_steering(fit_samples, degree=2)
+        front_steering_fits = {
+            "linear": {"law": front_steering, "metrics": fit_info},
+            "quadratic": {"law": quadratic, "metrics": quadratic_info},
+        }
 
         lock_by_u = {}
         for u in lock_inputs:
@@ -316,6 +377,15 @@ def measure_steering_to_input(
         if not slope_k:
             raise RuntimeError("no mid-range steering_input samples")
 
+        for name, result in front_steering_fits.items():
+            result["metrics"]["lock_max_abs_error_rad"] = max(
+                abs(row[channel] - (law["offset_rad"] + row["delta"] *
+                    (law["gain"] + law.get("quadratic_per_rad", 0.0) * row["delta"])))
+                for row in lock_by_u.values()
+                for corner, channel in (("fl", "delta_l"), ("fr", "delta_r"))
+                for law in (result["law"][corner],)
+            )
+            _log.info(f"front steering {name}: {result}")
         k_mean = sum(slope_k) / len(slope_k)
         steering = {
             "input_min": umin,
@@ -339,6 +409,13 @@ def measure_steering_to_input(
         return {
             "steering": steering,
             "steering_to_input": k_mean,
+            "front_steering": front_steering,
+            "front_steering_fit": fit_info,
+            "front_steering_fits": front_steering_fits,
+            "front_steering_samples": [
+                {key: row[key] for key in ("u", "delta", "delta_l", "delta_r")}
+                for row in sorted(details, key=lambda row: row["u"])
+            ],
             "samples": details,
             "settle": settle,
             **tau,

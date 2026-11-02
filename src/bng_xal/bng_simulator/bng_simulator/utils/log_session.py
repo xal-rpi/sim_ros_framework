@@ -15,6 +15,8 @@ Batch / replay callers::
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 import pickle
 import re
 import shutil
@@ -24,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
-from bng_msgs.srv import MPConfig, StartLogger, StopLogger
+from bng_msgs.srv import StartLogger, StopLogger
 from rclpy.node import Node
 from tqdm.auto import tqdm
 
@@ -41,7 +43,15 @@ def safe_log_slug(name: str) -> str:
 
 def vehicle_slug_from_config(scenario_infos: Optional[Dict[str, Any]]) -> str:
     """Catalog-style id from ``get_sim_config`` ``vehicles_part`` (e.g. ``utv_wild``)."""
-    parts = (scenario_infos or {}).get("vehicles_part") or {}
+    config = scenario_infos or {}
+    parts = config.get("vehicles_part")
+    if not parts:
+        # Composed startup configuration and live manager snapshots use the same id.
+        parts = {
+            name: str(vehicle.get("model_args", {}).get("model", "")) + "_"
+            + Path(vehicle.get("model_args", {}).get("part_config", "unknown")).stem
+            for name, vehicle in config.get("vehicles", {}).items()
+        }
     if not isinstance(parts, dict) or not parts:
         return "unknown"
     if parts.get("EGO"):
@@ -79,8 +89,32 @@ def get_next_run_folder(
     return run_folder
 
 
-def run_number_from_folder(run_folder: str | os.PathLike) -> int:
-    return int(os.path.basename(str(run_folder)).split("_")[1])
+def discard_run_folder(run_folder: str | os.PathLike, *, preserve_session: bool = False) -> None:
+    """Discard recorded data; a managed run retains its orchestration diagnostics.
+
+    Managed runs must have a real session/ directory. Standalone runs retain their
+    whole-folder deletion behavior. Symlinks are unlinked, never traversed.
+    """
+    root = Path(run_folder)
+    if not preserve_session:
+        shutil.rmtree(root)
+        return
+    session = root / "session"
+    if not session.is_dir() or session.is_symlink():
+        raise ValueError("Managed run requires a session directory before discard")
+    for child in root.iterdir():
+        if child.name == "session":
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
+def run_number_from_folder(run_folder: str | os.PathLike) -> Optional[int]:
+    """Numeric catalog run ID, or None for an explicitly selected directory."""
+    match = re.fullmatch(r"run_(\d+)", os.path.basename(str(run_folder)))
+    return int(match[1]) if match else None
 
 
 def consolidate_logger_files(data_dir: str | os.PathLike) -> Path:
@@ -131,7 +165,6 @@ class LoggerClient(Node):
         super().__init__(node_name)
         self.start_client = self.create_client(StartLogger, "start_logger")
         self.stop_client = self.create_client(StopLogger, "stop_logger")
-        self.mpc_config_client = self.create_client(MPConfig, "/mpc_high_level/get_config")
         while not self.start_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for start_logger service...")
         while not self.stop_client.wait_for_service(timeout_sec=1.0):
@@ -156,22 +189,6 @@ class LoggerClient(Node):
         rclpy.spin_until_future_complete(self, future)
         return future.result()
 
-    def get_mpc_config(self):
-        if not self.mpc_config_client.wait_for_service(timeout_sec=0.1):
-            return None
-        req = MPConfig.Request()
-        future = self.mpc_config_client.call_async(req)
-        import rclpy
-
-        try:
-            rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
-            if future.done():
-                return future.result()
-        except Exception as exc:
-            self.get_logger().warning(f"Error getting MPC config: {exc}")
-        return None
-
-
 @dataclass
 class LoggedRun:
     """An active or completed log session."""
@@ -179,7 +196,7 @@ class LoggedRun:
     run_folder: str
     data_path: str
     scenario_infos: Dict[str, Any]
-    run_number: int
+    run_number: Optional[int]
 
     @property
     def data_pkl(self) -> Path:
@@ -215,6 +232,8 @@ def build_metadata(
     }
     if mpc_config:
         metadata["mpc_config"] = mpc_config
+        if mpc_config.get("tracking_yaml"):
+            metadata["tracking_yaml"] = mpc_config["tracking_yaml"]
     if rosbag is not None:
         metadata["rosbag"] = rosbag
     if extra:

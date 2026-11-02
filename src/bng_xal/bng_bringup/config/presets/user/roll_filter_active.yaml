@@ -1,0 +1,9 @@
+# Enable intervention without changing the vehicle catalog's bounds or tuning.
+# Requires a catalog vehicle with environment + roll_filter and a running producer.
+overrides:
+  vehicles:
+    EGO:
+      controllers:
+        LowLevelController:
+          roll_filter:
+            mode: active

@@ -2,6 +2,9 @@
 
 High-fidelity vehicle simulation (BeamNG.tech) with a **compose-based** config stack, per-vehicle UDP I/O, and a thin ROS bridge for observations and low-level control.
 
+Compatible companion revisions and known follow-up issues are recorded in the
+[compatibility checkpoint](docs/compatibility_checkpoint.md).
+
 ## Quick start
 
 1. **Prerequisites:** ROS 2 Humble (Ubuntu 22.04) or Jazzy (Ubuntu 24.04), BeamNG.tech, Python 3.10+, [luamod](luamod/README.md) built and installed in BeamNG.
@@ -79,14 +82,14 @@ High-fidelity vehicle simulation (BeamNG.tech) with a **compose-based** config s
    source install/setup.bash
    ```
 
-5. **Start BeamNG** (with xlab mod loaded):
+5. **Start BeamNG** (with xlab mod loaded; see [startup and headless automation](docs/simulator_operations.md#startup-handoff-for-automation)):
    ```bash
    ./BinLinux/BeamNG.tech.x64 -tcom -colorStdOutLog -disable-sandbox
-   # -tcom -colorStdOutLog [-disable-sandbox] [-nosteam] -console -headless -gfx null
+   # Add -headless for no window, or -headless -gfx null to disable rendering.
    ```
 6. **Launch sim + bridge:**
    ```bash
-   ros2 launch bng_bringup simulator.launch.py config:=gridworld.yaml
+   ros2 launch bng_bringup simulator.launch.py config:=single_vehicle.yaml
    ```
 
 You should see `sim_manager_node` spawn the scenario and `sensor_dispatcher` publish `/EGO/sensors/...`.
@@ -118,6 +121,7 @@ You should see `sim_manager_node` spawn the scenario and `sensor_dispatcher` pub
 | **Companion I/O** | `bng_controller` | `sensor_dispatcher`, `VehicleSession`, UDP client |
 | **Messages** | `bng_msgs` | `BngControlCmd`, `BngVehicleStateMsg`, services |
 | **In-sim logic** | `luamod` | LLC Lua, gtState, torque map FFI |
+| **Environment assets** | [environments](environments/README.md) | Separate `xlab_environments` mod; config-selected tracks |
 
 **Config flow:** thin `config/runs/*.yaml` → `scenario_compose` → fragments (`defaults/`, `levels/`, `vehicle_catalog.yaml`).
 
@@ -136,7 +140,7 @@ Publish `bng_msgs/BngControlCmd` to `/<vehicle>/control/cmd`.
 # See bng_controller/examples/control_via_ros.py
 cmd.valid_fields = BngControlCmd.FIELD_TORQUE | BngControlCmd.FIELD_STEERING
 cmd.torque = 50.0
-cmd.steering = 0.05   # roadwheel [rad], uses catalog steering_to_input
+cmd.steering = 0.05   # roadwheel [rad], uses the measured steering map
 ```
 
 ### 2. Python `VehicleSession` (scripts, calibration, notebooks)
@@ -159,8 +163,8 @@ See [bng_controller README](src/bng_xal/bng_controller/README.md) and `examples/
 
 | Field | Use when |
 |-------|----------|
-| `steering_input` [-1,1] | Calibrating — unknown `steering_to_input` |
-| `steering` [rad] | Closed-loop — scale in `vehicle_catalog.yaml` |
+| `steering_input` [-1,1] | Explicit normalized input for calibration |
+| `steering` [rad] | Road-wheel target — measured map selected by the catalog |
 
 Details: [bng_msgs/MESSAGES.md](src/bng_xal/bng_msgs/MESSAGES.md).
 
@@ -184,15 +188,21 @@ ros2 topic echo /EGO/sensors/control_state/control_state --field yaw,v,rear_whee
 ## Configuration at launch
 
 ```bash
-# Default gridworld (tech_ground, utv at origin)
+# Default single vehicle (tech_ground, Covet Turbo Rally at origin)
 ros2 launch bng_bringup simulator.launch.py
 
 # Derby preset (no new YAML file)
 ros2 launch bng_bringup simulator.launch.py preset:=derby_grid_lane.yaml
 
+# Turbo Rally at the saved derby/dirt_corridor start, facing its travel direction
+ros2 launch bng_bringup simulator.launch.py level:=derby spawn:=dirt_corridor_start vehicle:=covet_turbo_rally
+
 # Spawn / vehicle shorthand (single-vehicle runs only)
 ros2 launch bng_bringup simulator.launch.py level:=derby spawn:=grid_lane yaw:=0
 ```
+
+Spawn and teleport yaw use ENU body heading: 0° along +X, 90° along +Y.
+The native BeamNG vehicle quaternion convention is converted internally.
 
 | Doc | Use when |
 |-----|----------|
@@ -225,6 +235,9 @@ After `.msg` changes: `colcon build --packages-select bng_msgs` then rebuild dep
 | UDP / ROS bridge | [bng_controller](src/bng_xal/bng_controller/README.md) |
 | ROS messages | [bng_msgs](src/bng_xal/bng_msgs/README.md) · [MESSAGES.md](src/bng_xal/bng_msgs/MESSAGES.md) |
 | BeamNG Lua mod | [luamod](luamod/README.md) |
+| Autonomous simulator operation | [Simulator operations](docs/simulator_operations.md) |
+| Road geometry export investigation | [API findings and staged plan](docs/road_geometry_export_plan.md) |
+| Evaluated track export & 3D inspection | [Prototype commands, schema and validation](tools/road_geometry/README.md) |
 
 ---
 
@@ -232,11 +245,11 @@ After `.msg` changes: `colcon build --packages-select bng_msgs` then rebuild dep
 
 | Issue | Fix |
 |-------|-----|
-| BeamNG needs focus | Keep window focused when loading scenarios |
+| Focus / background behavior varies | See [mode, pacing and startup checks](docs/simulator_operations.md#game-modes-and-physics-pacing); headless alone does not establish repeatability |
 | WSL2 can't reach BeamNG | `host:=<windows-ip>` on launch; see bringup README |
 | Vehicle falls / wrong spawn on derby | Use `preset:=derby_grid_lane.yaml` (origin is void on derby) |
 | Mod changes ignored | Re-run `./luamod/build.bash` and restart BeamNG |
-| `xlab extension not found` (headless) | `-headless -noui -nosteam` |
+| `xlab extension not found` | Check the active profile and installed `xlab.zip`; load `xlab/xlabCore` through the configured BeamNGpy extensions |
 | Torque units wrong | Metric units in BeamNG settings |
 | Config edits ignored after launch | `ls -la install/share/bng_bringup/config` — re-run `colcon build --symlink-install --packages-select bng_bringup` (see step 4) |
 | `bng_msgs` / `bng_simulator` symlink build errors | Use split build: symlink **only** `bng_bringup`; never mix `--symlink-install` on other packages |

@@ -5,7 +5,7 @@
 # beamng.host / beamng.port — injected from launch if omitted here.
 # beamng.open_args.launch: false  → connect to already-running BeamNG.tech.
 # beamng.open_args.extensions     → xlab mod required for custom sensors/controllers.
-# setup_funcs                     → deterministic physics stepping (0 = wall clock).
+# setup_funcs                     → explicit physics pacing; native physics rate is unchanged.
 
 beamng:
   open_args:
@@ -14,7 +14,8 @@ beamng:
     extensions:
       - xlab/xlabCore
   setup_funcs:
+    # Frame-based pacing at the existing FPS limit; 1/fps vehicle seconds per frame.
+    # Use speed_factor: 0 for wall-clock pacing. This does not set the frame limit.
     beamng.settings.set_deterministic:
-      # 0: physics dt follows wall clock; -1/n: fixed steps per frame
-      steps_per_second: 0
+      speed_factor: -1
     beamng.ui.show_hud: {}

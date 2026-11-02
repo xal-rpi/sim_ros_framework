@@ -347,6 +347,11 @@ class SimulationController:
         mapping_info = {}
         gear_name, gear_info = parse_gear_infos(gear_infos)
         initial_gear_name = gear_name
+        # Manual gear names are numeric indices. Retain the measured initial
+        # state: the scan may not revisit neutral during a short shift wait.
+        if isinstance(gear_name, (int, float)) and gear_name == gear_info["index"]:
+            gear_info["indexCmd"] = gear_info["index"]
+            mapping_info[gear_name] = gear_info
         print(f"  {gear_name}: {gear_info}")
         
         # Cycle through all gears
@@ -416,7 +421,7 @@ class SimulationController:
         req_args = {}
         if vehicle_name:
             req_args["vehicle_name"] = vehicle_name
-        long_timeout = max(self.timeout, 60.0)
+        long_timeout = max(self.timeout, 120.0)
 
         _vehicle_config = send_request(
             "get_vehicle_part_config", req_args,
@@ -452,7 +457,7 @@ class SimulationController:
             f"R={R:.4f}  Iw={iw_s}  IwSim={iw_sim_s}"
         )
 
-        print("  - steering (slope |u|≈0.3, lock u=±1)")
+        print("  - steering (scalar slope |u|≈0.3; dense FL/FR sweep; lock u=±1)")
         steer = send_request("measure_steering_to_input", req_args, timeout_sec=long_timeout)
         sti = steer.get("steering_to_input")
         for row in steer.get("samples") or []:
@@ -512,6 +517,9 @@ class SimulationController:
             "trackFront",
             "trackRear",
             "wheelRadius",
+            "wheelRadiusFront",
+            "wheelRadiusRear",
+            "frame",
             "wheelRadiusNominal",
             "wheelInertia",
             "wheelInertiaSim",
@@ -535,6 +543,16 @@ class SimulationController:
             plant["steering"] = steering_out
         else:
             plant["steering"] = None
+        if steer.get("front_steering") is not None:
+            plant["front_steering"] = round_dict_values(steer["front_steering"], 8)
+            plant["front_steering_fit"] = round_dict_values(steer["front_steering_fit"], 8)
+            if steer.get("front_steering_fits") is not None:
+                plant["front_steering_fits"] = round_dict_values(steer["front_steering_fits"], 8)
+                for name, result in plant["front_steering_fits"].items():
+                    print(f"    {name}: {result['law']}  errors [rad]: {result['metrics']}")
+            plant["front_steering_samples"] = [
+                round_dict_values(row, 8) for row in steer["front_steering_samples"]
+            ]
         for key in ("steering_tau_s", "steering_delay_s", "steering_t95_s"):
             val = steer.get(key)
             plant[key] = None if val is None else round(float(val), 4)
@@ -750,6 +768,21 @@ Examples:
         help='Output file path or directory (default: prints to stdout)'
     )
     
+    # Garage experiments use the same simulator service and vehicle socket.
+    for name in ('garage-inspect', 'garage-plan', 'garage-run', 'garage-status', 'garage-stop', 'garage-recover'):
+        garage = subparsers.add_parser(name, help='Garage support calibration: '+name)
+        garage.add_argument('--vehicle', help='Vehicle name (default simulator vehicle)')
+        if name in ('garage-inspect', 'garage-plan', 'garage-run', 'garage-recover'):
+            garage.add_argument('--output', required=True, help='Host output file (inspect/plan) or new run directory')
+        if name == 'garage-plan':
+            garage.add_argument('--placements', help='YAML with measured placement coordinates and node filters')
+            garage.add_argument('--preset', choices=['utv_seats_rear'], help='Source-based UTV seat/cargo structural-node mapping')
+        if name == 'garage-recover':
+            garage.add_argument('--stop-active', action='store_true', help='Stop this matching session before export')
+        if name == 'garage-run':
+            garage.add_argument('--plan', required=True, help='Vehicle-specific garage plan YAML')
+            garage.add_argument('--max-wall-seconds', type=float, default=1800)
+
     # Part config command
     part_config = subparsers.add_parser(
         'part-config',
@@ -1020,6 +1053,11 @@ def main():
                 stop_controllers=not args.no_stop_controllers,
             )
                 
+        elif args.command.startswith('garage-'):
+            from bng_simulator.core.garage_control import cli as garage_cli, GarageServiceClient
+            with GarageServiceClient(timeout=max(args.timeout, 10.0)) as garage_client:
+                result = garage_cli(args, garage_client.send)
+
         elif args.command == 'vehicle-config':
             result = controller.generate_vehicle_config(
                 output_path=args.output,

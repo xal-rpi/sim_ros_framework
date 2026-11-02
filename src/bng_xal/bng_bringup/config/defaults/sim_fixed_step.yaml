@@ -1,9 +1,10 @@
-# Fixed-step physics profile — use via compose.sim in a run file.
+# Fixed frame-pacing profile — use via compose.sim in a run file.
 #
 #   compose:
 #     sim: defaults/sim_fixed_step.yaml
 #
-# steps_per_second: 60 → deterministic 60 Hz physics (vs 0 = wall clock in sim.yaml).
+# 60 graphics frames/s, with 1/60 vehicle seconds of physics per frame.
+# The native physics rate remains unchanged (normally 2000 Hz); this is not LLC Hz.
 
 beamng:
   open_args:
@@ -14,4 +15,5 @@ beamng:
   setup_funcs:
     beamng.settings.set_deterministic:
       steps_per_second: 60
+      speed_factor: -1
     beamng.ui.show_hud: {}

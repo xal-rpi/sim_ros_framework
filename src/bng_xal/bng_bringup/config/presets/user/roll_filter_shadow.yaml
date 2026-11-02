@@ -1,0 +1,9 @@
+# Diagnostic-only override; export and filter defaults belong to vehicle_catalog.yaml.
+# Select a vehicle whose catalog entry configures environment and roll_filter.
+overrides:
+  vehicles:
+    EGO:
+      controllers:
+        LowLevelController:
+          roll_filter:
+            mode: shadow

@@ -43,24 +43,23 @@ class LoggerProcess(Process):
         in the buffer. Sleep for poll_interval on each iteration. When flush_interval
         elapses, flush the buffer to a new file.
         """
+        import signal
+        # The manager owns flushing/stopping this worker; terminal SIGINT is not data loss.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         last_flush = time.time()
 
-        while not self.stop_event.is_set():
-            # Drain the queue completely.
+        while True:
             try:
-                while True:
-                    m_data = self.data_queue.get_nowait()
-                    self.buffer.append(m_data)
+                item = self.data_queue.get(timeout=self.poll_interval)
             except Empty:
-                pass
-
-            if (time.time() - last_flush) >= self.flush_interval and self.buffer:
+                continue
+            if item is None:
+                break
+            self.buffer.append(item)
+            if time.time() - last_flush >= self.flush_interval:
                 self.flush_data()
                 last_flush = time.time()
-
-            time.sleep(self.poll_interval)
-
-        # Final flush on stop
+        # The FIFO sentinel follows every accepted record, including feeder-buffered data.
         self.flush_data()
 
     def flush_data(self):
@@ -117,7 +116,7 @@ class LoggerProcess(Process):
             print("Flush error:", e)
 
     def stop(self):
-        """
-        Signal the logger process to stop.
-        """
-        self.stop_event.set()
+        """Enqueue an ordered stop after the producer has detached this queue."""
+        if not self.stop_event.is_set():
+            self.data_queue.put(None, timeout=2.0)
+            self.stop_event.set()

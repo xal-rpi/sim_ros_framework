@@ -3,7 +3,7 @@
 
 Prefer the launch file for normal use::
 
-    ros2 launch bng_bringup simulator.launch.py config:=gridworld.yaml
+    ros2 launch bng_bringup simulator.launch.py config:=single_vehicle.yaml
 """
 
 import argparse
@@ -22,7 +22,7 @@ def main(args=None):
     parser.add_argument(
         "--config",
         type=str,
-        default="gridworld.yaml",
+        default="single_vehicle.yaml",
         help="Run config name or path (see bng_bringup/config/runs/)",
     )
     parsed_args, _remaining = parser.parse_known_args(args=args)

@@ -14,14 +14,16 @@ from bng_simulator.utils.scenario_compose import beamng_yaw_from_xlab
 
 def test_beamng_yaw_from_xlab_utv_offset() -> None:
     assert beamng_yaw_from_xlab(0.0, 90.0) == -90.0
-    assert beamng_yaw_from_xlab(45.0, 90.0) == -45.0
+    assert beamng_yaw_from_xlab(45.0, 90.0) == -135.0
+    assert beamng_yaw_from_xlab(-45.0, 90.0) == -45.0
+    assert beamng_yaw_from_xlab(90.0, 90.0) == -180.0
 
 
 def test_apply_xlab_yaw_to_beamng() -> None:
-    args = {"xlab_yaw_deg": 0.0}
+    args = {"xlab_yaw_deg": 45.0}
     apply_xlab_yaw_to_beamng(args, yaw_offset_deg=90.0)
-    assert args["yaw_angle"] == -90.0
-    assert args["xlab_yaw_deg"] == 0.0
+    assert args["yaw_angle"] == -135.0
+    assert args["xlab_yaw_deg"] == 45.0
 
 
 def test_apply_xlab_yaw_to_beamng_skips_when_quat_present() -> None:

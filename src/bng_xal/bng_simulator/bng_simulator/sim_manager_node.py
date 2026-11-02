@@ -30,7 +30,7 @@ class SimulationManagerNode(Node):
         super().__init__("sim_manager_node")
 
         # Declare parameters
-        self.declare_parameter("config", "gridworld.yaml")
+        self.declare_parameter("config", "single_vehicle.yaml")
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("remote", "")
         self.declare_parameter("beamng_port", 25252)
@@ -228,34 +228,79 @@ class SimulationManagerNode(Node):
             self.logger.error("Logger process not running")
             response.success = False
             return response
-        self.logger_process.stop()
-        self.logger_process.join()
-        self.logger_process = None
+        queue = self.logger_queue
         self.logger_queue = None
+        self.logger_process.stop()
+        self.logger_process.join(timeout=3.0)
+        if self.logger_process.is_alive():
+            raise RuntimeError('Logger did not finish draining its queue')
+        self.logger_process = None
+        queue.close()
+        queue.join_thread()
         response.success = True
         self.logger.info("Logger process stopped")
         return response
 
 
 
+    def destroy_node(self):
+        """Flush the logger before destroying ROS, with bounded worker cleanup."""
+        process = getattr(self, 'logger_process', None)
+        if process is not None:
+            self.logger_queue = None
+            process.stop()
+            process.join(timeout=3.0)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=1.0)
+                raise RuntimeError('Logger did not stop within its shutdown deadline')
+            self.logger_process = None
+        manager = getattr(self, 'sim_manager', None)
+        if manager is not None:
+            # Close local TCP transports only. Sensor RPC removal can wait forever
+            # when the simulator is paused; the game/scenario intentionally stays open.
+            endpoints = [item.vehicle for item in manager.vehicles.values()]
+            if manager.beamng is not None:
+                endpoints.append(manager.beamng)
+            for endpoint in endpoints:
+                if endpoint.connection is not None:
+                    endpoint.connection.disconnect()
+                    endpoint.connection = None
+        return super().destroy_node()
+
+
 def main(args=None):
-    """
-    Main function to run the Simulation Manager ROS Node
+    """Observe signals promptly while keeping ROS alive throughout worker cleanup."""
+    import signal
+    import threading
+    from rclpy.executors import ExternalShutdownException
+    from rclpy.signals import SignalHandlerOptions
 
-    Args:
-        args (list, optional): ROS command line arguments. Defaults to None.
-    """
-    # Initialize ROS
-    rclpy.init(args=args)
-
-    # Use ROS argument parsing
-    node = SimulationManagerNode()
-    rclpy.spin(node)
-
-    # Shutdown ROS and cleanup
-    if node.logger_process:
-        node.logger_process.stop()
-        node.logger_process.join()
-
-    node.destroy_node()
-    rclpy.shutdown()
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    stopping = threading.Event()
+    def interrupt(*_):
+        # ROS launch may forward a signal already delivered to the process group.
+        # Repeated signals must not interrupt local transport/logger cleanup.
+        if stopping.is_set():
+            return
+        stopping.set()
+        # Also interrupt a synchronous BeamNG socket read in a polling callback.
+        raise KeyboardInterrupt
+    previous = {sig: signal.signal(sig, interrupt)
+                for sig in (signal.SIGINT, signal.SIGTERM)}
+    node = None
+    try:
+        node = SimulationManagerNode()
+        while not stopping.is_set() and rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        stopping.set()
+        try:
+            if node is not None:
+                node.destroy_node()
+        finally:
+            rclpy.try_shutdown()
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)

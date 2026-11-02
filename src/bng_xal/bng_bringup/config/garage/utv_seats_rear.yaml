@@ -1,0 +1,25 @@
+# Source-verified UTV structural groups, in the fixed chassis reference frame.
+# Generate a plan, inspect the selected nodes, and supply the height estimate.
+# These groups approximate seat/cargo locations; they are not measured real loads.
+experiment:
+  mode: static_ballast         # static_ballast [kg] | baseline_release [N]
+  cogHeightEstimate: null      # required user estimate [m] above the contact plane
+  ballastKg: 10               # total added mass at the highest level [kg]
+  levels: 1                   # 1..3 equally spaced positive load levels
+  holdSeconds: 8              # hold per placement/level [s], minimum 3
+  testPlacements:
+    - name: seat_pair
+      weights: {left_seat: 0.5, right_seat: 0.5}
+placements:
+  left_seat:
+    node_names: [f2l, f2ll, f3l, f3ll]
+    node_pattern: utv_frame
+    verified_frame_origin: canam_x3_frame_base_808
+  right_seat:
+    node_names: [f2r, f2rr, f3r, f3rr]
+    node_pattern: utv_frame
+    verified_frame_origin: canam_x3_frame_base_808
+  rear_cargo:
+    node_names: [r5ll, r5rr, r6ll, r6rr]
+    node_pattern: utv_frame
+    verified_frame_origin: canam_x3_frame_base_808

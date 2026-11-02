@@ -1,0 +1,127 @@
+{
+  "author": "XJI-4833",
+  "connected": true,
+  "date": "1786380444",
+  "defaultLaps": 2,
+  "difficulty": 37,
+  "environment": {
+    "fog": 0.00030000001424924,
+    "tod": {
+      "azimuthOverride": 0,
+      "dayLength": 1800,
+      "dayScale": 1,
+      "nightScale": 2,
+      "startTime": 0.9200000166893,
+      "time": 0.9200000166893
+    }
+  },
+  "intersections": {},
+  "length": 94.174530443246,
+  "level": "tech_ground",
+  "materialFields": {
+    "A": {
+      "centerColor": [
+        0,
+        0,
+        0,
+        0.537254989
+      ],
+      "groundtype": "ASPHALT_OLD"
+    },
+    "B": {},
+    "C": {},
+    "D": {},
+    "E": {},
+    "F": {},
+    "G": {},
+    "H": {}
+  },
+  "materials": [
+    {
+      "ceilingMesh": {
+        "track_editor_A_center": [
+          1,
+          2,
+          3
+        ]
+      },
+      "centerMesh": {
+        "track_editor_A_center": [
+          1,
+          2,
+          3
+        ]
+      },
+      "leftMesh": {
+        "track_editor_A_border": [
+          1,
+          2,
+          3
+        ]
+      },
+      "leftWall": {
+        "track_editor_A_border": [
+          1,
+          2,
+          3
+        ]
+      },
+      "rightMesh": {
+        "track_editor_A_border": [
+          1,
+          2,
+          3
+        ]
+      },
+      "rightWall": {
+        "track_editor_A_border": [
+          1,
+          2,
+          3
+        ]
+      }
+    }
+  ],
+  "reversible": false,
+  "subPieces": [
+    [
+      {
+        "bank": {
+          "interpolation": "smoothSlope",
+          "inverted": false,
+          "value": -15
+        },
+        "height": {
+          "interpolation": "smoothSlope",
+          "value": 0
+        },
+        "piece": "init",
+        "width": {
+          "interpolation": "smoothSlope",
+          "value": 20
+        }
+      },
+      {
+        "direction": -1,
+        "length": 180,
+        "piece": "freeCurve",
+        "radius": 3.75
+      },
+      {
+        "direction": -1,
+        "length": 180,
+        "piece": "freeCurve",
+        "radius": 3.75
+      }
+    ]
+  ],
+  "subTrackPositions": [
+    {
+      "hdg": 1.5707,
+      "x": 8.499999995360575,
+      "y": -7.499903673205252,
+      "z": 5
+    }
+  ],
+  "version": "1.1"
+}

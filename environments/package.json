@@ -1,0 +1,57 @@
+{
+  "name": "xlab_environments",
+  "version": "0.3.1",
+  "assets": {
+    "donut_r15_b15": {
+      "path": "/trackEditor/xlab_environments/donut_r15_b15.json",
+      "type": "trackbuilder",
+      "author": "XJI-4833",
+      "base_level": "tech_ground",
+      "route_defaults": {
+        "topology": "closed",
+        "start": "first_evaluated_station",
+        "direction": "native_builder_order"
+      },
+      "description": "Closed 15 m radius circle, -15 degree bank; removed redundant 4 m entry straight while preserving the existing circular pavement placement."
+    },
+    "flat_circuit": {
+      "path": "/trackEditor/xlab_environments/flat_circuit.json",
+      "type": "trackbuilder",
+      "base_level": "tech_ground",
+      "display_name": "Flat Circuit",
+      "source_file": "Flat.json",
+      "description": "Unbanked circuit with constant design elevation; default mesh cross-section is preserved.",
+      "route_defaults": {
+        "topology": "closed",
+        "start": "first_evaluated_station",
+        "direction": "native_builder_order"
+      }
+    },
+    "rolling_hills_circuit": {
+      "path": "/trackEditor/xlab_environments/rolling_hills_circuit.json",
+      "type": "trackbuilder",
+      "base_level": "tech_ground",
+      "display_name": "Rolling Hills Circuit",
+      "source_file": "Roll1.json",
+      "description": "Unbanked circuit with changing elevation; default mesh cross-section is preserved.",
+      "route_defaults": {
+        "topology": "closed",
+        "start": "first_evaluated_station",
+        "direction": "native_builder_order"
+      }
+    },
+    "banked_oval_b15": {
+      "path": "/trackEditor/xlab_environments/banked_oval_b15.json",
+      "type": "trackbuilder",
+      "base_level": "tech_ground",
+      "display_name": "Banked Oval (15 degree bank)",
+      "source_file": "Oval_15.json",
+      "description": "Two straights and two semicircular bends with -15 degree bank; original evaluated mesh profile and placement preserved.",
+      "route_defaults": {
+        "topology": "closed",
+        "start": "first_evaluated_station",
+        "direction": "native_builder_order"
+      }
+    }
+  }
+}

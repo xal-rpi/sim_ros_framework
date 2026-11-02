@@ -4,7 +4,7 @@
 #
 # level / scenario_name — beamngpy Scenario(level=..., name=...)
 # spawns.*.yaw_angle    — xlab body yaw [deg]
-# beamng spawn yaw      — xlab_yaw - catalog.yaw_offset_deg (utv: gtState ≈ spawn + offset)
+# beamng spawn yaw      — -xlab_yaw - catalog.yaw_offset_deg (native vehicle quaternion convention)
 # extra_objects         — procedural meshes/cones (see scenario_builder.add_level_objects)
 
 level: tech_ground

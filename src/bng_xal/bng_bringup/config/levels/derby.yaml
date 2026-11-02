@@ -6,6 +6,11 @@ level: derby
 scenario_name: basic
 
 spawns:
+  # drive_trajopt derby/dirt_corridor, fitted s=0 centre and travel heading.
+  dirt_corridor_start:
+    pos: [115.56959832032491, -32.97901334217839, 79.7810313]
+    yaw_angle: 86.788733782468
+    cling: true
   grid_lane:
     pos: [-0.243, 148.0445, 79.3]
     yaw_angle: 0

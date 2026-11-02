@@ -35,7 +35,7 @@ Spawns vehicles with the full xlab stack:
 | Simulator | `defaults/sim.yaml` (or `compose.sim`) | BeamNG connection, timing |
 | Map | `levels/<level>.yaml` | Spawn presets, `extra_objects` |
 | Vehicle model | `vehicle_catalog.yaml` | Model, `steering_to_input`, `torque_map` |
-| LLC + sensors | `defaults/llc.yaml` | `gtstate`, `roof_imu`, `LowLevelController` |
+| LLC + sensors | `defaults/llc.yaml` | `gtstate`, `LowLevelController`; commented roof IMU example |
 | ROS poll | `defaults/ros_poll.yaml` | GE/TCP poll timers (not UDP) |
 | UDP slots | `defaults/udp_io.yaml` | `port_stride`; launch sets base ports |
 
@@ -79,7 +79,8 @@ Lua reports at the frozen wet COM after settle (COM + RPY path). Dead triangle k
 | Key | Role |
 |-----|------|
 | `accel_tau_s` / `gyro_tau_s` / `vel_tau_s` / `wheel_angvel_tau_s` | EMA time constants [s] |
-| `debug_raw` | Extra Lua fields (`velRaw`, `velRef`, `angVelObjRPY`, `rGeom`, …) for offline plots |
+| `debug_raw` | Adds unfiltered velocity/acceleration/angular and wheel rates, gravity and frame-comparison fields for offline analysis; does not change the normal filtered outputs or logging verbosity |
+| `contact.enable` | Contact-wrench sampling: off when omitted, enabled in LLC defaults, disabled in attach/calibration defaults |
 | `physics_update_time` | Physics-side filter step [s] |
 
 ```yaml
@@ -129,12 +130,14 @@ Field names match [defaults/llc.yaml](defaults/llc.yaml) under `controllers.LowL
 
 ### Simulator / scenario knobs
 
+Default pacing advances 1/fps vehicle seconds per graphics frame at the existing
+frame limit. Select the fragment below to also set the frame limit to 60 Hz;
+this does not change the native physics rate or LLC period. For wall-clock pacing,
+see [simulator operations](../../../../docs/simulator_operations.md#game-modes-and-physics-pacing).
+
 ```yaml
-overrides:
-  beamng:
-    setup_funcs:
-      beamng.settings.set_deterministic:
-        steps_per_second: 60
+compose:
+  sim: defaults/sim_fixed_step.yaml
 ```
 
 ### ROS poll (GE/TCP path only)
@@ -211,8 +214,7 @@ catalog:
     model: utv
     part_config: /vehicles/utv/wild.pc
     steering_to_input: -0.5948683325943701   # → LLC gains.steering_to_input
-    torque_map: utv_wild_drivetrain          # → LLC + gtstate torque_map
-    # torque_map_api: occupancy_rail         # pair with a matching stem (default legacy)
+    torque_map: utv_canam_r322_lift_wheel_torque # → LLC + gtstate torque_map
   # also: utv_canam_x3_loaded, utv_canam_x3_1g, utv_canam_x3_highcg,
   #       utv_canam_x3_r322, utv_canam_x3_r322_easylift
     llc_overrides:
@@ -246,11 +248,11 @@ Prefer run `overrides` or catalog entries so `defaults/` stays the shared golden
 
 ## Launch CLI (spawn / vehicle only)
 
-Single-vehicle shorthand runs only (`gridworld.yaml`, `derby_utv.yaml`, …):
+Single-vehicle shorthand runs only (`single_vehicle.yaml`, `derby_utv.yaml`, …):
 
 ```bash
 ros2 launch bng_bringup simulator.launch.py \
-  config:=gridworld.yaml \
+  config:=single_vehicle.yaml \
   level:=derby spawn:=grid_lane yaw:=45 \
   pos:="44.05,127.22,79.3"
 ```
@@ -287,8 +289,8 @@ On launch, `sim_manager_node` logs a scenario manifest (vehicle ids, spawn, LLC 
 
 ```python
 from bng_simulator.utils.scenario_compose import compose_scenario, summarize_config
-cfg = compose_scenario("gridworld.yaml")
-print(summarize_config(cfg, config_path="gridworld.yaml"))
+cfg = compose_scenario("single_vehicle.yaml")
+print(summarize_config(cfg, config_path="single_vehicle.yaml"))
 ```
 
 Inspect `cfg["vehicles"]["EGO"]["sensors"]` and `cfg["vehicles"]["EGO"]["controllers"]` to confirm overrides landed.

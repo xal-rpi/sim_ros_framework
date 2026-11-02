@@ -57,3 +57,6 @@ Session.vim
 # Colcon custom files
 COLCON_IGNORE
 AMENT_IGNORE
+
+# Optional local exports live outside the packaged runtime build inputs.
+/local_exports/

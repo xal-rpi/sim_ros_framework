@@ -1,0 +1,300 @@
+totalMass: 1094.378
+cogToFrontAxle: 1.391
+cogToRearAxle: 1.105
+cogToCentralAxle: 0.003
+cogAboveAxle: 0.241
+coGHeight: 0.613
+distFR: 2.497
+trackFront: 1.363
+trackRear: 1.406
+wheelRadius: 0.38
+wheelRadiusFront: 0.333
+wheelRadiusRear: 0.427
+frame:
+  cog_nom:
+  - 1.105
+  - 0.003
+  - 0.228
+  front_axle_body:
+  - 2.497
+  - 0.0
+  - -0.026
+  g_world:
+  - 0.0
+  - 0.0
+  - -9.81
+  imu_pos_body:
+  - 1.105
+  - 0.003
+  - 0.228
+  rear_axle_body:
+  - 0.0
+  - 0.0
+  - 0.0
+wheelRadiusNominal: 0.384
+wheelInertia: 1.666
+wheelInertiaSim: 0.686
+inertia:
+  xx: 415.174
+  xy: -9.47
+  xz: -21.771
+  yy: 1480.403
+  yz: 0.485
+  zz: 1707.086
+cogPosRel:
+- -0.288
+- 0.283
+- 0.258
+bbox:
+  vehHeight: 1.462
+  vehLength: 3.945
+  vehWidth: 1.851
+steering:
+  input_max: 1.0
+  input_min: -1.0
+  roadwheel_FL_at_umax_rad: -0.545435
+  roadwheel_FL_at_umin_rad: 0.644795
+  roadwheel_FR_at_umax_rad: -0.649854
+  roadwheel_FR_at_umin_rad: 0.546341
+  roadwheel_at_u0_rad: -0.000102
+  roadwheel_max_rad: -0.597644
+  roadwheel_min_rad: 0.595568
+  steering_to_input: -0.576966
+front_steering: &id001
+  fl:
+    gain: 1.00076002
+    offset_rad: -0.02444098
+  fr:
+    gain: 0.99923998
+    offset_rad: 0.02444098
+front_steering_fit: &id002
+  lock_max_abs_error_rad: 0.0771048
+  max_abs_error_rad: 0.04714931
+  mean_max_rad: 0.53510796
+  mean_min_rad: -0.53216281
+  rmse_rad: 0.01972104
+  sample_count: 19
+front_steering_fits:
+  linear:
+    law: *id001
+    metrics: *id002
+  quadratic:
+    law:
+      fl:
+        gain: 0.99958336
+        offset_rad: -0.04535896
+        quadratic_per_rad: 0.19511383
+      fr:
+        gain: 1.00041664
+        offset_rad: 0.04535896
+        quadratic_per_rad: -0.19511383
+    metrics:
+      lock_max_abs_error_rad: 0.02762905
+      max_abs_error_rad: 0.01282794
+      mean_max_rad: 0.53510796
+      mean_min_rad: -0.53216281
+      rmse_rad: 0.00646439
+      sample_count: 19
+front_steering_samples:
+- delta: 0.59556777
+  delta_l: 0.64479495
+  delta_r: 0.54634059
+  u: -1.0
+- delta: 0.53510796
+  delta_l: 0.55822299
+  delta_r: 0.51199293
+  u: -0.9
+- delta: 0.48208775
+  delta_l: 0.48243956
+  delta_r: 0.48173594
+  u: -0.8
+- delta: 0.43033547
+  delta_l: 0.40929137
+  delta_r: 0.45137957
+  u: -0.7
+- delta: 0.36416155
+  delta_l: 0.33646415
+  delta_r: 0.39185895
+  u: -0.6
+- delta: 0.30200833
+  delta_l: 0.26939187
+  delta_r: 0.33462479
+  u: -0.5
+- delta: 0.24074021
+  delta_l: 0.20472827
+  delta_r: 0.27675216
+  u: -0.4
+- delta: 0.17665509
+  delta_l: 0.138752
+  delta_r: 0.21455818
+  u: -0.3
+- delta: 0.11819416
+  delta_l: 0.07802769
+  delta_r: 0.15836063
+  u: -0.2
+- delta: 0.06202987
+  delta_l: 0.02149592
+  delta_r: 0.10256381
+  u: -0.1
+- delta: -0.00010193
+  delta_l: -0.03702132
+  delta_r: 0.03681747
+  u: 0.0
+- delta: -0.05838957
+  delta_l: -0.09921497
+  delta_r: -0.01756417
+  u: 0.1
+- delta: -0.11357057
+  delta_l: -0.15310432
+  delta_r: -0.07403683
+  u: 0.2
+- delta: -0.16952433
+  delta_l: -0.20752025
+  delta_r: -0.13152842
+  u: 0.3
+- delta: -0.23635577
+  delta_l: -0.27227978
+  delta_r: -0.20043177
+  u: 0.4
+- delta: -0.29433553
+  delta_l: -0.32625098
+  delta_r: -0.26242008
+  u: 0.5
+- delta: -0.35693578
+  delta_l: -0.38416655
+  delta_r: -0.32970502
+  u: 0.6
+- delta: -0.42165108
+  delta_l: -0.44210138
+  delta_r: -0.40120079
+  u: 0.7
+- delta: -0.47603985
+  delta_l: -0.47786008
+  delta_r: -0.47421962
+  u: 0.8
+- delta: -0.53216281
+  delta_l: -0.51137991
+  delta_r: -0.55294571
+  u: 0.9
+- delta: -0.59764431
+  delta_l: -0.54543471
+  delta_r: -0.64985391
+  u: 1.0
+steering_tau_s: 0.1048
+steering_delay_s: 0.0375
+steering_t95_s: 0.1048
+engine:
+  fuelCapacity: 40.0
+  fuelVolume: 39.979
+  idleRPM: 1550.0
+  maxRPM: 10000.0
+  superchargerBoostMax: -1.0
+  turboBoostMax: 36.0
+gearbox:
+  0.0:
+    index: 0
+    mode_index: 0.0
+    gear_ratio: 0.0
+    mode: ''
+    indexCmd: 0
+  -1.0:
+    index: -1
+    mode_index: 0.0
+    gear_ratio: -3.27
+    mode: ''
+    indexCmd: -1
+  1.0:
+    index: 1
+    mode_index: 0.0
+    gear_ratio: 3.67
+    mode: ''
+    indexCmd: 1
+  2.0:
+    index: 2
+    mode_index: 0.0
+    gear_ratio: 2.2800000000000002
+    mode: ''
+    indexCmd: 2
+  3.0:
+    index: 3
+    mode_index: 0.0
+    gear_ratio: 1.62
+    mode: ''
+    indexCmd: 3
+  4.0:
+    index: 4
+    mode_index: 0.0
+    gear_ratio: 1.27
+    mode: ''
+    indexCmd: 4
+  5.0:
+    index: 5
+    mode_index: 0.0
+    gear_ratio: 1.0
+    mode: ''
+    indexCmd: 5
+powertrain:
+  mainEngine:
+    type: combustionEngine
+    clutch:
+      type: frictionClutch
+      gearRatio: 1.0
+      gearbox:
+        type: sequentialGearbox
+        gearRatio: 1.0
+        gearRatios:
+          -1.0: -3.27
+          0.0: 0.0
+          1.0: 3.67
+          2.0: 2.28
+          3.0: 1.62
+          4.0: 1.27
+          5.0: 1.0
+        differential_R:
+          type: differential
+          gearRatio: 5.0
+          availableModes:
+          - lsd
+          diffTorqueSplit: 0.5
+          wheelaxleRL:
+            type: shaft
+            gearRatio: 1.0
+            availableModes:
+            - connected
+            wheelhubRL:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+          wheelaxleRR:
+            type: shaft
+            gearRatio: 1.0
+            availableModes:
+            - connected
+            wheelhubRR:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+  spindleFL:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+  spindleFR:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+controllers:
+  analogOdometer: gauges/analogOdometer
+  door_L_coupler: advancedCouplerControl
+  door_R_coupler: advancedCouplerControl
+  gtState2: xlab/gtState
+  hoodCatchCoupler: advancedCouplerControl
+  hoodLatchCoupler: advancedCouplerControl
+  nitrousOxideInjection: nitrousOxideInjection
+  sequentialLever: propAnimation/sequentialLever
+  tailgateCoupler: advancedCouplerControl
+  twoStepLaunch: twoStepLaunch
+  vehicleController: vehicleController/vehicleController

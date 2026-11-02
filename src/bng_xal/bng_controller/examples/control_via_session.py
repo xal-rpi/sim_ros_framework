@@ -3,7 +3,7 @@
 
 Requires sim running::
 
-    ros2 launch bng_bringup simulator.launch.py config:=gridworld.yaml
+    ros2 launch bng_bringup simulator.launch.py config:=single_vehicle.yaml
 
 Run (another terminal, after source install/setup.bash)::
 

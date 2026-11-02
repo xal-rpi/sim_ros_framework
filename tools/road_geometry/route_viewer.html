@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Route inspection</title>
+<style>__CSS__
+#routeDetails{font-size:12px;line-height:1.6;white-space:pre-wrap}.diagnostics{margin-top:0}#routeReport{max-height:220px;overflow:auto}#plot{height:220px}</style>
+<header><div><h1 id="title">Route inspection</h1><p>Inspect the saved surface, choose start and direction, save a named route.</p></div><span class="tag">ENU · metres · offline geometry</span></header>
+<main class="workspace"><section class="stage" id="stage">
+<div class="toolbar"><div class="group"><button id="showPlan" class="selected">Map / select</button><button id="showWorld">3D preview</button></div><div class="group"><select id="clickAction"><option value="inspect">Inspect station</option><option value="start">Set start / seam</option><option value="end">Set end</option></select><button id="expandMap">Expand</button></div></div>
+<div class="viewport"><canvas id="world"></canvas><canvas id="plan"></canvas><div class="overlay" id="pickFeedback"></div></div>
+<div class="toolbar"><div class="group"><button id="fitRoute">Fit route</button><button id="focus">Focus station</button><button id="previousStation">Previous</button><button id="nextStation">Next</button></div></div>
+<div class="footerbar"><span>Green: start · orange: end · pink: chosen travel order</span><span id="mapHelp">Wheel: zoom · right drag: pan</span></div><div id="pathStatus"></div></section>
+<aside class="sidebar"><div class="step"><h2><span class="number">1</span>Choose route order</h2>
+<label>Source route<select id="route"></select></label><label>Travel direction<select id="direction"><option value="forward">Source direction</option><option value="reverse">Reverse direction</option></select></label>
+<label class="check"><input id="fullLoop" type="checkbox">Full closed loop · one traversal</label>
+<div class="grid2"><label>Start row<input id="startRow" type="number" min="0"></label><label>End row<input id="endRow" type="number" min="0"></label></div>
+<p class="hint">Click a station, then use the buttons below. A closed lap repeats the chosen seam; an open section has an explicit end.</p>
+<div class="row"><button id="useStart">Use as start</button><button id="useEnd">Use as end</button></div><label style="margin-top:10px">Inspect source row<input id="station" type="number" min="0"></label><pre id="routeDetails"></pre></div>
+<div class="step"><h2><span class="number">2</span>Surface context</h2>
+<label class="check"><input id="showMesh" type="checkbox" checked>Evaluated source mesh</label><label class="check"><input id="showSamples" type="checkbox" checked>Measured/profile samples</label><label class="check"><input id="showContext" type="checkbox" checked>Nearby collision point cloud</label>
+<label class="check"><input id="localOnly" type="checkbox">Only around inspected station</label><label>Local radius [m]<input id="localRadius" type="number" min="1" value="20"></label><p id="contextInfo" class="hint"></p><details><summary>Context source / limits</summary><pre id="contextSource"></pre></details></div>
+<div class="step"><h2><span class="number">3</span>Save named route</h2><label>Export name<input id="selectionName" type="text" value="my_route" spellcheck="false"></label>
+<div class="row"><button id="saveRecipe" class="primary">Save route choice</button></div><div class="row"><button id="exportRoute">Create named export</button></div><p id="fileStatus" class="hint"></p>
+<label>Saved route choices<select id="selectionList"><option value="">Choose a saved route…</option></select></label><div class="row"><button id="loadSelection">Open choice</button><button id="refreshSelections">Refresh</button></div><label class="filelabel">Import route choice JSON…<input id="pathLoad" type="file" accept=".json"></label><p class="hint">Saving records a small reproducible recipe. Creating an export applies it to new arrays under exports/NAME. Original geometry stays unchanged. Direct file pages download the recipe; the CLI can apply it offline.</p></div>
+</aside></main><details class="diagnostics" open><summary>Geometry diagnostics</summary><div class="grid3"><label>Plot<select id="metric"><option value="elevation">Center elevation [m]</option><option value="section">Cross-section elevation [m]</option><option value="bank">End-to-end bank [deg]</option><option value="width">Sampled width [m]</option><option value="spacing">Station spacing [m]</option><option value="normal">Section normal Z</option></select></label></div><p id="plotDescription"></p><canvas id="plot"></canvas><pre id="routeReport"></pre></details>
+<script>__SELECTION__
+const data=__DATA__;
+__VIEWER__
+</script></html>

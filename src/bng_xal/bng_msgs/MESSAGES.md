@@ -1,6 +1,6 @@
 # bng_msgs — xlab interface messages
 
-Focused messages for the **gridworld** golden path.
+Focused messages for the **single-vehicle** control path.
 
 ## Types
 
@@ -88,15 +88,15 @@ JSON ``data`` payload and sendto's ``control_listen``.
 |-----|----------|----------|--------------|
 | `0x01` | `FIELD_THROTTLE` | `throttle` | `throttle_override` |
 | `0x02` | `FIELD_BRAKE` | `brake` | `brake_des` |
-| `0x04` | `FIELD_STEERING` | `steering` | `steer_des_rad` (needs `steering_to_input`) |
+| `0x04` | `FIELD_STEERING` | `steering` | `steer_des_rad` (uses calibrated `steering_map`) |
 | `0x08` | `FIELD_TORQUE` | `torque` | `torque_des` |
 | `0x10` | `FIELD_WHEEL_SPEED` | `wheel_speed` | `omega_des` |
 | `0x20` | `FIELD_PARKING_BRAKE` | `pbrake` | reserved (LLC TBD) |
 | `0x40` | `FIELD_GEAR` | `gear_index` | reserved (LLC TBD) |
 | `0x80` | `FIELD_STEERING_INPUT` | `steering_input` | direct `electrics.steering_input` (calibration) |
 
-Use `steering_input` when `steering_to_input` is unknown (fit roadwheel vs input).
-Use `steering` [rad] once catalog scale is calibrated. If both are sent, LLC uses
+Use `steering_input` for steering calibration. Use `steering` [rad] once the
+vehicle export supplies the calibrated input/roadwheel map. If both are sent, LLC uses
 `steering_input` and ignores `steering`.
 
 Example: `valid_fields = FIELD_TORQUE | FIELD_STEERING_INPUT`
@@ -109,28 +109,5 @@ Topic: `/<vehicle>/control/cmd` (`sensor_dispatcher` subscriber).
 
 ---
 
-## Drive trajopt tracking (high-level MPC)
-
-### `VehicleOnSurface`
-
-Chart localization + world pose at sensor rate. Numeric only — artifact / labels via `GetRefTrajInfo`.
-
-Default topic (controller node): `~/vehicle_on_surface`
-
-### `MpcHorizon`
-
-Primal horizon `x`/`u`, targets `x_tgt`/`u_tgt`, and world `pose_*` for viz / bags. Labels once via service.
-
-Default topic: `~/mpc_horizon`
-
-### `GtPath`
-
-Optional socket-plant ground-truth path for PlotJuggler overlays. Not used on BeamNG/PX4.
-
-Default topic: `~/debug/gt_path` (only when `gt_*` present on the sensor)
-
-### `GetRefTrajInfo`
-
-One-shot artifact identity, channel labels, and vehicle drawer geometry.
-
-Service: `~/get_ref_traj_info`
+Controller localization, horizons, solve diagnostics and reference setup use
+`xal_drive_msgs`; they are independent of this simulator bridge.

@@ -1,0 +1,20 @@
+# Base tech_ground plus Flat.json, packaged under a descriptive asset name.
+# Track coordinates/materials/mesh profile are preserved, not analytically rebuilt.
+level: tech_ground
+scenario_name: xlab_tech_ground_with_flat_circuit
+
+environment:
+  trackbuilder_tracks:
+    - /trackEditor/xlab_environments/flat_circuit.json
+
+spawns:
+  # Saved start=(7.5,7.5,5); XY grid scale=4, heading approximately +X.
+  # Five metres into the first 60 m straight. The regular mesh is recessed
+  # about 0.2 m below the design centerline. Provisional clearance: Z+0.5 m.
+  # Keep explicit Z while the scene loads, before track geometry exists.
+  on_track:
+    pos: [35, 30, 5.5]
+    yaw_angle: 0
+    cling: false
+
+extra_objects: {}

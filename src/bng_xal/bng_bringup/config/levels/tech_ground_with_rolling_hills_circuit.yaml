@@ -1,0 +1,20 @@
+# Base tech_ground plus Roll1.json, packaged under a descriptive asset name.
+# Bank is zero; "rolling hills" describes elevation changes, not vehicle roll.
+level: tech_ground
+scenario_name: xlab_tech_ground_with_rolling_hills_circuit
+
+environment:
+  trackbuilder_tracks:
+    - /trackEditor/xlab_environments/rolling_hills_circuit.json
+
+spawns:
+  # Saved start=(0,0,2); XY grid scale=4, heading approximately +X.
+  # Five metres into the first 44 m straight, before any elevation transition.
+  # Regular mesh center is about 1.8 m here; provisional spawn Z=2.5 m.
+  # Keep explicit Z while the scene loads, before track geometry exists.
+  on_track:
+    pos: [5, 0, 2.5]
+    yaw_angle: 0
+    cling: false
+
+extra_objects: {}

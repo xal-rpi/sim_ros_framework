@@ -1,0 +1,280 @@
+totalMass: 2865.226
+cogToFrontAxle: 1.799
+cogToRearAxle: 1.394
+cogToCentralAxle: 0.004
+cogAboveAxle: 0.329
+coGHeight: 0.827
+distFR: 3.193
+trackFront: 1.765
+trackRear: 1.81
+wheelRadius: 0.503
+wheelRadiusFront: 0.501
+wheelRadiusRear: 0.504
+frame:
+  cog_nom:
+  - 1.394
+  - 0.004
+  - 0.34
+  front_axle_body:
+  - 3.193
+  - 0.0
+  - 0.024
+  g_world:
+  - 0.0
+  - 0.0
+  - -9.81
+  imu_pos_body:
+  - 1.394
+  - 0.004
+  - 0.34
+  rear_axle_body:
+  - 0.0
+  - 0.0
+  - 0.0
+wheelRadiusNominal: 0.508
+wheelInertia: 4.393
+wheelInertiaSim: 1.546
+inertia:
+  xx: 1362.686
+  xy: -30.908
+  xz: -27.948
+  yy: 6826.52
+  yz: 5.755
+  zz: 7368.985
+cogPosRel:
+- -0.35
+- 0.004
+- 0.076
+bbox:
+  vehHeight: 2.066
+  vehLength: 5.615
+  vehWidth: 2.44
+steering:
+  input_max: 1.0
+  input_min: -1.0
+  roadwheel_FL_at_umax_rad: -0.52464
+  roadwheel_FL_at_umin_rad: 0.555119
+  roadwheel_FR_at_umax_rad: -0.553979
+  roadwheel_FR_at_umin_rad: 0.526141
+  roadwheel_at_u0_rad: 2.0e-06
+  roadwheel_max_rad: -0.53931
+  roadwheel_min_rad: 0.54063
+  steering_to_input: -0.508206
+front_steering: &id001
+  fl:
+    gain: 1.00174577
+    offset_rad: 0.00350423
+  fr:
+    gain: 0.99825423
+    offset_rad: -0.00350423
+front_steering_fit: &id002
+  lock_max_abs_error_rad: 0.0121072
+  max_abs_error_rad: 0.0094657
+  mean_max_rad: 0.48250156
+  mean_min_rad: -0.48209731
+  rmse_rad: 0.00464762
+  sample_count: 19
+front_steering_fits:
+  linear:
+    law: *id001
+    metrics: *id002
+  quadratic:
+    law:
+      fl:
+        gain: 1.00147975
+        offset_rad: -0.00156672
+        quadratic_per_rad: 0.0597549
+      fr:
+        gain: 0.99852025
+        offset_rad: 0.00156672
+        quadratic_per_rad: -0.0597549
+    metrics:
+      lock_max_abs_error_rad: 0.00220994
+      max_abs_error_rad: 0.00184649
+      mean_max_rad: 0.48250156
+      mean_min_rad: -0.48209731
+      rmse_rad: 0.00076422
+      sample_count: 19
+front_steering_samples:
+- delta: 0.54063002
+  delta_l: 0.55511857
+  delta_r: 0.52614147
+  u: -1.0
+- delta: 0.48250156
+  delta_l: 0.49371374
+  delta_r: 0.47128938
+  u: -0.9
+- delta: 0.42874094
+  delta_l: 0.4385947
+  delta_r: 0.41888718
+  u: -0.8
+- delta: 0.37671191
+  delta_l: 0.38553097
+  delta_r: 0.36789285
+  u: -0.7
+- delta: 0.32247907
+  delta_l: 0.32868581
+  delta_r: 0.31627233
+  u: -0.6
+- delta: 0.26895255
+  delta_l: 0.27285481
+  delta_r: 0.26505029
+  u: -0.5
+- delta: 0.21554285
+  delta_l: 0.21730881
+  delta_r: 0.21377688
+  u: -0.4
+- delta: 0.15268431
+  delta_l: 0.15286807
+  delta_r: 0.15250055
+  u: -0.3
+- delta: 0.110366
+  delta_l: 0.10921831
+  delta_r: 0.11151369
+  u: -0.2
+- delta: 0.05639237
+  delta_l: 0.05425703
+  delta_r: 0.05852771
+  u: -0.1
+- delta: 1.61e-06
+  delta_l: -0.00059831
+  delta_r: 0.00060153
+  u: 0.0
+- delta: -0.04820512
+  delta_l: -0.05038557
+  delta_r: -0.04602467
+  u: 0.1
+- delta: -0.10061229
+  delta_l: -0.10219534
+  delta_r: -0.09902925
+  u: 0.2
+- delta: -0.152239
+  delta_l: -0.15208851
+  delta_r: -0.15238949
+  u: 0.3
+- delta: -0.20601491
+  delta_l: -0.20602686
+  delta_r: -0.20600296
+  u: 0.4
+- delta: -0.25976796
+  delta_l: -0.25816551
+  delta_r: -0.26137041
+  u: 0.5
+- delta: -0.31366218
+  delta_l: -0.31011729
+  delta_r: -0.31720708
+  u: 0.6
+- delta: -0.36875709
+  delta_l: -0.36269448
+  delta_r: -0.3748197
+  u: 0.7
+- delta: -0.42464126
+  delta_l: -0.41573311
+  delta_r: -0.43354941
+  u: 0.8
+- delta: -0.48209731
+  delta_l: -0.46996902
+  delta_r: -0.49422561
+  u: 0.9
+- delta: -0.53930954
+  delta_l: -0.52463962
+  delta_r: -0.55397946
+  u: 1.0
+steering_tau_s: 0.2041
+steering_delay_s: 0.0685
+steering_t95_s: 0.3055
+engine:
+  fuelCapacity: 350.0
+  fuelVolume: 349.978
+  idleRPM: 750.0
+  maxRPM: 7500.0
+  superchargerBoostMax: -1.0
+  turboBoostMax: -1.0
+gearbox:
+  R:
+    index: -1
+    mode_index: 0.2
+    gear_ratio: -2.0
+    mode: drive
+    indexCmd: -1
+  N:
+    index: 0
+    mode_index: 0.4
+    gear_ratio: 0.0
+    mode: neutral
+    indexCmd: 0
+  P:
+    index: 0
+    mode_index: 0.0
+    gear_ratio: 0.0
+    mode: park
+    indexCmd: 1
+powertrain:
+  mainEngine:
+    type: combustionEngine
+    torqueConverter:
+      type: torqueConverter
+      gearRatio: 1.0
+      gearbox:
+        type: automaticGearbox
+        gearRatio: 0.0
+        gearRatios:
+          -1.0: -2.0
+          0.0: 0.0
+          1.0: 1.95
+          2.0: 1.34
+          3.0: 1.0
+        reductionGearbox:
+          type: shaft
+          gearRatio: 1.34
+          availableModes:
+          - connected
+          torsionReactorR:
+            type: torsionReactor
+            gearRatio: 1.0
+            driveshaft:
+              type: shaft
+              gearRatio: 1.0
+              availableModes:
+              - connected
+              differential_R:
+                type: differential
+                gearRatio: 4.11
+                availableModes:
+                - locked
+                diffTorqueSplit: 0.5
+                wheelaxleRL:
+                  type: shaft
+                  gearRatio: 1.0
+                  availableModes:
+                  - connected
+                wheelaxleRR:
+                  type: shaft
+                  gearRatio: 1.0
+                  availableModes:
+                  - connected
+  wheelaxleFL:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+  wheelaxleFR:
+    type: shaft
+    gearRatio: 1.0
+    availableModes:
+    - connected
+controllers:
+  beamNavigator: beamNavigator
+  frontBypass: bypassDampers
+  gauge: gauges/genericGauges
+  gauges/customModules/accelerationData: gauges/customModules/accelerationData
+  gauges/customModules/combustionEngineData: gauges/customModules/combustionEngineData
+  gauges/customModules/electricMotorData: gauges/customModules/electricMotorData
+  gauges/customModules/environmentData: gauges/customModules/environmentData
+  gauges/customModules/tireData: gauges/customModules/tireData
+  gtState4: xlab/gtState
+  rearBypass: bypassDampers
+  shiftLights: shiftLights
+  singleAxisLever: propAnimation/singleAxisLever
+  twoStepLaunch: twoStepLaunch
+  vehicleController: vehicleController/vehicleController

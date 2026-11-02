@@ -1,0 +1,24 @@
+# Logical environment preset: vanilla tech_ground plus a config-selected track.
+# This is not a new BeamNG level and does not override levels/tech_ground/.
+level: tech_ground
+scenario_name: xlab_tech_ground_with_oval
+
+environment:
+  trackbuilder_tracks:
+    - /trackEditor/xlab_environments/donut_r15_b15.json
+
+spawns:
+  # Closed circle seam=(34,-30,5) m, initial design tangent approximately +X.
+  # The redundant 4 m entry straight was removed without moving the circle.
+  # Keep Z during initial scene loading, before the elevated track is generated.
+  on_track:
+    pos: [34, -30, 5.5]
+    yaw_angle: 0
+    cling: false
+  # Optional parking position beside the track.
+  staging:
+    pos: [40, 40, 0]
+    yaw_angle: 0
+    cling: true
+
+extra_objects: {}

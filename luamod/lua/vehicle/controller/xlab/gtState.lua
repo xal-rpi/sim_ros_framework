@@ -3,6 +3,7 @@
 -- ω from getRollPitchYawAngularVelocity; BeamNG yawAV is right-positive, so
 -- ω_world += −yawAV * up. Pitch stays +pitchAV * right.
 
+local huge = math.huge
 local M = {}
 
 local sqrt, abs, ceil = math.sqrt, math.abs, math.ceil
@@ -17,22 +18,19 @@ local function clamp(x, lo, hi)
 end
 
 local logTag = 'GtState'
-local ffi = require('ffi')
 local customFields = {}
 local torquePolicyLib = nil
 local torqueMapEnabled = false
 local torqueMapFieldName = 'rear_wheel_torque_est'
-local torqueMapApi = 'legacy'
-local torqueMapRKin = 0.38
+local torqueMapRKin
+local contactSampler = nil
+local surfaceSampler = nil
 -- Floor linear rear speed before / r_kin so forward + invert stay on-map at rest.
 local MAP_WHEEL_SPEED_MIN_MS = 1.0
-local railTmin = ffi.new('float[1]')
-local railTmax = ffi.new('float[1]')
 local gtStateManager = nil
 
 local function occupancyWheelRads(rearWheelspeedMs)
   local r = torqueMapRKin
-  if not r or r < 0.05 then r = 0.38 end
   local v = rearWheelspeedMs
   if v < MAP_WHEEL_SPEED_MIN_MS then v = MAP_WHEEL_SPEED_MIN_MS end
   return v / r
@@ -278,6 +276,10 @@ local function ensureLatestReadingTables()
   if filters.params.debugRaw then
     ensureDebugFields(latest)
   end
+  if contactSampler then
+    latest.contact = contactSampler.readingTemplate()
+  end
+  if surfaceSampler then surfaceSampler.initializeReading(latest) end
 end
 
 local vehicleState = { currVeh = nil, engine = nil, gearbox = nil }
@@ -423,22 +425,15 @@ local function setCustomField(fieldName, value)
   return false
 end
 
-local function setTorqueMapLib(lib, api)
-  torquePolicyLib = lib
-  torqueMapApi = (api == 'occupancy_rail') and 'occupancy_rail' or 'legacy'
-  if lib and torqueMapApi == 'occupancy_rail' then
-    local r = tonumber(lib.drivetrain_r_kin)
-    if r and r > 0.05 then
-      torqueMapRKin = r
-    end
-  end
+-- LLC owns loading and the FFI ABI; GTState shares its library for forward estimates.
+local function setTorqueMapLib(lib)
   if lib then
-    log(
-      'I',
-      logTag,
-      string.format('Torque map lib attached api=%s r_kin=%.5f', torqueMapApi, torqueMapRKin)
-    )
+    local r = tonumber(lib.drivetrain_r_kin)
+    assert(r and r == r and r > 0.05 and r < huge, 'Invalid drivetrain_r_kin in torque map')
+    torqueMapRKin = r
+    log('I', logTag, string.format('Torque map lib attached r_kin=%.5f', r))
   end
+  torquePolicyLib = lib
 end
 
 local function quatFromAxes(dirX, dirY, dirZ)
@@ -528,6 +523,10 @@ local function update(dtSim)
   local tv = tmpVectors
   local wi = wheelInfoTables
 
+  -- Close the collision bin on EVERY physics update, before GT downsampling.
+  if contactSampler then
+    contactSampler.physicsStep(vs.currVeh:getSimTime(), dtSim)
+  end
   rb.physicsTimer = rb.physicsTimer + dtSim
   if rb.physicsTimer < rb.physicsUpdateTime then return end
   local dt = rb.physicsTimer
@@ -756,35 +755,22 @@ local function update(dtSim)
     latest.wheelRL_angVelRaw = filters.state.wheelsAngVel.rawRl
   end
 
+  latest.torque_est_valid = false
   if torqueMapEnabled and torquePolicyLib then
     local rear_wheelspeed_ms = 0.5 * (wi.rr.speed + wi.rl.speed)
     local engine_speed_rads = latest.RPM * constants.rpmToAV
-    local est
-    if torqueMapApi == 'occupancy_rail' then
-      local ww = occupancyWheelRads(rear_wheelspeed_ms)
-      local boost = latest.turboBoost or 0
-      est = tonumber(torquePolicyLib.drivetrain_forward_torque(
-        engine_speed_rads, latest.throttle, boost, ww
-      ))
-      latest.torque_min = tonumber(torquePolicyLib.drivetrain_forward_torque(
-        engine_speed_rads, 0, boost, ww
-      )) or 0
-      latest.torque_max = tonumber(torquePolicyLib.drivetrain_forward_torque(
-        engine_speed_rads, 1, boost, ww
-      )) or 0
-    else
-      est = tonumber(torquePolicyLib.drivetrain_forward_torque(
-        engine_speed_rads, latest.turboBoost, rear_wheelspeed_ms, latest.throttle
-      ))
-      local t0 = tonumber(torquePolicyLib.drivetrain_forward_torque(
-        engine_speed_rads, latest.turboBoost, rear_wheelspeed_ms, 0
-      ))
-      local t1 = tonumber(torquePolicyLib.drivetrain_forward_torque(
-        engine_speed_rads, latest.turboBoost, rear_wheelspeed_ms, 1
-      ))
-      latest.torque_min = min(t0, t1)
-      latest.torque_max = max(t0, t1)
-    end
+    local ww = occupancyWheelRads(rear_wheelspeed_ms)
+    local boost = latest.turboBoost or 0
+    local est = tonumber(torquePolicyLib.drivetrain_forward_torque(
+      engine_speed_rads, latest.throttle, boost, ww
+    ))
+    latest.torque_min = tonumber(torquePolicyLib.drivetrain_forward_torque(
+      engine_speed_rads, 0, boost, ww
+    )) or 0
+    latest.torque_max = tonumber(torquePolicyLib.drivetrain_forward_torque(
+      engine_speed_rads, 1, boost, ww
+    )) or 0
+    latest.torque_est_valid = est ~= nil and est == est and math.abs(est) < huge
     setCustomField(torqueMapFieldName, est)
   else
     latest.torque_min = 0
@@ -793,6 +779,15 @@ local function update(dtSim)
 
   for fieldName, value in pairs(customFields) do
     latest[fieldName] = value
+  end
+
+  if contactSampler then
+    contactSampler.sample(latest.contact, vs.currVeh:getSimTime())
+  end
+
+  if surfaceSampler then
+    surfaceSampler.sample(latest, dt, tv.sensorPos, tv.refPos,
+      tv.hubFl, tv.hubFr, tv.hubRl, tv.hubRr)
   end
 
   beginNewWrite(true)
@@ -853,7 +848,23 @@ local function init(data)
 
   torquePolicyLib = nil
   torqueMapEnabled = false
-  torqueMapApi = 'legacy'
+  contactSampler = nil
+  M.nodeCollision = nil
+  local contactCfg = data.contact
+  local contactOn = type(contactCfg) == 'table' and (contactCfg.enable == true or contactCfg.enable == 1)
+  if contactOn then
+    local contactLib = require('vehicle.controller.xlab.contactState')
+    contactSampler = contactLib.create(contactCfg)
+    M.nodeCollision = contactSampler.nodeCollision
+    log('I', logTag, 'contact sample on')
+  else
+    log('I', logTag, 'contact sample off')
+  end
+  surfaceSampler = nil
+  if type(data.surface) == "table" and data.surface.enable == true then
+    surfaceSampler = require("vehicle.controller.xlab.surfaceState").create(
+      data.surface, data.surfaceFriction or {}, wheel_fl, wheel_fr, wheel_rl, wheel_rr, sensorConfig.id)
+  end
   local torqueMapCfg = data.torque_map
   if torqueMapCfg ~= nil then
     torqueMapEnabled = true
@@ -886,9 +897,14 @@ local function init(data)
 end
 
 local function stop()
+  surfaceSampler = nil
   torquePolicyLib = nil
   torqueMapEnabled = false
-  torqueMapApi = 'legacy'
+  if contactSampler then
+    contactSampler.disable()
+  end
+  contactSampler = nil
+  M.nodeCollision = nil
 end
 
 local function getSensorData()
@@ -900,6 +916,18 @@ end
 
 local function getLatest() return ringBuffer.latestReading end
 
+local function updateGFX(dt)
+  -- BeamNG main calls wheels.updateGFX before controller.updateGFX.
+  if contactSampler then contactSampler.updateGFX(obj:getSimTime()) end
+  if surfaceSampler then surfaceSampler.updateGFX(dt) end
+end
+
+local function acceptSurfaceFriction(result)
+  if surfaceSampler then surfaceSampler.acceptFriction(result) end
+end
+
+M.acceptSurfaceFriction = acceptSurfaceFriction
+M.updateGFX = updateGFX
 M.update = update
 M.init = init
 M.stop = stop

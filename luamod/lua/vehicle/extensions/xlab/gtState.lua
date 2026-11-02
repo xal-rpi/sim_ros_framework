@@ -63,6 +63,9 @@ local function create(data)
     wheel_angvel_tau_s = decodedData.wheel_angvel_tau_s,
     debug_raw = decodedData.debug_raw,
     torque_map = decodedData.torque_map,
+    contact = decodedData.contact,
+    surface = decodedData.surface,
+    surfaceFriction = decodedData.surfaceFriction,
   }
 
   gtStates[decodedData.sensorId] = {
@@ -136,7 +139,15 @@ local function getGtStateController(sensorId)
   end
 end
 
+-- Async graphics-rate friction reply. Ignore replies for removed sensors.
+local function acceptSurfaceFriction(encoded)
+  local result = lpack.decode(encoded)
+  local state = gtStates[result.sensorId]
+  if state then state.controller.acceptSurfaceFriction(result) end
+end
+
 -- Public interface:
+M.acceptSurfaceFriction = acceptSurfaceFriction
 M.create = create
 M.remove = remove
 M.cacheLatestReading = cacheLatestReading

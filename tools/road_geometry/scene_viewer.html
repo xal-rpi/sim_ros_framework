@@ -1,0 +1,186 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Road workspace</title>
+<style>__CSS__</style>
+<header><div><h1 id="title">Road workspace</h1><p>Choose a path, set its corridor, then extract the actual surface.</p></div><div class="accuracy" id="accuracyInfo"></div><span class="tag">ENU · metres</span></header>
+<main class="workspace">
+<section class="stage" id="stage">
+<div class="toolbar"><div class="group"><button id="showPlan" class="selected">Map / select</button><button id="showWorld">3D preview</button></div><div class="group"><select id="clickAction" title="Left mouse action"><option value="add">Add points</option><option value="move">Move points</option><option value="inspect">Inspect / rectangle</option></select><button id="expandMap">Expand</button></div></div>
+<div class="viewport"><canvas id="world"></canvas><canvas id="plan" tabindex="0"></canvas><div class="overlay" id="pickFeedback">Click the map to add ordered waypoints.</div></div>
+<div class="toolbar"><div class="group planOnly"><button id="planMap">Whole map</button><button id="planSurvey">Detailed area</button><button id="planRoute">Fit route</button></div><div class="group worldOnly"><button id="fitMap">Whole map</button><button id="fitSurvey">Detailed area</button><button id="focus">Selected guide</button></div><div class="group"><button id="pathUndo" title="Undo (Ctrl+Z)">Undo</button><button id="pathRedo" title="Redo (Ctrl+Shift+Z)">Redo</button></div></div>
+<div class="footerbar"><div class="legend"><span><i class="dot" style="background:#ff8bd8"></i>Reference</span><span><i class="dot" style="background:#6cdaff"></i>Chosen corridor</span></div><span id="mapHelp">Wheel: zoom · right drag: pan</span></div><div id="pathStatus"></div><pre id="status" class="hidden"></pre>
+</section>
+<aside class="sidebar">
+<div class="step"><h2><span class="number">1</span>Choose your path</h2><label>Source<select id="pathMode"><option value="network">Follow connected roads</option><option value="free">Draw an authored path</option></select></label><label class="check"><input id="pathGuide" type="checkbox" checked>Use evaluated road guide curves</label><label class="check"><input id="pathJoins" type="checkbox" checked>Transition short node offsets · reference only</label><label class="check"><input id="pathClosed" type="checkbox">Closed loop · one traversal</label><label class="check"><input id="pathSmooth" type="checkbox">Smooth authored reference</label><p class="hint" id="sourceHint">Clicks project onto the selected source. Add intermediate points to choose a branch.</p><div class="row"><button id="pathReverse">Reverse</button><button id="pathRemove">Remove point</button><button id="pathClear">Clear</button></div><details style="margin-top:12px"><summary id="pointCount">Waypoints</summary><div id="waypoints"></div></details></div>
+<div class="step"><h2><span class="number">2</span>Set extraction corridor</h2><div class="grid2"><label>Left extent [m]<input id="pathLeft" type="number" min=".01" step=".25" value="3"></label><label>Right extent [m]<input id="pathRight" type="number" min=".01" step=".25" value="3"></label></div><label style="margin-top:10px">Extra margin each side [m]<input id="pathMargin" type="number" min="0" step=".25" value="1"></label><p class="hint">These are chosen extents. Physical pavement edges remain unknown.</p><details style="margin-top:12px"><summary>Sampling and surface level</summary><div class="grid2"><label>Along path [m]<input id="pathSpacing" type="number" min=".05" step=".25" value="1"></label><label>Across path [m]<input id="pathLateral" type="number" min=".05" step=".25" value=".5"></label><label>Reference Z [m]<input id="pathZ" type="number" step=".1"></label><label>Layer tolerance [m]<input id="pathLayer" type="number" min=".05" step=".5" value="3"></label><label>Ray above [m]<input id="pathAbove" type="number" min=".01" step=".25" value="2"></label><label>Ray below [m]<input id="pathBelow" type="number" min=".01" step=".25" value="2"></label></div></details></div>
+<div class="step"><h2><span class="number">3</span>Save or reopen</h2><label>Selection name<input id="selectionName" type="text" value="my_track" autocomplete="off" spellcheck="false"></label><div class="row"><button id="pathSave" class="primary">Save track recipe</button></div><p id="fileStatus" class="hint">Connecting to local export folder…</p><label>Saved in this export<select id="selectionList"><option value="">No saved selection loaded</option></select></label><div class="row"><button id="loadSelection">Open selection</button><button id="refreshSelections">Refresh list</button></div><label class="filelabel">Import a JSON file…<input id="pathLoad" type="file" accept=".json"></label></div>
+<div class="step"><details><summary>Original guides and area bookmark</summary><label class="check"><input id="navOnly" type="checkbox" checked>Navigation candidates only</label><label>Source object<select id="road"></select></label><label>Native guide station<input id="station" type="number" min="0" value="0"></label><pre id="source"></pre><div id="bounds"></div><div class="row"><button id="area">Focus area</button><button id="download">Save area bookmark</button></div><p class="hint">Uses the selection name above. Areas and track recipes are saved separately.</p></details></div>
+</aside></main>
+<details class="diagnostics"><summary>Geometry diagnostics</summary><p id="plotDescription">Reference guide elevation; measured plots become available after extraction.</p><div class="grid3"><label>Measured plot<select id="measurePlot"><option value="elevation">Center elevation [m]</option><option value="section">Cross-section elevation [m]</option><option value="normal">Normal Z</option></select></label><label>Measured station<input id="measureStation" type="number" min="0" value="0"></label></div><canvas id="plot"></canvas><pre id="diagnostics"></pre></details>
+<script>
+__PLANNER__
+const data=__DATA__, meta=data.metadata;
+const $=id=>document.getElementById(id);
+$('title').textContent=(meta.source.mission.match(/\/levels\/([^/]+)/)?.[1]||'Scene').replaceAll('_',' ')+' · road workspace';
+$('accuracyInfo').textContent=`Overview: ${data.overview?data.overview.spacing_m+' m sampling':'local survey'} · road guides retain native coordinates. Navigation fallback links are approximate.`;
+const bytes=Uint8Array.from(atob(data.points),c=>c.charCodeAt(0));
+const detailPoints=new Float32Array(bytes.buffer);
+const overviewBytes=data.overview_points?Uint8Array.from(atob(data.overview_points),c=>c.charCodeAt(0)):null;
+const points=overviewBytes?new Float32Array(overviewBytes.buffer):detailPoints;
+const overviewNormals=data.overview_normals?new Float32Array(Uint8Array.from(atob(data.overview_normals),c=>c.charCodeAt(0)).buffer):null;
+const add=(a,b)=>a.map((v,i)=>v+b[i]), sub=(a,b)=>a.map((v,i)=>v-b[i]);
+const scale=(a,s)=>a.map(v=>v*s), dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>scale(a,1/Math.max(1e-20,Math.hypot(...a)));
+const low=meta.settings.bounds_enu_m.slice(0,3), high=meta.settings.bounds_enu_m.slice(3);
+const contextLow=data.overview?data.overview.bounds_enu_m.slice(0,3):low;
+const contextHigh=data.overview?data.overview.bounds_enu_m.slice(3):high;
+let target=scale(add(contextLow,contextHigh),.5), distance=Math.hypot(...sub(contextHigh,contextLow))*1.15;
+let azimuth=-1.1,elevation=.85,selected=-1,station=0,roi=false;
+let planLow,planHigh,planTransform;
+const fields=[];
+for(let i=0;i<3;i++)for(const side of ['min','max']){
+ const label=document.createElement('label');label.textContent='XYZ'[i]+' '+side+' ';
+ const input=document.createElement('input');input.type='number';input.step='.1';
+ input.value=(side==='min'?low:high)[i].toFixed(3);input.onchange=()=>{roi=true;draw()};
+ label.append(input);$('bounds').append(label);fields.push({i,side,input});
+}
+function bounds(){const lo=[],hi=[];for(const f of fields)(f.side==='min'?lo:hi)[f.i]=Number(f.input.value);return{lo,hi}}
+function visible(i){return !$('navOnly').checked||Number(meta.roads[i].drivability)>=0}
+function chooseDefault(){
+ let best=Infinity;selected=-1;station=0;
+ data.guides.forEach((g,i)=>{if(!visible(i))return;g.forEach((e,j)=>{const d=Math.hypot(e[1][0]-target[0],e[1][1]-target[1]);if(d<best){best=d;selected=i;station=j}})});
+}
+function options(){
+ $('road').replaceChildren();
+ meta.roads.forEach((r,i)=>{if(!visible(i))return;const o=document.createElement('option');o.value=i;o.textContent=(r.persistent_id||r.runtime_id)+' · '+r.material;$('road').append(o)});
+ if(selected<0||!visible(selected))chooseDefault();
+ $('road').value=selected;
+}
+chooseDefault();options();
+const gl=$('world').getContext('webgl',{antialias:true});
+if(!gl)throw Error('WebGL unavailable');
+function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s}
+const program=gl.createProgram();
+gl.attachShader(program,shader(gl.VERTEX_SHADER,`attribute vec3 position;attribute vec3 color;uniform mat4 matrix;varying vec3 rgb;varying vec3 world;void main(){world=position;rgb=color;gl_PointSize=3.0;gl_Position=matrix*vec4(position,1.0);}`));
+gl.attachShader(program,shader(gl.FRAGMENT_SHADER,`precision highp float;varying vec3 rgb;varying vec3 world;uniform vec3 low;uniform vec3 high;uniform bool roi;void main(){bool inside=all(greaterThanEqual(world,low))&&all(lessThanEqual(world,high));gl_FragColor=vec4(roi?(inside?mix(rgb,vec3(1.,.65,.15),.6):rgb*.3):rgb,1.);}`));
+gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));
+gl.useProgram(program);gl.enable(gl.DEPTH_TEST);gl.clearColor(.05,.08,.11,1);
+const position=gl.getAttribLocation(program,'position'),color=gl.getAttribLocation(program,'color');
+function buffer(values){const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(values),gl.STATIC_DRAW);return b}
+function bind(location,b){gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.enableVertexAttribArray(location);gl.vertexAttribPointer(location,3,gl.FLOAT,false,0,0)}
+const colors=new Float32Array(points.length);
+for(let i=0;i<points.length;i+=3){const t=Math.max(0,Math.min(1,(points[i+2]-low[2])/(high[2]-low[2])));const n=overviewNormals?Array.from(overviewNormals.slice(i,i+3)):null;const light=n&&n.every(Number.isFinite) ? .4+.6*Math.abs(dot(n,norm([.3,-.4,1]))) : .7;colors.set([(.2+.65*t)*light,.7*light,(.9-.6*t)*light],i)}
+const planColors=[];for(let i=0;i<colors.length;i+=3)planColors.push('rgb('+Array.from(colors.slice(i,i+3)).map(c=>Math.round(c*255)).join(',')+')');
+// Cache the regular overview as an image. This keeps panning responsive when
+// preview density increases; it does not create triangles or road boundaries.
+let overviewRaster=null;
+if(data.overview){
+ const step=data.overview.spacing_m,x0=contextLow[0],y0=contextLow[1];
+ const nx=Math.floor((contextHigh[0]-x0)/step)+1,ny=Math.floor((contextHigh[1]-y0)/step)+1;
+ const image=document.createElement('canvas');image.width=nx;image.height=ny;
+ const context=image.getContext('2d'),pixels=context.createImageData(nx,ny);
+ for(let i=0;i<points.length;i+=3){const x=Math.round((points[i]-x0)/step),y=ny-1-Math.round((points[i+1]-y0)/step);if(x<0||x>=nx||y<0||y>=ny)continue;const j=(y*nx+x)*4;for(let k=0;k<3;k++)pixels.data[j+k]=Math.round(colors[i+k]*255);pixels.data[j+3]=255;}
+ context.putImageData(pixels,0,0);overviewRaster={image,min:[x0-step/2,y0-step/2],max:[x0+(nx-.5)*step,y0+(ny-.5)*step]};
+}
+const pointBuffer=buffer(points),pointColors=buffer(colors);
+const guideBuffers=data.guides.map(g=>buffer(g.flatMap(e=>[e[1][0],e[1][1],e[1][2]+.04])));
+const edgeBuffers=data.guides.map(g=>buffer(g.flatMap(e=>[...e[0],...e[2]])));
+function fixedColor(c){gl.disableVertexAttribArray(color);gl.vertexAttrib3f(color,...c)}
+function multiply(a,b){const c=new Float32Array(16);for(let j=0;j<4;j++)for(let i=0;i<4;i++)for(let k=0;k<4;k++)c[j*4+i]+=a[k*4+i]*b[j*4+k];return c}
+function matrix(){
+ const eye=add(target,[distance*Math.cos(elevation)*Math.cos(azimuth),distance*Math.cos(elevation)*Math.sin(azimuth),distance*Math.sin(elevation)]);
+ const z=norm(sub(eye,target)),x=norm(cross([0,0,1],z)),y=cross(z,x);
+ const view=[x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,eye),-dot(y,eye),-dot(z,eye),1];
+ const f=1/Math.tan(.5),near=.05,far=Math.max(distance*20,10000),aspect=$('world').width/$('world').height;
+ return multiply([f/aspect,0,0,0,0,f,0,0,0,0,(far+near)/(near-far),-1,0,0,2*far*near/(near-far),0],view);
+}
+function resize(c){const w=Math.round(c.clientWidth*(devicePixelRatio||1)),h=Math.round(c.clientHeight*(devicePixelRatio||1));if(c.width!==w||c.height!==h){c.width=w;c.height=h}}
+function draw(){
+ if($('stage').classList.contains('view3d')){
+ resize($('world'));gl.viewport(0,0,$('world').width,$('world').height);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+ gl.uniformMatrix4fv(gl.getUniformLocation(program,'matrix'),false,matrix());const b=bounds();
+ gl.uniform3fv(gl.getUniformLocation(program,'low'),b.lo);gl.uniform3fv(gl.getUniformLocation(program,'high'),b.hi);gl.uniform1i(gl.getUniformLocation(program,'roi'),roi);
+ bind(position,pointBuffer);bind(color,pointColors);gl.drawArrays(gl.POINTS,0,points.length/3);
+ data.guides.forEach((g,i)=>{if(!visible(i))return;bind(position,guideBuffers[i]);fixedColor(i===selected?[1,.78,.3]:[.38,.47,.57]);gl.drawArrays(gl.LINE_STRIP,0,g.length)});
+ if(selected>=0){bind(position,edgeBuffers[selected]);fixedColor([1,.5,.3]);gl.drawArrays(gl.LINES,station*2,2)}
+ // Reference intent can lie below the actual collision surface. Keep the
+ // magenta/cyan overlay visible without altering any saved coordinates.
+ if(typeof drawAuthored3D==='function'){gl.disable(gl.DEPTH_TEST);drawAuthored3D();gl.enable(gl.DEPTH_TEST)}
+ }drawPlan();drawPlot();
+ $('status').textContent=`${points.length/3} context hits${data.overview?' · '+data.overview.spacing_m+' m overview spacing':''} · ${detailPoints.length/3} detailed survey hits\n${meta.roads.length} original decal guides; no certified pavement limits.\nWhole-level context and detailed route extraction are separate.`;
+ if(selected>=0){const r=meta.roads[selected],e=data.guides[selected][station];$('road').value=selected;$('station').value=station;$('station').max=data.guides[selected].length-1;
+ $('source').textContent=`Persistent ID: ${r.persistent_id||'unknown'}\nMaterial label: ${r.material}\nDrivability: ${r.drivability} · oneWay=${r.one_way} · flipDirection=${r.flip_direction}\nDeclared looped=${r.declared_looped}; no closure applied\nStation ${station} ENU: ${e[1].map(x=>x.toFixed(3)).join(', ')}\nNative guide width: ${Math.hypot(...sub(e[2],e[0])).toFixed(3)} m (not usable width)`;
+ }else $('source').textContent='No visible reference guides';
+}
+function drawPlan(){
+ const c=$('plan');resize(c);const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);
+ if(!planLow){planLow=contextLow.slice();planHigh=contextHigh.slice();for(const g of data.guides)for(const e of g)for(let a=0;a<2;a++){planLow[a]=Math.min(planLow[a],e[1][a]);planHigh[a]=Math.max(planHigh[a],e[1][a])}}
+ const pad=18,s=Math.min((c.width-2*pad)/Math.max(1,planHigh[0]-planLow[0]),(c.height-2*pad)/Math.max(1,planHigh[1]-planLow[1]));
+ const padX=(c.width-(planHigh[0]-planLow[0])*s)/2,padY=(c.height-(planHigh[1]-planLow[1])*s)/2;
+ planTransform={s,pad,padX,padY};const pt=p=>[padX+(p[0]-planLow[0])*s,c.height-padY-(p[1]-planLow[1])*s];
+ if(overviewRaster){const r=overviewRaster,a=pt([r.min[0],r.max[1]]),b=pt([r.max[0],r.min[1]]);ctx.imageSmoothingEnabled=false;ctx.drawImage(r.image,a[0],a[1],b[0]-a[0],b[1]-a[1]);}
+ else for(let i=0;i<points.length;i+=3){const [x,y]=pt([points[i],points[i+1]]);ctx.fillStyle=planColors[i/3];ctx.fillRect(x,y,2,2)}
+ data.guides.forEach((g,i)=>{if(!visible(i))return;ctx.strokeStyle=i===selected?'#ffc257':'#c0d8e3';ctx.beginPath();g.forEach((e,j)=>{const p=pt(e[1]);j?ctx.lineTo(...p):ctx.moveTo(...p)});ctx.stroke()});
+ const b=bounds(),a=pt(b.lo),z=pt(b.hi);ctx.strokeStyle='#f0ac53';ctx.strokeRect(a[0],z[1],z[0]-a[0],a[1]-z[1]);
+ if(selected>=0){const p=pt(data.guides[selected][station][1]);ctx.fillStyle='#ffdd77';ctx.beginPath();ctx.arc(...p,4,0,7);ctx.fill()}
+ if(typeof drawAuthoredPlan==='function')drawAuthoredPlan(ctx,pt);
+}
+function planPoint(e){const c=$('plan'),r=c.getBoundingClientRect();return[planLow[0]+((e.clientX-r.left)*c.width/r.width-planTransform.padX)/planTransform.s,planLow[1]+(c.height-planTransform.padY-(e.clientY-r.top)*c.height/r.height)/planTransform.s]}
+let start=null,planPan=null;$('plan').oncontextmenu=e=>e.preventDefault();$('plan').onpointerdown=e=>{$('plan').focus();if(e.button===2){planPan=planPoint(e);$('plan').setPointerCapture(e.pointerId);return}start=planPoint(e);$('plan').setPointerCapture(e.pointerId)};
+$('plan').onpointermove=e=>{if(!planPan){if(typeof updateSnapPreview==='function')updateSnapPreview(planPoint(e));return}const p=planPoint(e),delta=sub(planPan,p);for(let a=0;a<2;a++){planLow[a]+=delta[a];planHigh[a]+=delta[a]}draw()};
+$('plan').onpointerup=e=>{if(planPan){planPan=null;return}if(!start)return;const end=planPoint(e);if(data.extracted_track){let best=15*(devicePixelRatio||1)/planTransform.s,index=-1;data.extracted_track.reference.forEach((p,i)=>{const d=Math.hypot(p[0]-end[0],p[1]-end[1]);if(d<best){best=d;index=i}});if(index>=0){$('measureStation').value=index;$('pickFeedback').textContent='Selected measured station '+index+'. Open Geometry diagnostics for its cross-section.';}start=null;draw();return}if($('clickAction').value!=='inspect'){handlePathClick(end,start);start=null;draw();return}if(Math.hypot(...sub(end,start))>2){for(const f of fields)if(f.i<2)f.input.value=(f.side==='min'?Math.min(start[f.i],end[f.i]):Math.max(start[f.i],end[f.i])).toFixed(3);roi=true}else{
+ let best=15*(devicePixelRatio||1)/planTransform.s;data.guides.forEach((g,i)=>{if(!visible(i))return;for(let j=1;j<g.length;j++){const p=RoutePlanner.project(end,g[j-1][1],g[j][1]),d=Math.hypot(p.xyz[0]-end[0],p.xyz[1]-end[1]);if(d<best){best=d;selected=i;station=p.t<.5?j-1:j}}})}start=null;draw()};
+$('plan').onwheel=e=>{e.preventDefault();const p=planPoint(e),factor=Math.exp(e.deltaY*.001);for(let a=0;a<2;a++){planLow[a]=p[a]+(planLow[a]-p[a])*factor;planHigh[a]=p[a]+(planHigh[a]-p[a])*factor}draw()};
+$('planMap').onclick=()=>{planLow=contextLow.slice();planHigh=contextHigh.slice();draw()};$('planSurvey').onclick=()=>{planLow=low.slice();planHigh=high.slice();draw()};
+function drawPlot(){
+ const c=$('plot');resize(c);const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);if(data.extracted_track){drawMeasured(ctx,c);return}if(selected<0&&!pathState.preview)return;
+ const p=pathState.preview?pathState.preview.sampled:data.guides[selected].map(e=>e[1]),zs=p.map(p=>p[2]),zmin=Math.min(...zs),zmax=Math.max(...zs),den=Math.max(1,p.length-1);
+ $('plotDescription').textContent=pathState.preview?'Reference-path elevation versus station order; actual surface measurements require extraction.':'Native source guide elevation versus station order.';
+ ctx.fillStyle='#c4d9e6';ctx.fillText(zmax.toFixed(3)+' m',4,14);ctx.fillText(zmin.toFixed(3)+' m',4,c.height-8);ctx.strokeStyle='#76dfbe';ctx.beginPath();
+ zs.forEach((z,i)=>{const x=65+i/den*(c.width-80),y=20+(zmax-z)/Math.max(.01,zmax-zmin)*(c.height-40);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();
+ const spacing=p.slice(1).map((v,i)=>Math.hypot(...sub(v,p[i])));
+ $('diagnostics').textContent=`${p.length} native stations · adjacent duplicates ${spacing.filter(d=>d<1e-8).length} · largest spacing ${Math.max(0,...spacing).toFixed(3)} m\nEndpoint gap ${Math.hypot(...sub(p[0],p.at(-1))).toFixed(3)} m; travel topology remains unselected.\nGrid midpoint error diagnostics: ${JSON.stringify(data.validation.midpoint_grid_approximation)}`;
+}
+function drawMeasured(ctx,c){
+ const t=data.extracted_track,mode=$('measurePlot').value,i=Math.max(0,Math.min(t.center.length-1,Math.floor(Number($('measureStation').value)||0))),a=t.offsets[i],b=t.offsets[i+1];$('measureStation').max=t.center.length-1;
+ let values=t.center.map(p=>p[2]),x=values.map((_,j)=>j);
+ if(mode==='section'){values=t.section_xyz.slice(a,b).map(p=>p[2]);x=t.lateral.slice(a,b)}
+ if(mode==='normal'){values=t.normal.slice(a,b).map((p,j)=>t.normal_valid[a+j]?p[2]:null);x=t.lateral.slice(a,b)}
+ const good=values.filter(v=>v!==null&&Number.isFinite(v));if(!good.length){$('diagnostics').textContent='No valid measurements for this plot.';return}
+ const lo=Math.min(...good),hi=Math.max(...good),xmin=x[0],xmax=x.at(-1),pad=70;
+ ctx.fillStyle='#c4d9e6';ctx.fillText(hi.toFixed(3),4,14);ctx.fillText(lo.toFixed(3),4,c.height-8);ctx.strokeStyle='#76dfbe';ctx.beginPath();let active=false;
+ values.forEach((v,j)=>{if(v===null||!Number.isFinite(v)){active=false;return}const px=pad+(x[j]-xmin)/Math.max(1e-9,xmax-xmin)*(c.width-pad-10),py=20+(hi-v)/Math.max(1e-6,hi-lo)*(c.height-40);active?ctx.lineTo(px,py):ctx.moveTo(px,py);active=true});ctx.stroke();
+ $('plotDescription').textContent=mode==='elevation'?'Measured center height versus travel-order station; missing hits break the line.':'Measured samples versus lateral metres, right to left (left positive).';
+ $('diagnostics').textContent=`Station ${i}: ${t.valid.slice(a,b).filter(Boolean).length}/${b-a} valid lateral samples. Limits are chosen extents; physical pavement edges remain unknown.\n`+JSON.stringify(t.report,null,2);
+}
+$('measurePlot').onchange=draw;$('measureStation').onchange=draw;
+let pointer=null;$('world').oncontextmenu=e=>e.preventDefault();
+$('world').onpointerdown=e=>{pointer={x:e.clientX,y:e.clientY,button:e.button};$('world').setPointerCapture(e.pointerId)};
+$('world').onpointermove=e=>{if(!pointer)return;const dx=e.clientX-pointer.x,dy=e.clientY-pointer.y;if(pointer.button===2)target=add(target,add(scale([-Math.sin(azimuth),Math.cos(azimuth),0],-dx*distance/800),[0,0,dy*distance/800]));else{azimuth-=dx*.008;elevation=Math.max(.02,Math.min(1.55,elevation+dy*.008))}pointer.x=e.clientX;pointer.y=e.clientY;draw()};
+$('world').onpointerup=()=>pointer=null;$('world').onwheel=e=>{e.preventDefault();distance=Math.max(.5,distance*Math.exp(e.deltaY*.001));draw()};
+$('fitSurvey').onclick=()=>{target=scale(add(low,high),.5);distance=Math.hypot(...sub(high,low))*1.15;draw()};
+$('fitMap').onclick=()=>{target=scale(add(contextLow,contextHigh),.5);distance=Math.hypot(...sub(contextHigh,contextLow))*1.15;draw()};
+$('focus').onclick=()=>{if(selected<0)return;target=data.guides[selected][station][1].slice();distance=35;draw()};
+$('area').onclick=()=>{const b=bounds();target=scale(add(b.lo,b.hi),.5);distance=Math.max(10,Math.hypot(...sub(b.hi,b.lo))*1.2);draw()};
+$('navOnly').onchange=()=>{options();draw()};$('road').onchange=()=>{selected=Number($('road').value);station=0;draw()};
+$('station').onchange=()=>{if(selected>=0)station=Math.min(data.guides[selected].length-1,Math.max(0,Math.floor(Number($('station').value)||0)));draw()};
+$('download').onclick=async()=>{
+ const b=bounds();if(b.lo.some((v,i)=>!Number.isFinite(v)||!Number.isFinite(b.hi[i])||v>=b.hi[i])){alert('Check the ENU bounds.');return}
+ const r=selected>=0?meta.roads[selected]:null;
+ const recipe={schema_version:'0.2-native-selection',frame:'local_ENU',source_mission:meta.source.mission,source_files_sha256:meta.files_sha256,
+ focus_xyz:roi?scale(add(b.lo,b.hi),.5):r?data.guides[selected][station][1]:scale(add(b.lo,b.hi),.5),
+ bounds_enu_m:[...b.lo,...b.hi],guide:r?{persistent_id:r.persistent_id,runtime_id:r.runtime_id,edge_station:station}:null,
+ semantics:'Area/source selection only; not a route, corridor, pavement boundary or stacked-layer choice.'};
+ try{await saveSelection('areas',recipe)}catch(e){$('fileStatus').textContent=e.message}
+};
+__EDITOR__
+$('showPlan').onclick=()=>{$('stage').classList.remove('view3d');$('showPlan').classList.add('selected');$('showWorld').classList.remove('selected');$('mapHelp').textContent='Wheel: zoom · right drag: pan';draw()};
+$('showWorld').onclick=()=>{$('stage').classList.add('view3d');$('showWorld').classList.add('selected');$('showPlan').classList.remove('selected');$('mapHelp').textContent='Drag: orbit · wheel: zoom · right drag: pan';if(pathState.preview){const p=pathState.preview.sampled;target=[(Math.min(...p.map(x=>x[0]))+Math.max(...p.map(x=>x[0])))/2,(Math.min(...p.map(x=>x[1]))+Math.max(...p.map(x=>x[1])))/2,p.reduce((s,x)=>s+x[2],0)/p.length];distance=Math.max(20,Math.max(Math.max(...p.map(x=>x[0]))-Math.min(...p.map(x=>x[0])),Math.max(...p.map(x=>x[1]))-Math.min(...p.map(x=>x[1])))*1.5);}draw()};
+$('expandMap').onclick=()=>{document.body.classList.toggle('mapExpanded');$('expandMap').textContent=document.body.classList.contains('mapExpanded')?'Collapse':'Expand';draw()};
+$('planRoute').onclick=()=>{if(!pathState.preview)return;const p=pathState.preview.sampled;planLow=[Math.min(...p.map(x=>x[0]))-10,Math.min(...p.map(x=>x[1]))-10,low[2]];planHigh=[Math.max(...p.map(x=>x[0]))+10,Math.max(...p.map(x=>x[1]))+10,high[2]];draw()};
+document.addEventListener('keydown',e=>{if(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();$(e.shiftKey?'pathRedo':'pathUndo').click()}});
+document.querySelector('.diagnostics').addEventListener('toggle',draw);
+if(!data.extracted_track){$('measurePlot').closest('label').classList.add('hidden');$('measureStation').closest('label').classList.add('hidden');}
+window.onresize=draw;draw();
+</script>
+</html>

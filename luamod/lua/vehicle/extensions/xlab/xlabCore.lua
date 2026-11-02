@@ -479,7 +479,6 @@ end
     Call after the vehicle has settled. No world poses.
 ]]
 local function getVehicleProperties(_props)
-  local vectorForward, vectorLeft, vectorUp = principalAxes()
   local cogRel = wetCogRel()
   local totalMass = wetTotalMass()
 
@@ -498,23 +497,36 @@ local function getVehicleProperties(_props)
   local cRR = wheelCenter(wheelsData.RR)
   local frontAxle = (cFL + cFR) * 0.5
   local rearAxle = (cRL + cRR) * 0.5
-  -- Bicycle x = wheelbase in the body plane (same triad as δ).
-  local steerFwd, steerLeft, steerUp = bodySteerAxes(frontAxle, rearAxle, vectorUp)
+  -- One orthonormal FLU triad for every body-frame property, matching gtState.
+  -- GT projects the wheelbase against getDirectionVectorUp(), then closes by cross.
+  local vectorForward, vectorLeft = bodySteerAxes(frontAxle, rearAxle, obj:getDirectionVectorUp():normalized())
+  local vectorUp = vectorForward:cross(vectorLeft):normalized()
+  local frameCog = convertLBUtoFLU(cogRel - rearAxle, vectorForward, vectorLeft, vectorUp)
+  local frameFront = convertLBUtoFLU(frontAxle - rearAxle, vectorForward, vectorLeft, vectorUp)
 
-  local a = math.abs((frontAxle - cogRel):dot(steerFwd))
-  local b = math.abs((rearAxle - cogRel):dot(steerFwd))
+  local a = math.abs((frontAxle - cogRel):dot(vectorForward))
+  local b = math.abs((rearAxle - cogRel):dot(vectorForward))
   local L = a + b
   -- CoG off the vehicle centerline (front/rear axle mids). +left, +up from axle.
   local axleMid = (frontAxle + rearAxle) * 0.5
   local dCog = cogRel - axleMid
-  local cogToCentralAxle = dCog:dot(steerLeft)
-  local cogAboveAxle = dCog:dot(steerUp)
+  local cogToCentralAxle = dCog:dot(vectorLeft)
+  local cogAboveAxle = dCog:dot(vectorUp)
   local trackFront = (cFL - cFR):length()
   local trackRear = (cRL - cRR):length()
 
   local sumDyn, sumNom, sumIw, sumIwSim, nW, nIw, nIwSim = 0, 0, 0, 0, 0, 0, 0
-  for _, wd in pairs(wheelsData) do
+  local sumDynFront, sumDynRear, nFront, nRear = 0, 0, 0, 0
+  for corner, wd in pairs(wheelsData) do
     if wd.hasTire ~= false then
+      local radius = wd.dynamicRadius or wd.radius or 0
+      if corner == 'FL' or corner == 'FR' then
+        sumDynFront = sumDynFront + radius
+        nFront = nFront + 1
+      else
+        sumDynRear = sumDynRear + radius
+        nRear = nRear + 1
+      end
       sumDyn = sumDyn + (wd.dynamicRadius or wd.radius or 0)
       sumNom = sumNom + (wd.radius or 0)
       nW = nW + 1
@@ -579,6 +591,17 @@ local function getVehicleProperties(_props)
     trackFront = trackFront,
     trackRear = trackRear,
     wheelRadius = wheelRadius,
+    wheelRadiusFront = nFront > 0 and (sumDynFront / nFront) or 0,
+    wheelRadiusRear = nRear > 0 and (sumDynRear / nRear) or 0,
+    frame = {
+      cog_nom = { frameCog.x, frameCog.y, frameCog.z },
+      -- gtState's nominal IMU is at the settled wet CoG; not a mounted sensor.
+      imu_pos_body = { frameCog.x, frameCog.y, frameCog.z },
+      rear_axle_body = { 0, 0, 0 },
+      front_axle_body = { frameFront.x, frameFront.y, frameFront.z },
+      -- Same fixed world gravity convention as gtState's specific force.
+      g_world = { 0, 0, -9.81 },
+    },
     wheelRadiusNominal = wheelRadiusNominal,
     wheelInertia = wheelInertia,
     wheelInertiaSim = wheelInertiaSim,
@@ -1123,6 +1146,28 @@ function M.handleSetInputs(request)
   local gear = request['gear']
   if gear ~= nil then drivetrain.shiftToGear(gear) end
   request:sendACK(ackResponse)
+end
+
+-- Garage API uses the same vehicle socket as GetVehicleProperties.
+function M.handleSupportGarage(request)
+  local ok, data = pcall(function()
+    if not extensions.xlab_supportGarage then extensions.load('xlab/supportGarage') end
+    local garage = assert(extensions.xlab_supportGarage,
+      'supportGarage not loaded; rebuild and reload xlab.zip')
+    local action = request.action
+    if action == 'inspect' then return garage.inspect() end
+    if action == 'start' then return garage.start(request.config) end
+    if action == 'status' then return garage.status(request.expectedOutput) end
+    if action == 'stop' then
+      garage.stop('CLI stop', request.expectedOutput)
+      return garage.status(request.expectedOutput)
+    end
+    if action == 'read' then
+      return garage.readRecording(request.offset, request.limit, request.expectedOutput)
+    end
+    error('Unknown garage action: ' .. tostring(action))
+  end)
+  request:sendResponse({type = 'SupportGarage', data = ok and data or {error = tostring(data)}})
 end
 
 function M.onExtensionLoaded() log('D', logTag, 'Loaded vehicle xlabCore') end

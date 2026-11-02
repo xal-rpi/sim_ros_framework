@@ -3,6 +3,24 @@ local M = {}
 -- GE-side gtState registry: id + vlua init + poll buffer. No SensorMatrix.
 local gtStateLastRawReadings = {}
 
+-- Contact IDs are collision types, not necessarily unique ground-model IDs.
+-- Only resolve coefficients when every model with that type agrees.
+local function buildSurfaceFrictionCache()
+  local cache = {}
+  for _, entry in pairs(core_environment.groundModels) do
+    local gm = entry.cdata
+    local id = tonumber(gm.collisiontype)
+    local static, sliding = tonumber(gm.staticFrictionCoefficient), tonumber(gm.slidingFrictionCoefficient)
+    local previous = cache[id]
+    if not previous then
+      cache[id] = {static = static, sliding = sliding, valid = true}
+    elseif previous.static ~= static or previous.sliding ~= sliding then
+      previous.valid = false
+    end
+  end
+  return cache
+end
+
 local function createGtState(vid, args)
   if args.GFXUpdateTime == nil then args.GFXUpdateTime = 0.1 end
   if args.isVisualised == nil then args.isVisualised = true end
@@ -22,6 +40,10 @@ local function createGtState(vid, args)
     wheel_angvel_tau_s = args.wheel_angvel_tau_s,
     debug_raw = args.debug_raw,
     torque_map = args.torque_map,
+    contact = args.contact,
+    surface = args.surface,
+    surfaceFriction = args.surface and args.surface.enable and
+      args.surface.terrain_friction ~= true and buildSurfaceFrictionCache() or nil,
   }
 
   log(
@@ -42,6 +64,7 @@ local function createGtState(vid, args)
     buffer = {},
     head = 0,
     maxSize = maxSize,
+    vehicleId = vid,
   }
   log('I', 'gtState', 'Created GtState sensor ' .. sensorId .. ' buffer=' .. maxSize)
   return sensorId
@@ -84,6 +107,17 @@ local function updateGtStateLastReadings(data)
   end
 end
 
+-- One batch per vehicle graphics callback; reply through the vehicle manager.
+local function queryTerrainFriction(encoded)
+  local request = lpack.decode(encoded)
+  local sensor = gtStateLastRawReadings[request.sensorId]
+  if not sensor then return end -- sensor removed while request was queued
+  local result = require('ge.extensions.xlab.terrainFriction').query(request)
+  be:queueObjectLua(sensor.vehicleId, string.format(
+    'extensions.xlab_gtState.acceptSurfaceFriction(%q)', lpack.encode(result)))
+end
+
+M.queryTerrainFriction = queryTerrainFriction
 M.createGtState = createGtState
 M.removeGtState = removeGtState
 M.getGtStateReadings = getGtStateReadings

@@ -1,0 +1,9 @@
+# Requires xlab_environments.zip and the updated xlab integration mod.
+# ros2 launch bng_bringup simulator.launch.py config:=tech_ground_oval.yaml
+compose:
+  vehicle: covet_turbo_rally
+  vehicle_id: EGO
+  level: tech_ground_with_oval
+  spawn: on_track
+
+scenario_mode: create

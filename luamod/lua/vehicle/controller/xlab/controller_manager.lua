@@ -9,7 +9,7 @@
     sensor_send          vehicle sendto — companion BINDs for observation batches
 
   Each update tick (order matters):
-    1. Drain control_listen (recv-last) and route messages
+    1. Drain latest command/context independently; route discrete config operations
     2. refreshControlState() once (gt._seq dedup)
     3. Stream control_state_send at controlStateRate
     4. Stream sensor_send for due sensor_broadcast streams
@@ -19,6 +19,7 @@
   See luamod/FEEDBACK_CONTRACT.md
 ]]
 
+local abs, huge, exp = math.abs, math.huge, math.exp
 local M = {}
 local logTag = 'ControllerManager'
 
@@ -90,6 +91,9 @@ local common = {
   getSimTime = nil,
   gtStateSensorId = nil,
   gtStateManager = nil,
+  environment = nil, -- optional model context shared with feedback/controller consumers
+  rollFilter = nil,  -- optional final physical-command layer (controller_llc)
+  rollInputValid = false, -- raw GT fields existed before legacy zero defaults
 
   constants = { rpmToAV = 0.104719755 },
 }
@@ -98,6 +102,39 @@ local activeController = nil
 local activeControllerType = nil
 local activeFeedback = nil
 local activeFeedbackStem = nil
+local activeEnvironment = nil
+local environmentUnavailableReported = false
+
+-- Shared measured rates, updated only with a distinct GTState timestamp.
+-- Raw differences retain the tested filter timing. The first-order smoothed
+-- values are available to feedback/diagnostics, not silently substituted in QP.
+local steeringRate, torqueRate = {}, {}
+local rateTau, rateMaxGap = 0.02, 0.05
+local function finite(x) return type(x)=='number' and x==x and abs(x)<huge end
+local function updateRate(history, value, time)
+  if not finite(value) or not finite(time) then
+    history.t,history.value,history.raw,history.filtered=nil,nil,nil,nil
+    return nil,nil,false
+  end
+  if time==history.t then return history.raw,history.filtered,history.raw~=nil end
+  local dt=history.t and time-history.t
+  local raw,filtered
+  if dt and dt>0 and dt<=rateMaxGap then
+    raw=(value-history.value)/dt
+    if finite(raw) then
+      local weight=rateTau>0 and (1-exp(-dt/rateTau)) or 1
+      filtered=history.filtered and history.filtered+weight*(raw-history.filtered) or raw
+    else raw=nil end
+  end
+  history.t,history.value,history.raw,history.filtered=time,value,raw,filtered
+  return raw,filtered,raw~=nil
+end
+local function resetRates()
+  steeringRate,torqueRate={},{}
+  local cs=common.controlStateOut
+  cs.steering_rate_raw,cs.steering_rate,cs.steering_rate_valid=0,0,false
+  cs.torque_rate_raw,cs.torque_rate,cs.torque_rate_valid=0,0,false
+end
 
 -- ============================================================================
 -- §2  control_state — live packet (control_state_send + sensor_broadcast)
@@ -106,12 +143,16 @@ local activeFeedbackStem = nil
 local function refreshControlState()
   if not common.gtStateManager or not common.gtStateSensorId then
     common.controlStateOut.t = -1
+    resetRates()
+    common.rollInputValid = false
     return false
   end
 
   local gt = common.gtStateManager.geGtStateReading(common.gtStateSensorId)
   if not gt or gt.time == nil then
     common.controlStateOut.t = -1
+    resetRates()
+    common.rollInputValid = false
     return false
   end
   if gt._seq == common.controlStateSeq then return true end
@@ -135,12 +176,24 @@ local function refreshControlState()
 
   local wfl, wfr = gt.wheelFL or {}, gt.wheelFR or {}
   local wrl, wrr = gt.wheelRL or {}, gt.wheelRR or {}
+  -- Keep legacy published defaults, but never present absent measurements as
+  -- valid zero wheel speeds, steering angles or torque capabilities to the filter.
+  common.rollInputValid = wrl.speed ~= nil and wrr.speed ~= nil
+    and wfl.angle ~= nil and wfr.angle ~= nil
+    and gt.rear_wheel_torque_est ~= nil and gt.torque_min ~= nil and gt.torque_max ~= nil
+    and finite(gt.brake) and gt.brake>=0 and gt.brake<=1 and finite(gt.pbrake)
   cs.w_fl = wfl.speed or 0
   cs.w_fr = wfr.speed or 0
   cs.w_rl = wrl.speed or 0
   cs.w_rr = wrr.speed or 0
   cs.delta_l = wfl.angle or 0
   cs.delta_r = wfr.angle or 0
+  local raw,filtered,valid=updateRate(steeringRate,
+    finite(wfl.angle) and finite(wfr.angle) and .5*(wfl.angle+wfr.angle) or nil,gt.time)
+  cs.steering_rate_raw,cs.steering_rate,cs.steering_rate_valid=raw or 0,filtered or 0,valid
+  raw,filtered,valid=updateRate(torqueRate,
+    gt.torque_est_valid==true and gt.rear_wheel_torque_est or nil,gt.time)
+  cs.torque_rate_raw,cs.torque_rate,cs.torque_rate_valid=raw or 0,filtered or 0,valid
 
   cs.throttle = gt.throttle or 0
   cs.brake = gt.brake or 0
@@ -304,38 +357,67 @@ local function sendSensorObservations(dt)
 end
 
 -- ============================================================================
--- §5  control_listen — drain recv-last, route by envelope.type
+-- §5  control_listen — latest per channel; one dispatcher for all message types
 -- ============================================================================
 
-local function drainControlListen()
+local function drainControlListen(route)
   if not common.socketIn then return nil end
-  local lastMsg, err
+  local lastCommand, lastEnvironment, err
   repeat
     local msg, _, _, recvErr = common.socketIn:receivefrom()
     err = recvErr
-    if msg and #msg > 0 then lastMsg = msg end
+    if msg and #msg > 0 then
+      if msg:sub(1, 4) == 'XLE1' then
+        lastEnvironment = msg
+      elseif msg:sub(1,4)=='XLP1' or msg:sub(1,4)=='XLG1' then
+        lastCommand = {type = 'plan', data = msg}
+      else
+        local envelope = jsonDecode(msg)
+        if type(envelope) ~= 'table' then
+          log('W', logTag, 'Ignoring non-table control_listen payload')
+        elseif envelope.type == 'cmd' then
+          lastCommand = envelope
+        else
+          -- Configuration/reset/bypass are discrete operations, not driving plans.
+          route(envelope.type, envelope.data)
+        end
+      end
+    end
   until not msg and (not err or err == 'timeout')
   if err and err ~= 'timeout' then
     log('E', logTag, 'control_listen error: ' .. tostring(err))
   end
-  return lastMsg
+  if lastEnvironment then route('environment', lastEnvironment) end
+  return lastCommand
 end
 
-local function routeIncomingMessage(msg)
-  if not msg or msg == '' then return end
-
-  local envelope = jsonDecode(msg)
-  if type(envelope) ~= 'table' then
-    log('W', logTag, 'Ignoring non-table control_listen payload')
+local function routeIncomingMessage(msgType, data)
+  if msgType == 'environment' then
+    if activeEnvironment then
+      activeEnvironment.onPacket(data)
+    elseif not environmentUnavailableReported then
+      log('W', logTag, 'Ignoring environment packet: module not configured')
+      environmentUnavailableReported = true
+    end
     return
   end
-
-  local msgType = envelope.type
   if msgType == 'tune' then
-    local payload = envelope.data or {}
+    local payload = data or {}
     local tuneOk = true
-    if activeFeedback and activeFeedback.onTune and type(payload.feedback_gains) == 'table' then
-      tuneOk = activeFeedback.onTune({ feedback_gains = payload.feedback_gains }) ~= false
+    if common.rollFilter and type(payload.roll_filter) == 'table' then
+      tuneOk = common.rollFilter.onTune(payload.roll_filter) ~= false
+    end
+    if payload.feedback_config ~= nil then
+      if activeFeedback and activeFeedback.onTune and type(payload.feedback_config) == 'table' then
+        tuneOk = activeFeedback.onTune({ feedback_config = payload.feedback_config }) ~= false and tuneOk
+      else
+        log('E', logTag, 'feedback_config requires a configured, tunable feedback module')
+        tuneOk = false
+      end
+    end
+    if payload.feedback_gains ~= nil then
+      log('E', logTag, 'Use feedback_config instead of feedback_gains')
+      tuneOk = false
     end
     if activeController and activeController.onTune then
       tuneOk = activeController.onTune(payload) ~= false and tuneOk
@@ -347,7 +429,7 @@ local function routeIncomingMessage(msg)
   end
 
   if msgType == 'bypass' then
-    M.toggleBypass(envelope.data and envelope.data.enabled == true)
+    M.toggleBypass(data and data.enabled == true)
     return
   end
 
@@ -356,9 +438,17 @@ local function routeIncomingMessage(msg)
     return
   end
 
+  if msgType == 'plan' then
+    assert(activeController and activeController.onPlanPacket,'Execution plans require the LLC receiver')
+    activeController.onPlanPacket(data,activeFeedback)
+    return
+  end
+
   if msgType == 'cmd' then
-    if type(envelope.data) == 'table' and activeController and activeController.onCommand then
-      activeController.onCommand(envelope.data)
+    assert(not (activeFeedback and activeFeedback.requiresReferencePacket),
+      'TVLQR requires a paired reference/gain packet; bare cmd rejected')
+    if type(data) == 'table' and activeController and activeController.onCommand then
+      activeController.onCommand(data)
     end
     return
   end
@@ -382,14 +472,26 @@ local function runActuationTick(dt)
     local step = ctl.prepareControlStep(dt, common)
     if not step then return end
 
-    local resolved = ctl.resolveSetpoints(step.plant)
-    local sp_eff = activeFeedback.transform({
-      sim_t = common.getSimTime(),
-      dt = step.dt_control,
-      plant = step.plant,
-      resolved = resolved,
-      raw = ctl.getRawTargets and ctl.getRawTargets() or nil,
-    })
+    local resolved = ctl.resolveSetpoints(step.plant, step.dt_control)
+    if resolved==false then
+      if ctl.finishControlStep then ctl.finishControlStep(common,step) end
+      return
+    end
+    -- External feedback plugins must not transform human targets after timeout.
+    local sp_eff = resolved
+    if not step.manual then
+      sp_eff = activeFeedback.transform({
+        sim_t = common.getSimTime(),
+        dt = step.dt_control,
+        plant = step.plant,
+        resolved = resolved,
+        raw = ctl.getRawTargets and ctl.getRawTargets() or nil,
+      })
+    end
+    if sp_eff == false then
+      if ctl.finishControlStep then ctl.finishControlStep(common, step) end
+      return
+    end
     if type(sp_eff) ~= 'table' then sp_eff = resolved end
 
     ctl.applySetpoints(step.plant, sp_eff, step.dt_control, step)
@@ -454,6 +556,15 @@ local function commonInit(data)
   common.controlStateSendAccum = 0
   common.controlStateSeq = nil
   common.controlStateOut.t = -1
+  local rates=data.measured_rates or {}
+  for key in pairs(rates) do
+    assert(key=='filter_tau_s' or key=='max_gap_s','Unknown measured_rates setting: '..tostring(key))
+  end
+  rateTau=rates.filter_tau_s or 0.02
+  rateMaxGap=rates.max_gap_s or 0.05
+  assert(finite(rateTau) and rateTau>=0 and finite(rateMaxGap) and rateMaxGap>0,
+    'Invalid measured_rates settings')
+  resetRates()
   common.controllerRate = data.controllerRate
   if common.controlStateRate > 0 and common.controlStateRate < common.controllerRate then
     common.controlStateRate = common.controllerRate
@@ -503,12 +614,45 @@ function M.init(data)
   activeControllerType = data.controllerType
   activeController = require('vehicle.controller.xlab.controller_' .. activeControllerType)
 
-  if data.calibration then M.calibrate(data.calibration) end
+  if data.calibration and M.calibrate(data.calibration) == false then
+    error(logTag .. ': invalid controller calibration')
+  end
   if activeController.init then activeController.init(common) end
+
+  -- Optional received-model context. Configure paths/identity under environment.
+  -- Feedback consumers receive this same module through common.environment.
+  activeEnvironment, common.environment = nil, nil
+  environmentUnavailableReported = false
+  if data.environment ~= nil then
+    assert(type(data.environment) == 'table', 'environment must be a configuration table')
+    activeEnvironment = require('vehicle.controller.xlab.vehicle_environment')
+    assert(activeEnvironment.init(common, data.environment), 'Environment initialization failed')
+    common.environment = activeEnvironment
+  end
+
+  -- Final physical-command filter: loaded only when explicitly configured.
+  -- Environment alone loads no roll controller and changes no actuation.
+  common.rollFilter = nil
+  if data.roll_filter ~= nil then
+    assert(data.controllerType == 'llc', 'roll_filter currently requires controller_llc')
+    assert(type(data.roll_filter) == 'table', 'roll_filter must be a table')
+    local steeringMin,steeringMax = activeController.getSteeringCapability()
+    local rc = data.roll_filter
+    assert(type(rc.steering_min_rad) == 'number' and type(rc.steering_max_rad) == 'number'
+      and rc.steering_min_rad >= steeringMin and rc.steering_max_rad <= steeringMax,
+      'roll_filter steering bounds exceed calibrated input capability')
+    common.rollFilter = require('vehicle.controller.xlab.roll_filter')
+    assert(common.rollFilter.init(common, data.roll_filter), 'Roll filter initialization failed')
+  end
+  if data.controllerType == 'llc' then
+    -- Preserve driver inputs and release autonomous outputs even without a filter.
+    activeController.enableManualInput(data.manual_input)
+  end
 
   -- Optional feedback plugin (fail-fast require; see FEEDBACK_CONTRACT.md)
   activeFeedback = nil
   activeFeedbackStem = nil
+  assert(data.feedback_gains == nil, 'Use feedback_config instead of feedback_gains')
   local stem = data.feedback
   if stem and stem ~= '' and stem ~= 'none' then
     activeFeedbackStem = tostring(stem)
@@ -516,7 +660,7 @@ function M.init(data)
     if activeFeedback.init then
       activeFeedback.init(common, {
         stem = activeFeedbackStem,
-        gains = type(data.feedback_gains) == 'table' and data.feedback_gains or {},
+        settings = type(data.feedback_config) == 'table' and data.feedback_config or {},
       })
     end
     log('I', logTag, "feedback='" .. activeFeedbackStem .. "'")
@@ -525,9 +669,12 @@ end
 
 function M.update(dt)
   if not common.isRunning then return end
-  local lastMsg = drainControlListen()
-  if lastMsg then routeIncomingMessage(lastMsg) end
+  local lastMsg = drainControlListen(routeIncomingMessage)
+  if lastMsg then routeIncomingMessage(lastMsg.type, lastMsg.data) end
   refreshControlState()
+  if common.rollFilter and not common.isBypassed then
+    common.rollFilter.observe(common.controlStateOut, common.getSimTime())
+  end
   sendControlState(dt)
   sendSensorObservations(dt)
   runActuationTick(dt)
@@ -536,6 +683,9 @@ end
 function M.toggleBypass(enabled)
   if type(enabled) == 'boolean' then
     common.isBypassed = enabled
+    if enabled and activeController and activeController.releaseInput then
+      activeController.releaseInput()
+    end
     log('I', logTag, 'bypass=' .. tostring(enabled))
   end
 end
@@ -548,6 +698,9 @@ function M.stop()
   if common.sensorSocketOut then common.sensorSocketOut:close() end
   if activeController and activeController.stop then activeController.stop(common) end
   if activeFeedback and activeFeedback.stop then activeFeedback.stop() end
+  if common.rollFilter then common.rollFilter.stop(); common.rollFilter = nil end
+  if activeEnvironment then activeEnvironment.stop() end
+  activeEnvironment, common.environment = nil, nil
   activeFeedback, activeFeedbackStem = nil, nil
 end
 
@@ -557,24 +710,31 @@ end
 
 function M.calibrate(params)
   if type(params) == 'table' and activeFeedback and activeFeedback.onTune
-      and type(params.feedback_gains) == 'table' then
-    activeFeedback.onTune({ feedback_gains = params.feedback_gains })
+      and type(params.feedback_config) == 'table' then
+    if activeFeedback.onTune({ feedback_config = params.feedback_config }) == false then return false end
   end
   if activeController and activeController.calibrate then
-    activeController.calibrate(params)
+    return activeController.calibrate(params) ~= false
   end
+  return true
 end
 
 function M.reset()
+  common.controlStateSeq = nil
+  resetRates()
+  if common.rollFilter then common.rollFilter.reset() end
+  if activeEnvironment then activeEnvironment.reset() end
   if activeFeedback and activeFeedback.reset then activeFeedback.reset() end
   if activeController and activeController.reset then activeController.reset(common) end
 end
 
 function M.getStatus()
-  if activeController and activeController.getStatus then
-    return activeController.getStatus(common)
-  end
-  return { isRunning = common.isRunning }
+  local status = activeController and activeController.getStatus
+    and activeController.getStatus(common) or {isRunning = common.isRunning}
+  if activeFeedback and activeFeedback.getStatus then status.feedback = activeFeedback.getStatus() end
+  if activeEnvironment then status.environment = activeEnvironment.getStatus() end
+  if common.rollFilter then status.roll_filter = common.rollFilter.getStatus() end
+  return status
 end
 
 return M

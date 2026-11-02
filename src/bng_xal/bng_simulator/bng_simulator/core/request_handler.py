@@ -463,6 +463,24 @@ class SimulationRequestHandler:
             logger=self._logger,
         )
 
+    def garage_experiment(
+        self, action, vehicle_name=None, config=None, offset=0, limit=131072,
+        expected_output=None,
+    ):
+        """Relay garage requests; Lua checks expected_output before stop/read."""
+        vehicle_name = vehicle_name or self._sim.default_vehicle_name
+        vehicle = self._sim.vehicles[vehicle_name].vehicle
+        payload = dict(type="SupportGarage", action=action, offset=offset, limit=limit)
+        if expected_output is not None:
+            payload["expectedOutput"] = expected_output
+        if config is not None:
+            payload["config"] = config
+        result = vehicle._root._send(payload).recv("SupportGarage")["data"]
+        if action == "inspect" and not result.get("error"):
+            result["vehicle"] = dict(name=vehicle_name, model=vehicle.options.get("model"),
+                                     partConfig=vehicle.get_part_config().get("partConfigFilename"))
+        return result
+
     def execute_request(self, func_name: str, **func_args):
         """
         Execute a request on the RequestHandler, SimulationManager, or BeamNG instance.

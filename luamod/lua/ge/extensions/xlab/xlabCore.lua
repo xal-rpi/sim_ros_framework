@@ -17,6 +17,38 @@ M.handleHelloXlab = function(request)
   request:sendACK('HelloXlab')
 end
 
+-- Inspect deployed experiment assets before Python loads them through the
+-- standard Track Builder API. Return exact file bytes for SHA-256 verification
+-- and metadata; do not trust source-tree checksums for a deployed mod.
+M.handleGetEnvironmentAssets = function(request)
+  local manifest = jsonReadFile('/art/xlab_environments/manifest.json')
+  if not manifest then
+    request:sendBNGValueError('xlab_environments manifest missing; install xlab_environments.zip')
+    return false
+  end
+  local contents = {}
+  local assetRoot = '/trackEditor/xlab_environments/'
+  for _, assetPath in ipairs(request.paths or {}) do
+    if type(assetPath) ~= 'string' or
+      assetPath:sub(1, #assetRoot) ~= assetRoot or
+      assetPath:find('..', 1, true) then
+      request:sendBNGValueError('Invalid environment asset path')
+      return false
+    end
+    local content = readFile(assetPath)
+    if not content then
+      request:sendBNGValueError('Environment asset missing: ' .. assetPath)
+      return false
+    end
+    contents[assetPath] = content
+  end
+  -- BeamNG 0.38.3's LoadTrackBuilderTrack handler expects this extension loaded.
+  if not extensions.util_trackBuilder_splineTrack then
+    extensions.load('util/trackBuilder/splineTrack')
+  end
+  request:sendResponse({type = 'EnvironmentAssets', manifest = manifest, contents = contents})
+end
+
 -- Groundtruth full state
 M.handleGetGtStateId = function(request)
   local sensorId = GtStates[request['name']]
@@ -37,6 +69,8 @@ M.handleOpenGtState = function(request)
   args.wheel_angvel_tau_s = request['wheel_angvel_tau_s']
   args.debug_raw = request['debug_raw']
   args.torque_map = request['torque_map']
+  args.contact = request['contact']
+  args.surface = request['surface']
 
   local name = request['name']
   local vid = scenetree.findObject(request['vid']):getID()
@@ -78,6 +112,31 @@ M.handlePollGtStateGE = function(request)
   request:sendResponse(resp)
 end
 
+-- Stage immutable native bytes once per content identity. Reusing an existing
+-- matching file avoids overwriting DLLs that another vehicle VM still holds.
+local function stageNativeLibrary(base, manifest)
+  local windows = jit and jit.os == 'Windows'
+  local extension = windows and '.dll' or '.so'
+  assert(manifest.target == (windows and 'windows' or 'linux'), 'Native library target mismatch')
+  local library, hash = manifest.library, manifest.library_sha256
+  assert(type(library) == 'string' and library:match('^[%w_-]+%.[%w]+$')
+    and library:sub(-#extension) == extension, 'Invalid packaged native library name')
+  assert(type(hash) == 'string' and #hash == 64 and hash:match('^%x+$'),
+    'Invalid packaged native library hash')
+  local contents = assert(readFile(base .. library), 'Missing packaged native library: ' .. library)
+  local staged = 'tmp/xlab_' .. hash .. extension
+  local cached = readFile(staged)
+  if cached ~= nil then
+    assert(cached == contents, 'Cached native library differs from packaged bytes: ' .. staged)
+  else
+    copyfile(base .. library, staged)
+    assert(readFile(staged) == contents, 'Failed to stage native library: ' .. library)
+  end
+  local path = FS:virtual2Native(staged)
+  assert(type(path) == 'string' and path ~= '', 'Native library path is unavailable: ' .. staged)
+  return path
+end
+
 M.handleOpenController = function(request)
   local name = request.name
   log('I', logTag, 'Opening LowLevelController...')
@@ -109,18 +168,6 @@ M.handleOpenController = function(request)
     end
   end
 
-  -- TODO: This may need some more generality in case controller names
-  local function stageTorqueMapLib(stem)
-    local ext = 'so'
-    if jit and jit.os and jit.os == 'Windows' then ext = 'dll' end
-    local mod_libpath = string.format('lua/vehicle/controller/xlab/lib/%s.%s', stem, ext)
-    local fs_libpath = string.format('tmp/%s.%s', stem, ext)
-    copyfile(mod_libpath, fs_libpath)
-    local nativePath = FS:virtual2Native(fs_libpath)
-    log('I', logTag, 'Staged torque map lib ' .. stem .. ' -> ' .. fs_libpath)
-    return nativePath
-  end
-
   local torqueMapStem = data.calibration and data.calibration.torque_map
 
   if torqueMapStem then
@@ -129,9 +176,41 @@ M.handleOpenController = function(request)
       'Native torque map libs require Lua sandbox disabled. '
         .. "Restart BeamNG with '-disable-sandbox'."
     )
-    data.torqueMapPath = stageTorqueMapLib(torqueMapStem)
+    assert(type(torqueMapStem) == 'string' and torqueMapStem:match('^[%w_-]+$'),
+      'calibration.torque_map must name a packaged library')
+    local base = 'lua/vehicle/controller/xlab/lib/'
+    local manifest = assert(jsonReadFile(base .. torqueMapStem .. '.manifest.json'),
+      'Missing packaged torque map manifest: ' .. torqueMapStem)
+    local extension = jit and jit.os == 'Windows' and '.dll' or '.so'
+    assert(manifest.library == torqueMapStem .. extension, 'Torque map manifest library mismatch')
+    data.torqueMapPath = stageNativeLibrary(base, manifest)
   elseif data.controllerType == 'llc' then
     log('W', logTag, 'LLC opened without calibration.torque_map; torque control disabled')
+  end
+
+  -- An optional packaged export is staged before entering the vehicle Lua VM.
+  -- Use a content-addressed native filename: Windows may keep an old DLL loaded.
+  if data.environment then
+    local env = data.environment
+    assert(type(env) == 'table', 'environment must be a table')
+    local export = env.vehicle_export
+    assert(type(export) == 'string' and export:match('^[%w_-]+$'),
+      'environment.vehicle_export must name a packaged vehicle export')
+    assert(not Engine.Sandbox.Lua.isEnabled(),
+      "Native vehicle exports require '-disable-sandbox'; restart BeamNG")
+    local base = 'lua/vehicle/controller/xlab/lib/vehicles/' .. export .. '/'
+    local manifest = assert(jsonReadFile(base .. 'manifest.json'),
+      'Missing packaged vehicle export: ' .. export)
+    local windows = jit and jit.os == 'Windows'
+    local platform = windows and 'windows' or 'linux'
+    local library = windows and 'roll_filter.dll' or 'libroll_filter.so'
+    assert(manifest.target == platform and manifest.precision == 'float32'
+      and manifest.environment_abi_version == 1 and manifest.library == library,
+      'Incompatible packaged vehicle export')
+    env.vehicle_export = nil
+    env.library_path = stageNativeLibrary(base, manifest)
+    env.ffi_header_path = base .. 'roll_filter_ffi.h'
+    log('I', logTag, 'Staged vehicle environment export: ' .. export)
   end
 
   -- handle gtStateName → gtStateSensorId

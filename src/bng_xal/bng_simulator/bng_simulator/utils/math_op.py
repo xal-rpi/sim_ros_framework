@@ -57,6 +57,11 @@ def process_euler_to_quat(args_dict: dict, deg_to_rad_factor: float = np.pi / 18
         args_dict.pop("xlab_yaw_deg", None)
 
 
+def beamng_yaw_from_xlab(xlab_yaw_deg: float, yaw_offset_deg: float) -> float:
+    """ENU body heading → native BeamNG quaternion yaw, in degrees."""
+    return -float(xlab_yaw_deg) - float(yaw_offset_deg)
+
+
 def apply_xlab_yaw_to_beamng(
     args_dict: dict,
     yaw_offset_deg: float,
@@ -64,8 +69,8 @@ def apply_xlab_yaw_to_beamng(
     """
     Convert xlab yaw to BeamNG spawn euler (in place).
 
-    beamng_yaw = xlab_yaw - yaw_offset_deg
-    (utv: gtState yaw at rest ≈ beamng_spawn_yaw + yaw_offset_deg)
+    BeamNG vehicle quaternion yaw rotates clockwise in the world XY plane.
+    yaw_offset_deg selects the native yaw that gives zero ENU body heading.
     """
     if "rot_quat" in args_dict:
         return
@@ -75,4 +80,4 @@ def apply_xlab_yaw_to_beamng(
     if xlab_yaw is None:
         return
     args_dict["xlab_yaw_deg"] = xlab_yaw
-    args_dict["yaw_angle"] = float(xlab_yaw) - float(yaw_offset_deg)
+    args_dict["yaw_angle"] = beamng_yaw_from_xlab(xlab_yaw, yaw_offset_deg)

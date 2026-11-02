@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # See defaults/udp_io.yaml for per-vehicle UDP port assignment.
-# Vehicle catalog may override: steering_to_input, torque_map, gains, drivetrain.
+# Vehicle catalog may override: steering_calibration, torque_map, gains, drivetrain.
 
 sensors:
   # beamngpy BasicState — lightweight pose snapshot (GE poll / attach).
@@ -20,19 +20,32 @@ sensors:
     gyro_tau_s: 0.005
     vel_tau_s: 0.005
     wheel_angvel_tau_s: 0.005
-    debug_raw: true               # extra: ObjRPY, velRef, rGeom, rFlu, …
+    debug_raw: true               # diagnostic unfiltered state and frame comparisons
+    # Surface below CoG/hubs; contact material IDs copied without extra timestamps.
+    surface:
+      enable: true
+      update_time: 0.0          # sample height/normal at every GT update
+      normal_radius: 0.15       # [m] local three-point normal stencil
+      max_distance: 100.0       # [m] downward static ray range
+      terrain_friction: true   # live terrain coefficients at graphics cadence
+      profile: true            # occasional sampler cost + sim/real log
+      profile_interval: 5.0     # [sim s] between performance reports
+    # Contact wrenches are opt-in in Lua; enabled here for normal runs.
+    # Setting false skips the collision callback and contact sampling.
+    contact:
+      enable: true
 
-  # AdvancedIMU mounted on roof; dir/up define sensor frame vs body.
-  roof_imu:
-    type: AdvancedIMU
-    gfx_update_time: 0.3
-    physics_update_time: 0.01
-    is_using_gravity: true
-    is_visualised: true
-    is_dir_world_space: false
-    dir: [0, -1, 0]               # sensor x-axis in body frame
-    up: [1, 0, 0]                  # sensor y-axis (RH rule with dir)
-    pos: [0, 0, 1.0]               # [m] offset from vehicle origin
+  # Optional roof IMU example. Enable this and its sensor_broadcast entry together.
+  # roof_imu:
+  #   type: AdvancedIMU
+  #   gfx_update_time: 0.3
+  #   physics_update_time: 0.01
+  #   is_using_gravity: true
+  #   is_visualised: true
+  #   is_dir_world_space: false
+  #   dir: [0, -1, 0]               # sensor x-axis in body frame
+  #   up: [1, 0, 0]                  # sensor y-axis (RH rule with dir)
+  #   pos: [0, 0, 1.0]               # [m] offset from vehicle origin
 
 controllers:
   LowLevelController:
@@ -47,10 +60,10 @@ controllers:
       control_state:
         sensor: control_state      # live controlStateOut (no source/sensorId)
         rate: 0.01                 # [s] batch period
-      roof_imu:
-        sensor: imu                # converter type on wire
-        source: roof_imu           # vehicle.sensors key; sensorId injected
-        rate: 0.05
+      # roof_imu:
+      #   sensor: imu                # converter type on wire
+      #   source: roof_imu           # vehicle.sensors key; sensorId injected
+      #   rate: 0.05
 
     # BeamNG shifter + safety — applied once at LLC open (controller_manager.lua).
     drivetrain:
@@ -85,10 +98,17 @@ controllers:
       # true → mode/setpoint transition logs + periodic PI dump (every 4 sim s)
       verbose: true
       # torque_map: <stem>  — injected from vehicle_catalog when available.
-      # torque_map_api: legacy | occupancy_rail  — must match the stem (default legacy).
       # Trajectory setpoint pick along projected path:
-      #   next | lerp | closest
-      trajectory_pick: next
+      #   next | lerp | closest | preview
+      trajectory_pick: preview
+      # For explicit preview, set trajectory_pick: preview and enable ONE block.
+      # Interpolate from projected path phase; time_s uses packet simulator clock.
+      # Unspecified channels have zero preview. Values must be >= 0.
+      trajectory_preview:
+        time_s: {steering: 0.1, torque: 0.1, wheel_speed: 0.1}
+      # Or distance along predicted 3D CoG polyline, not reference-chart s:
+      # trajectory_preview:
+      #   distance_m: {steering: 0.5, torque: 0.5, wheel_speed: 0.5}
       # LLC authority gating for scalar commands:
       #   full | steering_only | torque_only
       control_mode: full
@@ -110,4 +130,4 @@ controllers:
         steer_pi_enable: 0.0         # 0 = open-loop steer_des_rad only
         steer_kp: 0.01
         steer_ki: 0.1
-        # steering_to_input injected from vehicle_catalog (rad per input unit).
+        # steering_map is injected from the catalog calibration export.

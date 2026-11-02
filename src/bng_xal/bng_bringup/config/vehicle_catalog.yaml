@@ -2,87 +2,164 @@
 # Hand-maintained xlab vehicle catalog (NOT auto-generated physics exports).
 # =============================================================================
 #
-# Add one entry per supported (model, part_config). Scripts may update
-# steering_to_input here after calibration.
+# Add one entry per supported (model, part_config).
+# steering_calibration points to its measured steering export.
 #
 # Fields:
 #   model, part_config  — BeamNG vehicle identity (required)
-#   yaw_offset_deg      — utv body→gtState: beamng_spawn = xlab_yaw - offset (default 90)
-#   steering_to_input   — roadwheel_rad / steering_input scale (LLC)
+#   yaw_offset_deg      — utv body→gtState: beamng_spawn = -xlab_yaw - offset (default 90)
+#   steering_calibration — exported vehicle YAML with front_steering_samples (required)
+#   calibration_only    — true: spawn with attach sensors and no LLC; no map required
 #   torque_map          — luamod lib stem; omit if no drivetrain map exists
-#   torque_map_api      — legacy (default) | occupancy_rail; must match the stem
+#   controllers        — optional vehicle-specific native export and filter defaults
 #   io.port_index       — UDP port slot (0=EGO base ports, 1=+port_stride, …)
 
 defaults:
   yaw_offset_deg: 90
 
 catalog:
-  utv_wild:
-    model: utv
-    part_config: /vehicles/utv/wild.pc
-    io:
-      port_index: 0
-    steering_to_input: -0.5948683325943701
-    torque_map: utv_wild_v2_wheel_torque
-    torque_map_api: occupancy_rail
+  racetruck_tt1_unlimited:
+    model: racetruck
+    part_config: /vehicles/racetruck/tt1_unlimited.pc
+    # Export: vehicles/racetruck_tt1_unlimited.yaml; roadwheel locks [-0.539310, 0.540630] rad.
+    # Measured steering response: tau=0.2041 s, delay=0.0685 s.
+    steering_calibration: vehicles/racetruck_tt1_unlimited.yaml
+    torque_map: racetruck_tt1_unlimited_wheel_torque
+    controllers:
+      LowLevelController:
+        drivetrain:
+          mode: 2                 # arcade: automatic clutch and shifting
+          startGear: null         # forced gear selection would restore realistic mode
+          disableSafety: true     # disable ABS/ESC and unload drivingDynamics controllers
 
-  # Same plant + map as utv_wild (kept so existing occupancy run files still resolve).
-  utv_wild_occupancy:
-    model: utv
-    part_config: /vehicles/utv/wild.pc
-    io:
-      port_index: 0
-    steering_to_input: -0.5948683325943701
-    torque_map: utv_wild_v2_wheel_torque
-    torque_map_api: occupancy_rail
+  covet_turbo_rally:
+    model: covet
+    part_config: /vehicles/covet/turbo_rally.pc
+    # Export: vehicles/covet_turbo_rally.yaml; roadwheel locks [-0.654706, 0.659121] rad.
+    # Measured steering response: tau=0.1032 s, delay=0.0373 s.
+    steering_calibration: vehicles/covet_turbo_rally.yaml
+    torque_map: covet_turbo_rally_wheel_torque
+    controllers:
+      LowLevelController:
+        drivetrain:
+          mode: 2                 # arcade: automatic clutch and shifting
+          startGear: null         # forced gear selection would restore realistic mode
+          disableSafety: true     # disable ABS/ESC and unload drivingDynamics controllers
 
-  utv_canam_x3_loaded:
-    model: utv
-    part_config: /vehicles/utv/canam_x3_loaded.pc
-    io:
-      port_index: 0
-    steering_to_input: -0.683809
-
-  utv_canam_x3_1g:
-    model: utv
-    part_config: /vehicles/utv/canam_x3_1g.pc
-    io:
-      port_index: 0
-    steering_to_input: -0.68172
-
-  utv_canam_x3_highcg:
-    model: utv
-    part_config: /vehicles/utv/canam_x3_highcg.pc
-    io:
-      port_index: 0
-    steering_to_input: -0.682111
-
-  utv_canam_x3_r322:
-    model: utv
-    part_config: /vehicles/utv/canam_x3_r322.pc
-    io:
-      port_index: 0
-    steering_to_input: -0.668394
+  covet_dunes:
+    model: covet
+    part_config: /vehicles/covet/Dunes.pc
+    # Export: vehicles/covet_Dunes.yaml; roadwheel locks [-0.597644, 0.595568] rad.
+    # Measured steering response: tau=0.1048 s, delay=0.0375 s.
+    steering_calibration: vehicles/covet_Dunes.yaml
+    torque_map: covet_dunes_wheel_torque
+    controllers:
+      LowLevelController:
+        drivetrain:
+          mode: 2                 # arcade: automatic clutch and shifting
+          startGear: null         # forced gear selection would restore realistic mode
+          disableSafety: true     # disable ABS/ESC and unload drivingDynamics controllers
 
   utv_canam_x3_r322_easylift:
     model: utv
     part_config: /vehicles/utv/canam_x3_r322_easylift.pc
     io:
       port_index: 0
-    steering_to_input: -0.665825
+    steering_calibration: vehicles/utv_canam_x3_r322_easylift.yaml
     torque_map: utv_canam_r322_lift_wheel_torque
-    torque_map_api: occupancy_rail
-
-  etk800_track:
-    model: etk800
-    part_config: /vehicles/etk800/844_track_M.pc
-    # io:
-    #   port_index: 1
-
-  sunburst2_drift:
-    model: sunburst2
-    part_config: /vehicles/sunburst2/drift_pro.pc
-
-  sbr_track:
-    model: sbr
-    part_config: /vehicles/sbr/track.pc
+    # Optional newly identified map: utv_canam_r322_lift_wheel_torque_identified_20261028
+    # To switch, replace torque_map and recreate the controller.
+    # Optional native consumer; requires matching export in xlab.zip.
+    # Omit the LowLevelController environment/roll_filter entries to leave this unloaded.
+    # Environment alone receives context; roll_filter additionally evaluates controls.
+    # Per-run overrides use presets or drive_trajopt runtime vehicle_tuning.
+    # roll_filter: null removes the adapter; mode: shadow evaluates without actuation.
+    # Startup capabilities/export cannot be changed through tune.
+    # With roll_filter configured, fresh external commands take priority. Before
+    # the first command / after command_timeout, stock driver input is filtered.
+    # Explicit controller bypass restores unfiltered manual input immediately.
+    # Service brake remains driver-owned and enters the filter model.
+    # Parking brake makes filtering unavailable and releases manual assistance.
+    controllers:
+      LowLevelController:
+        drivetrain:
+          mode: 0                 # realistic: retain explicit CVT gear selection
+          startGear: 2            # Drive command index from the measured gearbox export
+        calibration:
+          # Autonomous post-PI slew, independent of roll-filter mode and tuning.
+          autonomous_rate_limits:
+            steering_rate_max: 0.9 # road-wheel command rate [rad/s]
+            torque_rate_max: 6000.0 # physical torque command rate [Nm/s]
+        # Stock processed manual inputs pass through without extra ramps.
+        # Raw and smoothed measured rates are shared by control/feedback consumers.
+        measured_rates:
+          filter_tau_s: 0.02        # [s], 0 disables smoothing; raw rate also retained
+          max_gap_s: 0.05           # reset rate estimate after missing samples
+        environment:
+          vehicle_export: utv_wild_x3_easylift_twin # packaged dynamics export, not BeamNG model ID
+          frame_id: 1              # must match companion environment packet frame
+          epoch_id: 1              # match producer; change together on context reset
+          projection_tolerance_m: 2.0e-05 # positive surface-projection residual [m]
+          projection_max_iterations: 12 # integer 1..24
+        roll_filter:
+          mode: shadow              # off | shadow | active; tuneable
+          recovery_enabled: true   # infeasible: model alignment + bounded positive-drive reduction
+          apply_bias: true          # false: estimate/log bias but do not apply it
+          tau_s: 0.2                # positive roll predictor time scale [s]
+          phi_limit_rad: 0.6108652382 # (0, pi/2) rad; 35 deg, not a guaranteed roll cap
+          alpha_per_s: 5.0          # positive barrier decay coefficient [1/s]
+          P: [2.3125, 1.9375, 0.5, 3.25, 0.8125, 0.4375] # 11,12,13,22,23,33
+          # Assisted-command angle range [rad], inside the measured steering map.
+          # Free driver input can exceed it; takeover uses bounded inward re-entry.
+          steering_min_rad: -0.65   # startup-only
+          steering_max_rad: 0.65    # startup-only
+          steering_rate_max: 0.9    # assisted command [rad/s]; tunes may only reduce it
+          steering_rate_scale: 10.0 # fixed QP metric [rad/s], not a bound
+          torque_scale: 500.0       # fixed QP metric [Nm]
+          observer_gain_per_s: 2.0 # positive; changing gain resets observer
+          observer_max_gap_s: 0.05  # positive; sample gaps above this reinitialize [s]
+          max_state_age_s: 0.1      # positive max state age in vehicle time [s]
+          torque_correction: true   # false: steering only; nominal torque follows live rails
+          torque_rate_max: 6000.0   # filter candidate slew [Nm/s], not a free-driver cap
+          speed_enable_m_s: 1.0    # total body-speed norm; enable >= this
+          speed_disable_m_s: 0.5   # disable <= this; reset observer
+  #
+  # # Same BeamNG vehicle, confirmation-v2 torque calibration; keep the old entry intact.
+  # utv_canam_x3_r322_easylift_v3:
+  #   model: utv
+  #   part_config: /vehicles/utv/canam_x3_r322_easylift.pc
+  #   io:
+  #     port_index: 0
+  #   steering_calibration: vehicles/utv_canam_x3_r322_easylift.yaml
+  #   torque_map: utv_canam_r322_lift_wheel_torque_identified_20261028
+  #   controllers:
+  #     LowLevelController:
+  #       drivetrain:
+  #         mode: 0
+  #         startGear: 2             # CVT Drive
+  #         disableSafety: true
+  #       measured_rates:
+  #         filter_tau_s: 0.02
+  #         max_gap_s: 0.05
+  #       # Environment/roll_filter require a matching v3 native dynamics export;
+  #       # do not reuse the old Easylift filter model implicitly.
+  #
+  # # New-vehicle calibration: source measurements remain in vehicles/<model>_<config>.yaml.
+  # # Physical torque_min/torque_max are live outputs of the fitted torque map;
+  # # there are no fixed catalog torque-limit fields. Do not infer them from engine RPM.
+  # # Optional per-vehicle tuning after fitting a map (merge under that entry):
+  # # controllers:
+  # #   LowLevelController:
+  # #     calibration:
+  # #       gains:
+  # #         pi_enable: 0.0         # enable only after wheel-speed PI tuning
+  # #         kp: 0.0
+  # #         ki: 0.0
+  # #         t_min: -100.0          # example PI correction clamp [Nm], not total torque
+  # #         t_max: 100.0
+  # #     drivetrain:
+  # #       mode: 0                 # realistic; select for the actual gearbox
+  # #       startGear: 1            # example only; verify the gearbox command mapping
+  # # With a matching environment/model export and complete roll_filter settings:
+  # #   steering_min_rad / steering_max_rad: use the measured roadwheel locks
+  # #   steering_rate_max [rad/s], torque_rate_max [Nm/s]: identify; not exported here

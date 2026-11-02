@@ -18,6 +18,7 @@ sensor_defaults:
   gtstate:
     poll_time: 0.25
     publish: 0
-  roof_imu:
-    poll_time: 0.25
-    publish: 0
+  # Optional roof IMU polling example (enable the sensor in llc.yaml first).
+  # roof_imu:
+  #   poll_time: 0.25
+  #   publish: 0

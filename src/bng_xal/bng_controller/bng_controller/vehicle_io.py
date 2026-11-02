@@ -128,6 +128,17 @@ class VehicleIoClient:
             self._sensor_recv_sock.bind(sensor_bind_addr)
             self._sensor_recv_sock.settimeout(recv_timeout)
 
+    @property
+    def control_state_waitable(self) -> socket.socket:
+        """Borrow the live state socket for readiness waits; this client owns it.
+
+        After readability, recv_control_state(timeout=0) drains the latest state.
+        Do not read concurrently or close this socket outside the client.
+        """
+        if self._control_state_recv_sock is None or self._control_state_recv_sock.fileno() < 0:
+            raise RuntimeError("Control-state receive socket is not open")
+        return self._control_state_recv_sock
+
     @classmethod
     def from_endpoints(cls, endpoints: VehicleIoEndpoints, **kwargs: Any) -> "VehicleIoClient":
         return cls(
@@ -163,6 +174,16 @@ class VehicleIoClient:
         """Send a JSON object without the cmd/tune envelope."""
         packet = json.dumps(payload).encode("utf-8")
         self._send_sock.sendto(packet, self.command_addr)
+
+    def send_binary(self, payload: bytes) -> None:
+        """Send one already packed datagram on the existing command socket.
+
+        Requires a matching vehicle-side binary dispatch handler. No envelope,
+        timestamp, encoding or extra bind is added; send completion is not ACK.
+        """
+        if not isinstance(payload, bytes) or not 0 < len(payload) <= 65507:
+            raise ValueError("Nonempty bytes within UDP payload capacity required")
+        self._send_sock.sendto(payload, self.command_addr)
 
     def send_command(self, data: Dict[str, Any]) -> None:
         self._send_envelope("cmd", data)

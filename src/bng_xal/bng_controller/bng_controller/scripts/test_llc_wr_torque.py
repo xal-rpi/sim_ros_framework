@@ -4,7 +4,7 @@
 Sends torque and/or wheel_speed with steering=0, then samples control_send
 (reduced gtState) for wr, rear_wheel_torque_est, and LLC target_* fields.
 
-Requires sim + xlab LLC running (e.g. gridworld.yaml). Do not bind control_send
+Requires sim + xlab LLC running (e.g. single_vehicle.yaml). Do not bind control_send
 elsewhere (only one process may bind each UDP port).
 
 Usage::

@@ -1,26 +1,49 @@
-totalMass: 912.723
+totalMass: 912.724
 cogToFrontAxle: 1.389
 cogToRearAxle: 1.208
 cogToCentralAxle: -0.001
-cogAboveAxle: 0.299
+cogAboveAxle: 0.298
 coGHeight: 0.618
 distFR: 2.596
 trackFront: 1.381
-trackRear: 1.372
+trackRear: 1.373
 wheelRadius: 0.324
+wheelRadiusFront: 0.323
+wheelRadiusRear: 0.324
+frame:
+  cog_nom:
+  - 1.208
+  - -0.001
+  - 0.289
+  front_axle_body:
+  - 2.596
+  - 0.0
+  - -0.02
+  g_world:
+  - 0.0
+  - 0.0
+  - -9.81
+  imu_pos_body:
+  - 1.208
+  - -0.001
+  - 0.289
+  rear_axle_body:
+  - 0.0
+  - 0.0
+  - 0.0
 wheelRadiusNominal: 0.322
 wheelInertia: 0.984
 wheelInertiaSim: 0.511
 inertia:
-  xx: 330.631
-  xy: 117.362
-  xz: 32.654
-  yy: 1319.437
-  yz: 3.203
-  zz: 1419.394
+  xx: 316.889
+  xy: -1.454
+  xz: 32.782
+  yy: 1333.15
+  yz: -0.787
+  zz: 1419.376
 cogPosRel:
-- 0.535
-- 0.366
+- -0.575
+- 0.298
 - 0.34
 bbox:
   vehHeight: 1.547
@@ -29,20 +52,140 @@ bbox:
 steering:
   input_max: 1.0
   input_min: -1.0
-  roadwheel_FL_at_umax_rad: -0.624225
-  roadwheel_FL_at_umin_rad: 0.740336
-  roadwheel_FR_at_umax_rad: -0.739919
-  roadwheel_FR_at_umin_rad: 0.620741
-  roadwheel_at_u0_rad: -0.000188
-  roadwheel_max_rad: -0.682072
-  roadwheel_min_rad: 0.680539
-  steering_to_input: -0.665825
-steering_tau_s: 0.1851
-steering_delay_s: 0.0843
-steering_t95_s: 0.2538
+  roadwheel_FL_at_umax_rad: -0.623015
+  roadwheel_FL_at_umin_rad: 0.738499
+  roadwheel_FR_at_umax_rad: -0.743337
+  roadwheel_FR_at_umin_rad: 0.625438
+  roadwheel_at_u0_rad: -6.5e-05
+  roadwheel_max_rad: -0.683176
+  roadwheel_min_rad: 0.681969
+  steering_to_input: -0.66654
+front_steering: &id001
+  fl:
+    gain: 1.0002296
+    offset_rad: 0.04643278
+  fr:
+    gain: 0.9997704
+    offset_rad: -0.04643278
+front_steering_fit: &id002
+  lock_max_abs_error_rad: 0.01388489
+  max_abs_error_rad: 0.03998469
+  mean_max_rad: 0.6380869
+  mean_min_rad: -0.63941743
+  rmse_rad: 0.02144621
+  sample_count: 19
+front_steering_fits:
+  linear:
+    law: *id001
+    metrics: *id002
+  quadratic:
+    law:
+      fl:
+        gain: 1.00015664
+        offset_rad: 0.02364593
+        quadratic_per_rad: 0.14933096
+      fr:
+        gain: 0.99984336
+        offset_rad: -0.02364593
+        quadratic_per_rad: -0.14933096
+    metrics:
+      lock_max_abs_error_rad: 0.03667317
+      max_abs_error_rad: 0.0107611
+      mean_max_rad: 0.6380869
+      mean_min_rad: -0.63941743
+      rmse_rad: 0.00498692
+      sample_count: 19
+front_steering_samples:
+- delta: 0.68196884
+  delta_l: 0.73849949
+  delta_r: 0.62543818
+  u: -1.0
+- delta: 0.6380869
+  delta_l: 0.71212491
+  delta_r: 0.56404889
+  u: -0.9
+- delta: 0.59040515
+  delta_l: 0.67695819
+  delta_r: 0.50385212
+  u: -0.8
+- delta: 0.50344747
+  delta_l: 0.56875005
+  delta_r: 0.43814489
+  u: -0.7
+- delta: 0.42634875
+  delta_l: 0.47746206
+  delta_r: 0.37523545
+  u: -0.6
+- delta: 0.3523846
+  delta_l: 0.39289428
+  delta_r: 0.31187492
+  u: -0.5
+- delta: 0.27974881
+  delta_l: 0.31312468
+  delta_r: 0.24637293
+  u: -0.4
+- delta: 0.20139939
+  delta_l: 0.23199477
+  delta_r: 0.17080402
+  u: -0.3
+- delta: 0.14168105
+  delta_l: 0.16727224
+  delta_r: 0.11608986
+  u: -0.2
+- delta: 0.0720811
+  delta_l: 0.09539941
+  delta_r: 0.04876278
+  u: -0.1
+- delta: -6.534e-05
+  delta_l: 0.02424544
+  delta_r: -0.02437613
+  u: 0.0
+- delta: -0.06243796
+  delta_l: -0.03893096
+  delta_r: -0.08594496
+  u: 0.1
+- delta: -0.13183572
+  delta_l: -0.10675523
+  delta_r: -0.15691621
+  u: 0.2
+- delta: -0.19852491
+  delta_l: -0.1687315
+  delta_r: -0.22831831
+  u: 0.3
+- delta: -0.27096981
+  delta_l: -0.2376162
+  delta_r: -0.30432341
+  u: 0.4
+- delta: -0.34515406
+  delta_l: -0.30430088
+  delta_r: -0.38600724
+  u: 0.5
+- delta: -0.42143406
+  delta_l: -0.37040542
+  delta_r: -0.47246271
+  u: 0.6
+- delta: -0.50245178
+  delta_l: -0.43765313
+  delta_r: -0.56725042
+  u: 0.7
+- delta: -0.58982221
+  delta_l: -0.50470962
+  delta_r: -0.67493479
+  u: 0.8
+- delta: -0.63941743
+  delta_l: -0.56542027
+  delta_r: -0.71341459
+  u: 0.9
+- delta: -0.68317607
+  delta_l: -0.62301526
+  delta_r: -0.74333689
+  u: 1.0
+steering_tau_s: 0.1731
+steering_delay_s: 0.0374
+steering_t95_s: 0.2409
 engine:
   fuelCapacity: 25.0
-  fuelVolume: 24.994
+  fuelVolume: 24.995
   idleRPM: 1400.0
   maxRPM: 8000.0
   superchargerBoostMax: -1.0

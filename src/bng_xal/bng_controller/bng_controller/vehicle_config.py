@@ -162,7 +162,7 @@ def resolve_vehicle_io(
         from bng_controller.vehicle_config import resolve_vehicle_io
 
         res = resolve_vehicle_io(
-            "EGO", "gridworld.yaml", source="config",
+            "EGO", "single_vehicle.yaml", source="config",
         )
     """
     all_resolved = resolve_vehicles_io(

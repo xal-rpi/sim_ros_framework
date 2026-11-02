@@ -18,3 +18,15 @@ sensors:
     vel_tau_s: 0.005
     wheel_angvel_tau_s: 0.005
     debug_raw: true
+    # Surface below CoG/hubs; contact material IDs copied without extra timestamps.
+    surface:
+      enable: true
+      update_time: 0.0          # sample height/normal at every GT update
+      normal_radius: 0.15       # [m] local three-point normal stencil
+      max_distance: 100.0       # [m] downward static ray range
+      terrain_friction: true   # live terrain coefficients at graphics cadence
+      profile: true            # occasional sampler cost + sim/real log
+      profile_interval: 5.0     # [sim s] between performance reports
+    # Corner contact wrench on the gtState physics step. Off skips nodeCollision.
+    contact:
+      enable: false

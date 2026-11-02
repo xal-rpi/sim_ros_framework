@@ -1,143 +1,110 @@
 #!/usr/bin/env bash
+# Package Lua/JSON, torque maps and all staged native vehicle exports by default.
 set -euo pipefail
-
-# # 📦 XLab Mod Packaging Script
-
-# This Bash script automates packaging your BeamNG.drive mod (`xlab.zip`) from tracked or all source files in your Git repository. It ensures platform-specific compilation, includes relevant Lua and JSON files, and outputs a ready-to-use zip file.
-
-# ---
-
-# ## Features
-
-# - Automatically detects Git root and validates mod directory
-# - Selects tracked or all Lua/JSON mod sources based on --lua flag
-# - Compiles export-c torque map libs from lib/policies/*.c
-# - Preserves file paths inside the zip
-# - Outputs to BeamNG mod directory
-
-
-# Resolve absolute path to the script
-SCRIPT_PATH="$(readlink -f "$0")"
-SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
-
-# Find the Git root from the script's location
-GIT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"
-if [[ -z "$GIT_ROOT" ]]; then
-  echo "❌ Error: Script is not inside a Git repository. Please place it within your repo." >&2
-  exit 1
-fi
-cd "${GIT_ROOT}/luamod"
-
-# Default build target
-PLATFORM="linux"
-LUA_MODE="tracked"
-
-# Optional platform override
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+PLATFORM=linux
+OUTPUT="${BEAMNG_MOD_DIR:-${SCRIPT_DIR}/dist}/xlab.zip"
+EXPLICIT_OUTPUT=false
+EXPORTS=()
 for arg in "$@"; do
   case "$arg" in
-    --platform=windows|--win)
-      PLATFORM="windows"
-      ;;
-    --platform=linux|--linux)
-      PLATFORM="linux"
-      ;;
-    --lua=all|--all)
-      LUA_MODE="all"
-      ;;
-    --lua=tracked|--tracked)
-      LUA_MODE="tracked"
-      ;;
-    *)
-      echo "Unknown option: $arg"
-      exit 1
-      ;;
+    --platform=windows|--win) PLATFORM=windows ;;
+    --platform=linux|--linux) PLATFORM=linux ;;
+    --output=*) OUTPUT="${arg#*=}"; EXPLICIT_OUTPUT=true ;;
+    --vehicle-export=*) EXPORTS+=("${arg#*=}") ;;
+    --help)
+      echo 'build.bash [--win|--linux] [--output=ZIP] [--vehicle-export=NAME ...]'
+      echo 'Packages all runtime Lua/JSON sources, independent of Git staging.'
+      echo 'Destination: --output, then BEAMNG_MOD_DIR/xlab.zip, then local dist/xlab.zip.'
+      echo 'Default: compile all staged exports under lib/vehicles/<vehicle>.'
+      echo '--vehicle-export=NAME (repeatable) restricts the build to an explicit subset.'
+      exit 0 ;;
+    *) echo "Unknown option: $arg" >&2; exit 1 ;;
   esac
 done
-
-# Print platform
-echo "Building for platform: $PLATFORM"
-echo "Including Lua sources: $LUA_MODE"
-
-# Set default mod directory (Linux)
-MOD_DIR="${HOME}/.local/share/BeamNG.drive/0.35/mods"
-# Override if BEAMNG_MOD_DIR is defined
-if [[ -n "${BEAMNG_MOD_DIR:-}" ]]; then
-  MOD_DIR="${BEAMNG_MOD_DIR}"
+OUTPUT="$(realpath -m "$OUTPUT")"
+if [[ -z "${BEAMNG_MOD_DIR:-}" && "$EXPLICIT_OUTPUT" == false ]]; then
+  echo 'Warning: BEAMNG_MOD_DIR is unset; building into local luamod/dist/. The mod is not installed automatically.' >&2
 fi
-
-# Validate that MOD_DIR exists
-if [[ ! -d "$MOD_DIR" ]]; then
-  echo "❌ Error: Mod directory '$MOD_DIR' does not exist." >&2
-  echo "Please create it manually or set BEAMNG_MOD_DIR to a valid path." >&2
-  echo ""
-  echo "📦 Example for WSL users:"
-  echo '  mkdir -p /mnt/c/Users/<your-username>/AppData/Local/BeamNG.drive/0.35/mods'
-  echo '  export BEAMNG_MOD_DIR="/mnt/c/Users/<your-username>/AppData/Local/BeamNG.drive/0.35/mods"'
-  echo ""
-  echo "🔁 To make this permanent, run:"
-  echo "  echo 'export BEAMNG_MOD_DIR=\"/mnt/c/Users/<your-username>/AppData/Local/BeamNG.drive/0.35/mods\"' >> ~/.bashrc"
-  echo "  source ~/.bashrc"
-  exit 1
-fi
-
-MOD_ZIP="${MOD_DIR}/xlab.zip"
-
-# ensure target dirs exist
-mkdir -p "$(dirname "$MOD_DIR")"
-
-# remove any existing zip
-rm -f "$MOD_ZIP"
-
-# Collect Lua + JSON sources (tracked = git index only; all = every file on disk)
-declare -a WANT=( '*.lua' 'lua/**/*.json' )
-if [[ "$LUA_MODE" == "tracked" ]]; then
-  mapfile -t FILES < <(git ls-files "${WANT[@]}")
-else
-  mapfile -t FILES < <(find . -type f \( -name '*.lua' -o -name '*.json' \))
-fi
-
-# if nothing to do, exit
-if [ ${#FILES[@]} -eq 0 ]; then
-  echo "No matching tracked files found." >&2
-  exit 1
-fi
-
-# Compile export-c torque map libs (lib/<stem>.{so,dll} from policies/<stem>.{c,h})
-LIB_DIR="./lua/vehicle/controller/xlab/lib"
-POLICY_DIR="${LIB_DIR}/policies"
-if [[ -d "$POLICY_DIR" ]]; then
-  if [[ "$PLATFORM" == "windows" ]] && ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
-    echo "❌ Error: MinGW toolchain not found. Please install x86_64-w64-mingw32-gcc." >&2
-    exit 1
-  fi
-  for src in "$POLICY_DIR"/*.c; do
-    [[ -f "$src" ]] || continue
-    stem="$(basename "$src" .c)"
-    if [[ "$PLATFORM" == "windows" ]]; then
-      out_dll="${LIB_DIR}/${stem}.dll"
-      x86_64-w64-mingw32-gcc -D_WIN32 -O3 -shared -I"${POLICY_DIR}" -o "$out_dll" "$src" -lm
-      FILES+=( "$out_dll" )
-    else
-      out_so="${LIB_DIR}/${stem}.so"
-      cc -O3 -fPIC -shared -I"${POLICY_DIR}" -o "$out_so" "$src" -lm
-      FILES+=( "$out_so" )
-    fi
+mkdir -p "$(dirname "$OUTPUT")"
+cd "$SCRIPT_DIR"
+LIB_DIR=lua/vehicle/controller/xlab/lib
+# All staged vehicle libraries coexist in the mod. Runtime vehicle configuration
+# chooses which one to FFI-load; changing vehicle needs no rebuild if it is included.
+# Explicit selection is only an optional build subset, never required for normal use.
+if [[ ${#EXPORTS[@]} -eq 0 ]]; then
+  for directory in "$LIB_DIR/vehicles"/*; do
+    [[ -d "$directory" ]] || continue
+    EXPORTS+=("$(basename "$directory")")
   done
 fi
+printf 'Building xlab: target=%s\n' "$PLATFORM"
+if [[ ${#EXPORTS[@]} -gt 0 ]]; then
+  printf 'Native vehicle exports (%s): %s\n' "${#EXPORTS[@]}" "${EXPORTS[*]}"
+else
+  printf 'Native vehicle exports: none staged under %s/vehicles\n' "$LIB_DIR"
+fi
+STAGE="$(mktemp -d)"
+TEMP_ZIP=''
+trap 'rm -rf "$STAGE"; [[ -z "$TEMP_ZIP" ]] || rm -f "$TEMP_ZIP"' EXIT
 
-# zip them preserving paths
-printf '%s\n' "${FILES[@]}" | zip -q "$MOD_ZIP" -@
-
-# Print summary
-echo -e "\n📦 Exported ${#FILES[@]} files:"
-for f in "${FILES[@]}"; do
-  echo "  └── $f"
+# Git staging must not change the runtime dependency set in the package.
+mapfile -t FILES < <(find lua -type f \( -name '*.lua' -o -name '*.json' \) | sort)
+[[ ${#FILES[@]} -gt 0 ]] || { echo 'No Lua/JSON sources found' >&2; exit 1; }
+for file in "${FILES[@]}"; do
+  # Native export JSON is an input to compilation, not a Lua runtime asset.
+  [[ "$file" == *"/lib/vehicles/"* || "$file" == *"/lib/vehicle_runtime/"* ]] && continue
+  mkdir -p "$STAGE/$(dirname "$file")"
+  cp "$file" "$STAGE/$file"
 done
 
-# Show zip contents (outline)
-echo -e "\n🗂️ Zip structure:"
-unzip -l "$MOD_ZIP" | awk 'NR>3 { print "  └──", $4 }' | sed '$d'
+POLICY_DIR="$LIB_DIR/policies"
+mkdir -p "$STAGE/$LIB_DIR"
+COMPILER=cc
+EXT=so
+COMPILE_FLAGS=(-O3 -shared -fPIC)
+if [[ "$PLATFORM" == windows ]]; then
+  COMPILER=x86_64-w64-mingw32-gcc
+  EXT=dll
+  COMPILE_FLAGS=(-D_WIN32 -O3 -shared)
+fi
+for src in "$POLICY_DIR"/*.c; do
+  [[ -f "$src" ]] || continue
+  printf 'Compiling torque/policy library: %s.%s\n' "$(basename "$src" .c)" "$EXT"
+  "$COMPILER" "${COMPILE_FLAGS[@]}" \
+    -I"$POLICY_DIR" -o "$STAGE/$LIB_DIR/$(basename "$src" .c).$EXT" "$src" -lm
+done
 
-# Highlight destination
-echo -e "\n✅ Zip written to: \033[1;31m$MOD_ZIP\033[0m"
+# The compiled bytes, not the model source name, identify the runtime cache.
+python3 - "$STAGE/$LIB_DIR" "$PLATFORM" "$EXT" <<'PYTORQUE'
+import hashlib
+import json
+from pathlib import Path
+import sys
 
+folder, target, extension = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+for library in sorted(folder.glob("*." + extension)):
+    record = {
+        "target": target,
+        "library": library.name,
+        "library_sha256": hashlib.sha256(library.read_bytes()).hexdigest(),
+    }
+    library.with_suffix(".manifest.json").write_text(json.dumps(record, indent=2) + "\n")
+PYTORQUE
+
+# Compile staged sources here; model generation belongs to drive_trajopt.
+for vehicle in "${EXPORTS[@]}"; do
+  printf 'Compiling native vehicle export: %s\n' "$vehicle"
+  python3 "$SCRIPT_DIR/build_vehicle.py" --vehicle "$vehicle" --target "$PLATFORM" \
+    --output "$STAGE/$LIB_DIR/vehicles"
+done
+
+(
+  cd "$STAGE"
+  zip -qr package.zip lua
+)
+# Copy to a sibling temporary file; replace the destination only after success.
+TEMP_ZIP="$(mktemp "${OUTPUT}.XXXXXX")"
+cp "$STAGE/package.zip" "$TEMP_ZIP"
+mv -f "$TEMP_ZIP" "$OUTPUT"
+printf 'Built %s (%s)\n' "$OUTPUT" "$PLATFORM"

@@ -1,0 +1,8 @@
+# Receive context using the vehicle catalog export, without loading a roll adapter.
+# Select a catalog vehicle with environment configured; null removes its filter.
+overrides:
+  vehicles:
+    EGO:
+      controllers:
+        LowLevelController:
+          roll_filter: null

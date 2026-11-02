@@ -148,7 +148,10 @@ def get_diff_lock_state(vehicle: Vehicle, diff: str = "front") -> dict:
 def get_vehicle_properties(vehicle: Vehicle, world_space: bool = False) -> dict:
     """Body-frame plant after settle (wet COM, axle-center kinematics).
 
-    ``world_space`` is ignored: always live ref-node frame. No world poses.
+    ``world_space`` is ignored. Body projections, height and inertia all use the
+    published gtState orthonormal FLU triad. ``frame`` vectors use rear-axle
+    origin; only ``cogPosRel`` retains the raw ref-node origin. No world poses
+    are exported.
 
     Returns:
         dict:
@@ -161,10 +164,14 @@ def get_vehicle_properties(vehicle: Vehicle, world_space: bool = False) -> dict:
             trackFront / trackRear (float): wheel-center track [m]
             coGHeight (float): h, COM above contact along body z [m]
             wheelRadius (float): mean dynamicRadius [m]
+            wheelRadiusFront / wheelRadiusRear (float): per-axle mean dynamicRadius [m]
+            frame (dict): cog_nom, rear_axle_body, front_axle_body [m] in GT FLU;
+                imu_pos_body is the nominal gtState CoG sensor position, not a
+                separately mounted IMU; g_world is GT world gravity [m/s²]
             wheelRadiusNominal (float): mean wd.radius [m]
             wheelInertia (float): catalog I_w prior from geometry [kg·m²]
             wheelInertiaSim (float): mean wd.inertia (rotator / invert F_x) [kg·m²]
-            inertia (dict): xx,yy,zz,xy,xz,yz about COM, FLU, wet
+            inertia (dict): xx,yy,zz,xy,xz,yz about COM, GT FLU, wet
             cogPosRel (list): wet COM in ref-node frame
             bbox (dict): vehLength, vehWidth, vehHeight
     """

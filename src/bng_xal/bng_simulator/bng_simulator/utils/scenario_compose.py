@@ -55,7 +55,10 @@ level/scenario/vehicles with LLC; ATTACH grafts minimal sensors onto existing id
 
 from __future__ import annotations
 
+from .math_op import beamng_yaw_from_xlab
+
 import os
+import math
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -63,10 +66,10 @@ from ament_index_python.packages import get_package_share_directory
 
 from bng_simulator.utils.io_dict_utils import load_yaml
 
-
 # ---------------------------------------------------------------------------
 # Path resolution & YAML loading
 # ---------------------------------------------------------------------------
+
 
 def bringup_config_dir() -> str:
     return os.path.join(get_package_share_directory("bng_bringup"), "config")
@@ -130,11 +133,7 @@ def deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge overlay into base (overlay wins on conflicts)."""
     result = deepcopy(base)
     for key, value in overlay.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = deep_merge(result[key], value)
         else:
             result[key] = deepcopy(value)
@@ -151,6 +150,7 @@ def _load_fragment(relative_path: str) -> Dict[str, Any]:
 # Spawn: level preset → xlab/BeamNG yaw, optional pos / pos_offset
 # ---------------------------------------------------------------------------
 
+
 def _resolve_spawn(
     level_data: Dict[str, Any],
     spawn_name: str,
@@ -160,15 +160,12 @@ def _resolve_spawn(
     spawns = level_data.get("spawns", {})
     if spawn_name not in spawns:
         known = ", ".join(sorted(spawns.keys())) or "(empty)"
-        raise KeyError(
-            f"Unknown spawn preset '{spawn_name}' for level. Known: {known}"
-        )
+        raise KeyError(f"Unknown spawn preset '{spawn_name}' for level. Known: {known}")
 
     spawn = deepcopy(spawns[spawn_name])
     xlab_yaw = yaw_override if yaw_override is not None else spawn.get("yaw_angle", 0)
     spawn["xlab_yaw_deg"] = xlab_yaw
-    # utv: gtState yaw ≈ beamng_spawn_yaw + offset → xlab 0 needs spawn = xlab - offset
-    spawn["yaw_angle"] = xlab_yaw - yaw_offset_deg
+    spawn["yaw_angle"] = beamng_yaw_from_xlab(xlab_yaw, yaw_offset_deg)
     return spawn
 
 
@@ -184,17 +181,16 @@ def _apply_spawn_adjustments(spawn: Dict[str, Any], veh_spec: Dict[str, Any]) ->
         if not isinstance(offset, (list, tuple)) or len(offset) != 3:
             raise ValueError("pos_offset must be [dx, dy, dz]")
         base = spawn.get("pos", [0, 0, 0])
-        spawn["pos"] = [
-            float(base[i]) + float(offset[i]) for i in range(3)
-        ]
+        spawn["pos"] = [float(base[i]) + float(offset[i]) for i in range(3)]
 
     if "cling" in veh_spec:
         spawn["cling"] = bool(veh_spec["cling"])
 
 
 # ---------------------------------------------------------------------------
-# Catalog → LLC calibration (steering_to_input, torque_map, yaw frame)
+# Catalog → LLC calibration (measured steering map, torque_map, yaw frame)
 # ---------------------------------------------------------------------------
+
 
 def _catalog_entry(
     catalog: Dict[str, Any],
@@ -206,6 +202,8 @@ def _catalog_entry(
         raise KeyError(f"Unknown vehicle catalog id '{vehicle_key}'. Known: {known}")
     defaults = catalog.get("defaults", {})
     entry = deepcopy(entries[vehicle_key])
+    if "torque_map_api" in entry:
+        raise ValueError("torque_map_api was removed; configure only torque_map")
     if "yaw_offset_deg" not in entry and "yaw_offset_deg" in defaults:
         entry["yaw_offset_deg"] = defaults["yaw_offset_deg"]
     return entry
@@ -214,25 +212,22 @@ def _catalog_entry(
 def _apply_torque_map_rules(
     vehicle_cfg: Dict[str, Any],
     torque_map: Optional[str],
-    torque_map_api: Optional[str] = None,
 ) -> None:
-    """Inject or strip torque_map on LLC + gtstate depending on catalog entry."""
+    """Select the torque library for LLC and enable GTState forward estimates.
+
+    LLC loads the occupancy_rail library and shares it with GTState.
+    """
     llc = vehicle_cfg.setdefault("controllers", {}).setdefault("LowLevelController", {})
     calibration = llc.setdefault("calibration", {})
 
     if torque_map:
         calibration["torque_map"] = torque_map
-        if torque_map_api:
-            calibration["torque_map_api"] = str(torque_map_api)
-        else:
-            calibration.setdefault("torque_map_api", "legacy")
         gtstate = vehicle_cfg.setdefault("sensors", {}).setdefault("gtstate", {})
         gtstate["torque_map"] = {
             "field_name": "rear_wheel_torque_est",
         }
     else:
         calibration.pop("torque_map", None)
-        calibration.pop("torque_map_api", None)
         sensors = vehicle_cfg.get("sensors", {})
         if "gtstate" in sensors:
             sensors["gtstate"].pop("torque_map", None)
@@ -242,18 +237,39 @@ def _apply_catalog_to_vehicle(
     vehicle_cfg: Dict[str, Any],
     catalog_entry: Dict[str, Any],
 ) -> None:
-    steering_to_input = catalog_entry.get("steering_to_input")
-    if steering_to_input is not None:
-        llc = vehicle_cfg.setdefault("controllers", {}).setdefault(
-            "LowLevelController", {}
+    calibration_file = catalog_entry["steering_calibration"]
+    path = os.path.join(bringup_config_dir(), str(calibration_file))
+    samples = load_yaml(path).get("front_steering_samples")
+    if not isinstance(samples, list) or len(samples) < 2:
+        raise ValueError(
+            f"{path}: front_steering_samples required for steering calibration"
         )
-        gains = llc.setdefault("calibration", {}).setdefault("gains", {})
-        gains["steering_to_input"] = steering_to_input
+    pairs = [{"u": float(row["u"]), "delta": float(row["delta"])} for row in samples]
+    if (
+        not all(
+            math.isfinite(p["u"]) and math.isfinite(p["delta"]) and -1 <= p["u"] <= 1
+            for p in pairs
+        )
+        or pairs[0]["u"] != -1.0
+        or pairs[-1]["u"] != 1.0
+    ):
+        raise ValueError(
+            f"{path}: finite steering samples covering inputs [-1,1] required"
+        )
+    du = [b["u"] - a["u"] for a, b in zip(pairs, pairs[1:])]
+    dd = [b["delta"] - a["delta"] for a, b in zip(pairs, pairs[1:])]
+    if not all(v > 0 for v in du) or not (
+        all(v > 0 for v in dd) or all(v < 0 for v in dd)
+    ):
+        raise ValueError(
+            f"{path}: steering inputs must increase and angles must be strictly monotone"
+        )
+    llc = vehicle_cfg.setdefault("controllers", {}).setdefault("LowLevelController", {})
+    llc.setdefault("calibration", {})["steering_map"] = pairs
 
     _apply_torque_map_rules(
         vehicle_cfg,
         catalog_entry.get("torque_map"),
-        catalog_entry.get("torque_map_api"),
     )
 
     vehicle_cfg["frame"] = {
@@ -264,6 +280,7 @@ def _apply_catalog_to_vehicle(
 # ---------------------------------------------------------------------------
 # Fragment loaders & run-level overlays
 # ---------------------------------------------------------------------------
+
 
 def _load_sim_defaults(compose: Dict[str, Any]) -> Dict[str, Any]:
     """Load sim fragment (defaults/sim.yaml unless compose.sim overrides)."""
@@ -300,7 +317,9 @@ def _ros_poll_overrides_for_vehicle(
     return None
 
 
-def _apply_run_overlays(config: Dict[str, Any], run_data: Dict[str, Any]) -> Dict[str, Any]:
+def _apply_run_overlays(
+    config: Dict[str, Any], run_data: Dict[str, Any]
+) -> Dict[str, Any]:
     """Merge run-level keys and overrides.* onto the composed config."""
     for key in ("scenario_mode", "attach_fallback", "beamng"):
         if key in run_data:
@@ -326,6 +345,8 @@ def _attach_vehicle_io_slot(vehicle_cfg: Dict[str, Any], port_index: int = 0) ->
 
 
 def _merge_level_extras(config: Dict[str, Any], level_data: Dict[str, Any]) -> None:
+    if level_data.get("environment"):
+        config["environment"] = deepcopy(level_data["environment"])
     if level_data.get("extra_objects"):
         config["extra_objects"] = deepcopy(level_data["extra_objects"])
     else:
@@ -495,7 +516,9 @@ def _apply_launch_overrides(
         compose[key] = val
 
 
-def _vehicle_specs_from_compose(compose: Dict[str, Any], profile: str) -> List[Dict[str, Any]]:
+def _vehicle_specs_from_compose(
+    compose: Dict[str, Any], profile: str
+) -> List[Dict[str, Any]]:
     """Normalize compose.vehicles list or single-vehicle shorthand."""
     if "vehicles" in compose:
         specs = deepcopy(compose["vehicles"])
@@ -539,6 +562,7 @@ def _vehicle_specs_from_compose(compose: Dict[str, Any], profile: str) -> List[D
 # One CREATE vehicle: catalog + llc defaults + spawn + io.port_index
 # ---------------------------------------------------------------------------
 
+
 def _build_create_vehicle(
     veh_spec: Dict[str, Any],
     index: int,
@@ -562,6 +586,23 @@ def _build_create_vehicle(
 
     spawn = _resolve_spawn(level_data, str(spawn_key), yaw_offset, yaw_override)
     _apply_spawn_adjustments(spawn, veh_spec)
+
+    if catalog_entry.get("calibration_only") is True:
+        # First export: spawn with the same sensors as attach, without an LLC
+        # that would require the steering map we are about to measure.
+        vehicle_cfg = deepcopy(_load_fragment("defaults/attach_sensors.yaml"))
+        vehicle_cfg["model_args"] = {
+            "model": catalog_entry["model"],
+            "part_config": catalog_entry["part_config"],
+            "license": vehicle_id,
+        }
+        vehicle_cfg["spawn"] = spawn
+        vehicle_cfg["frame"] = {"yaw_offset_deg": yaw_offset}
+        port_index = veh_spec.get("port_index")
+        if port_index is None:
+            port_index = catalog_entry.get("io", {}).get("port_index", index)
+        _attach_vehicle_io_slot(vehicle_cfg, int(port_index))
+        return vehicle_id, vehicle_cfg
 
     vehicle_cfg = deep_merge(llc_defaults, {})
     vehicle_cfg["model_args"] = {
@@ -604,6 +645,7 @@ def _build_create_vehicle(
 # ---------------------------------------------------------------------------
 # Profile assembly (attach vs create share ros_poll + _apply_run_overlays tail)
 # ---------------------------------------------------------------------------
+
 
 def _compose_attach_run(run_data: Dict[str, Any]) -> Dict[str, Any]:
     """Attach: minimal sensors per in-game vehicle id; no spawn/LLC."""
@@ -722,6 +764,7 @@ def _compose_from_run(run_data: Dict[str, Any]) -> Dict[str, Any]:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def compose_scenario(
     config_path: str,
     launch_overrides: Optional[Dict[str, Any]] = None,
@@ -752,16 +795,24 @@ def compose_scenario(
 
     compose = raw.setdefault("compose", {})
     _apply_launch_overrides(compose, overrides)
-    return _compose_from_run(raw)
+    config = _compose_from_run(raw)
+    # Validate the final payload too: controller overrides can replace catalog values.
+    for vehicle_id, vehicle in config.get("vehicles", {}).items():
+        calibration = (
+            vehicle.get("controllers", {})
+            .get("LowLevelController", {})
+            .get("calibration", {})
+        )
+        if "torque_map_api" in calibration:
+            raise ValueError(
+                f"Vehicle {vehicle_id}: torque_map_api was removed; configure only torque_map"
+            )
+    return config
 
 
 def vehicle_yaw_offset_deg(vehicle_cfg: Dict[str, Any]) -> float:
     frame = vehicle_cfg.get("frame", {})
     return float(frame.get("yaw_offset_deg", 0))
-
-
-def beamng_yaw_from_xlab(xlab_yaw_deg: float, yaw_offset_deg: float) -> float:
-    return xlab_yaw_deg - yaw_offset_deg
 
 
 def summarize_config(
@@ -838,18 +889,17 @@ def summarize_config(
         llc = vehicle_cfg.get("controllers", {}).get("LowLevelController", {})
         calibration = llc.get("calibration", {})
         torque_map = calibration.get("torque_map", "—")
-        torque_map_api = calibration.get("torque_map_api", "legacy")
         control_mode = calibration.get("control_mode", "—")
         timeout = calibration.get("command_timeout", "—")
         gains = calibration.get("gains", {})
-        steering_to_input = gains.get("steering_to_input", "—")
+        steering_samples = calibration.get("steering_map", [])
         steer_pi = "on" if gains.get("steer_pi_enable", 0) else "off"
         llc_verbose = calibration.get("verbose", False)
         lines.append(
-            f"  llc:        torque_map={torque_map} api={torque_map_api} "
+            f"  llc:        torque_map={torque_map} "
             f"control_mode={control_mode} "
             f"timeout={timeout}s verbose={llc_verbose} "
-            f"steering_to_input={steering_to_input} steer_pi={steer_pi}"
+            f"steering_map={len(steering_samples)} samples steer_pi={steer_pi}"
         )
 
         ge_sensors = sorted(vehicle_cfg.get("sensors", {}).keys())
@@ -870,9 +920,7 @@ def summarize_config(
                 ros_topics.append(topic)
         for stream_name, entry in sorted(broadcast.items()):
             sensor_type = entry.get("sensor", stream_name)
-            ros_topics.append(
-                f"/{vehicle_id}/sensors/{stream_name}/{sensor_type}"
-            )
+            ros_topics.append(f"/{vehicle_id}/sensors/{stream_name}/{sensor_type}")
         if llc:
             ros_topics.append(f"/{vehicle_id}/control/cmd")
         lines.append(f"  ros:        {', '.join(ros_topics) or '—'}")

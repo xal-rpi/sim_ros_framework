@@ -66,6 +66,8 @@ class SimulationManager:
         if scenario_mode == "create":
             self.scenario_builder.initialize_create_mode()
         else:
+            if self.config.get("environment", {}).get("trackbuilder_tracks"):
+                raise ValueError("Environment asset spawning requires scenario_mode: create")
             self.attach_manager.initialize_by_mode(scenario_mode)
 
         # Setup sensors and controllers for all vehicles after initialization

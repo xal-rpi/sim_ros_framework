@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 import beamngpy
 from beamngpy import Scenario
 
+from bng_simulator.core.environment_assets import load_environment_assets
+from bng_simulator.core.xlab_api import XlabApi
 from bng_simulator.vehicle.manager import VehicleManager
 from bng_simulator.utils.math_op import process_euler_to_quat
 
@@ -45,27 +47,18 @@ class ScenarioBuilder:
         self._logger = sim_manager.logger
 
     def close_existing_scenario_if_any(self) -> None:
+        """Return to the main menu only when a level is loaded.
+
+        The level query also handles Freeroam and an empty main menu. A query or
+        stop failure propagates; it must not be reported as an absent scenario.
         """
-        Close any existing scenario before creating new one.
-        
-        This prevents state conflicts when switching between scenarios.
-        Gracefully handles cases where no scenario is loaded.
-        """
-        try:
-            assert self._sim.beamng is not None
-            old_scenario_name = self._sim.beamng.get_scenario_name()
-            
-            # Check if a scenario is actually running
-            if old_scenario_name is not None or old_scenario_name != "":
-                self._logger.info("Stopping the existing scenario...")
-                data = dict(type="StopScenario")
-                self._sim.beamng.scenario._send(data).ack("ScenarioStopped")
-                self._logger.info("Existing scenario stopped.")
-            else:
-                self._logger.info("No existing scenario found.")
-        except Exception as e:
-            # No scenario running is not an error condition
+        assert self._sim.beamng is not None
+        if not XlabApi.get_current_level(self._sim.beamng):
             self._logger.info("No existing scenario found.")
+            return
+        self._logger.info("Stopping the existing scenario...")
+        self._sim.beamng.scenario._send({"type": "StopScenario"}).ack("ScenarioStopped")
+        self._logger.info("Existing scenario stopped.")
 
     def add_level_objects(
         self, 
@@ -158,6 +151,11 @@ class ScenarioBuilder:
                 "Example: scenario: {level: tech_ground, name: my_scenario}"
             )
 
+        if self._sim.config.get("environment", {}).get("trackbuilder_tracks"):
+            # Spawning assets into an existing scene is deliberately CREATE-only.
+            # Every fresh scenario load owns a clean set of additions.
+            self._logger.info("Environment additions will load before simulation starts")
+
         # === STEP 2: Clean Slate ===
         # Stop any existing scenario to avoid inconsistent simulation state
         self.close_existing_scenario_if_any()
@@ -193,7 +191,8 @@ class ScenarioBuilder:
         assert self._sim.scenario is not None, "Scenario instance not created"
         self._sim.scenario.make(self._sim.beamng)  # Write scenario files
         self._sim.beamng.load_scenario(self._sim.scenario)  # Load into simulation
-        self._sim.beamng.scenario.start()  # Start simulation clock
+        load_environment_assets(self._sim.beamng, self._sim.config, self._logger)
+        self._sim.beamng.scenario.start()  # Start after track collision is ready
 
         self._logger.info("Scenario created and started successfully")
 
@@ -201,6 +200,27 @@ class ScenarioBuilder:
         # BeamNG bug: colors don't apply on first spawn, must replace vehicles
         for vehicle_name, vehicle_manager in self._sim.vehicles.items():
             self._sim.replace_vehicle(vehicle_manager)
+            self.restore_explicit_spawn(vehicle_manager)
 
         # Settle + sensors happen in setup_vehicle_runtime (after replace, before GtState).
         self._logger.info("✓ CREATE mode initialization complete")
+
+    def restore_explicit_spawn(self, vehicle_manager: VehicleManager) -> None:
+        """Restore an airborne/elevated spawn after scene loading and replacement.
+
+        BeamNGpy does not serialize cling=False into the initial vehicle prefab.
+        Replacement preserves the current pose, which may already be on terrain.
+        Teleport after environment geometry is loaded, before settling/sensors,
+        so an explicit Z remains meaningful for tracks above the base terrain.
+        """
+        spawn = vehicle_manager.get_spawn_args()
+        if spawn.get("cling", True):
+            return
+        process_euler_to_quat(spawn)
+        pos = tuple(spawn["pos"])
+        rot = tuple(spawn.get("rot_quat", (0, 0, 0, 1)))
+        if not vehicle_manager.vehicle.teleport(pos, rot_quat=rot, reset=True):
+            raise RuntimeError(f"Could not restore explicit spawn for {vehicle_manager.vehicle.vid}")
+        self._logger.info(
+            f"Restored explicit spawn for {vehicle_manager.vehicle.vid}: pos={pos}"
+        )

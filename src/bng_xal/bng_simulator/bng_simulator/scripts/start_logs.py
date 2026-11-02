@@ -11,30 +11,34 @@ This script:
 - Records specified ROS topics as mcap files in the run folder.
 - Prompts the user for metadata (map name, additional info) and saves it as metadata.yaml.
 - Consolidates all temporary logger files into data.pkl.
-- Deletes the run folder if the user aborts or opts not to keep it.
+- Discards recording outputs on request; managed runs retain session/ diagnostics.
 """
 
 import os
 import sys
 import time
 import argparse
-import shutil
 import rclpy
 import subprocess
 import signal
 import atexit
 import threading
-import pathlib
 import json
+from pathlib import Path
+import yaml
 
 from bng_simulator.utils.log_session import (
     LoggerClient,
     begin_run,
     end_run,
     get_next_run_folder,
+    discard_run_folder,
     vehicle_slug_from_config,
 )
 from bng_simulator.utils.services_utils import send_request
+from bng_simulator.utils.mpc_snapshot import DEFAULT_INFO_SERVICE, snapshot_ref_traj_info
+
+_managed_run = False
 
 # Color utilities for terminal output
 class Colors:
@@ -78,11 +82,15 @@ mpc_config = None
 mpc_config_received = False
 mpc_config_thread = None
 mpc_config_stop_event = None  # Event to signal the MPC config thread to stop
+mpc_info_service = DEFAULT_INFO_SERVICE
 
 # Default topics to record with ROS bag
 DEFAULT_TOPICS = [
-    "/vehicle/mpc_solution",
-    "/vehicle/state_n_control",
+    "/drive_high_level_ros/controller_info",
+    "/drive_high_level_ros/mpc_horizon",
+    "/drive_high_level_ros/vehicle_on_surface",
+    "/drive_high_level_ros/debug/gt_path",
+    "/drive_high_level_ros/mpc_solve",
 ]
 
 # ------------------------------------------------------------------
@@ -171,11 +179,11 @@ def cleanup_handler(signum=None, frame=None):
     # Ask if the user wants to keep the partial data
     if run_folder and os.path.exists(run_folder):
         try:
-            keep = input("\nDo you want to keep the partial data? (y/n): ").strip().lower()
+            keep = prompt("\nDo you want to keep the partial data? (y/n): ", "y").strip().lower()
             if keep != 'y':
                 print(f"Removing run folder {run_folder}...")
-                shutil.rmtree(run_folder)
-                print("Run folder removed.")
+                discard_run_folder(run_folder, preserve_session=_managed_run)
+                print("Recording discarded; session diagnostics retained." if _managed_run else "Run folder removed.")
             else:
                 print(f"Partial data kept in {run_folder}")
         except:
@@ -186,110 +194,61 @@ def cleanup_handler(signum=None, frame=None):
     sys.exit()
 
 # ------------------------------------------------------------------
-# Copy MPC configuration file to the run folder
-# ------------------------------------------------------------------
-def copy_mpc_config_file(config_file_path, run_folder):
-    """
-    Copy the MPC configuration file to the run folder.
-    
-    Args:
-        config_file_path: Path to the MPC configuration file
-        run_folder: Path to the run folder where the file will be copied
-        
-    Returns:
-        bool: True if the file was copied successfully, False otherwise
-        str: Path to the copied file if successful, None otherwise
-    """
-    if not config_file_path:
-        print("No MPC configuration file path provided.")
-        return False, None
-        
-    # Check if the file exists
-    if not os.path.isfile(config_file_path):
-        print_error(f"MPC configuration file not found: {config_file_path}")
-        return False, None
-        
-    try:
-        # Create the destination path
-        dest_file = os.path.join(run_folder, "mpc_config.yaml")
-        
-        # Copy the file
-        shutil.copy2(config_file_path, dest_file)
-        print_success(f"MPC configuration file copied to: {dest_file}")
-        return True, dest_file
-    except Exception as e:
-        print_error(f"Error copying MPC configuration file: {e}")
-        return False, None
-
-# ------------------------------------------------------------------
-# Function to periodically check for MPC configuration
+# Capture the current controller configuration without blocking recording.
 # ------------------------------------------------------------------
 def check_mpc_config():
+    """Retry GetRefTrajInfo until captured or logging stops.
+
+    Use a dedicated node/executor so the background service call cannot race
+    the main thread's logger start/stop calls on LoggerClient. Controllers that
+    start after recording are supported; no MPC is required for a sensor-only run.
     """
-    Periodically check for MPC configuration until received or stopped.
-    
-    This function runs in a separate thread and attempts to call the
-    /mpc_high_level/get_config service at regular intervals. Once it
-    receives a successful response, it stores the configuration and stops.
-    The thread can also be stopped externally by setting the mpc_config_stop_event.
-    """
-    global mpc_config, mpc_config_received, client, mpc_config_stop_event, run_folder
-    
-    print_info("Starting to check for MPC configuration...")
-    
-    # Check every second until we receive the config or are told to stop
-    while not mpc_config_received and client is not None:
-        # Check if we've been asked to stop
-        if mpc_config_stop_event and mpc_config_stop_event.is_set():
-            print_warning("MPC configuration checking stopped.")
-            return
-            
-        try:
-            # Try to get the MPC configuration
-            result = client.get_mpc_config()
-            if result and result.success:
-                # Store the configuration in the global variable
-                mpc_config = {
-                    "num_x": result.num_x,
-                    "mpc_fields_name": result.mpc_fields_name,
-                    "num_fields": result.num_fields,
-                    "mpc_horizon": result.mpc_horizon,
-                    "mpc_config_file": result.mpc_config_file,
-                    "state_n_control_fields_name": result.state_n_control_fields_name,
-                }
-                
-                # Try to copy the MPC configuration file
-                if result.mpc_config_file:
-                    success, copied_path = copy_mpc_config_file(result.mpc_config_file, run_folder)
-                    if success and copied_path:
-                        # Update the config file path to the local copy
-                        mpc_config["mpc_config_file_local"] = os.path.basename(copied_path)
-                
-                mpc_config_received = True
-                print("\n")
-                print_success("MPC configuration received successfully.")
-                
-                # Pretty print the received configuration immediately
-                print(f"\n{Colors.CYAN}{Colors.BOLD}📋 MPC Configuration Details:{Colors.END}")
-                print(f"{Colors.CYAN}{'─' * 50}{Colors.END}")
-                for key, value in mpc_config.items():
-                    if isinstance(value, list):
-                        print(f"{Colors.WHITE}{key:25}{Colors.END}: {Colors.YELLOW}{json.dumps(value, indent=2)}{Colors.END}")
+    global mpc_config, mpc_config_received
+    try:
+        from xal_drive_msgs.srv import GetRefTrajInfo
+    except ImportError:
+        print_warning("MPC capture skipped: xal_drive_msgs is unavailable; source its workspace.")
+        return
+
+    from rclpy.node import Node
+    from rclpy.executors import SingleThreadedExecutor
+
+    node = Node("logger_mpc_snapshot")
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    service = node.create_client(GetRefTrajInfo, mpc_info_service)
+    print_info(f"Waiting for MPC identity on {mpc_info_service} (recording continues).")
+    try:
+        while not mpc_config_stop_event.is_set() and rclpy.ok():
+            try:
+                if service.wait_for_service(timeout_sec=0.2):
+                    future = service.call_async(GetRefTrajInfo.Request())
+                    executor.spin_until_future_complete(future, timeout_sec=1.0)
+                    if future.done() and not future.cancelled():
+                        result = future.result()
+                        if result is not None and result.success:
+                            captured = snapshot_ref_traj_info(result, run_folder, print_warning)
+                            captured["service"] = mpc_info_service
+                            mpc_config = captured
+                            mpc_config_received = True
+                            report = print_warning if captured.get("reference_snapshot_error") else print_success
+                            report("MPC identity captured" + (
+                                "; reference snapshot failed (see error above)." if captured.get("reference_snapshot_error") else
+                                " with reference/ and tracking.yaml saved." if captured.get("tracking_yaml") else " with reference/ saved."
+                            ))
+                            print(json.dumps(captured, indent=2))
+                            return
                     else:
-                        print(f"{Colors.WHITE}{key:25}{Colors.END}: {Colors.YELLOW}{value}{Colors.END}")
-                print(f"{Colors.CYAN}{'─' * 50}{Colors.END}\n")
-                
-                return  # Exit the thread once we have the config
-        except Exception as e:
-            print_error(f"Error checking MPC configuration: {e}")
-        
-        # Sleep for a short time before checking again
-        # Use a small timeout to allow for responsive stopping
-        for _ in range(10):  # 10 * 0.1 = 1.0 second total
-            if mpc_config_stop_event and mpc_config_stop_event.is_set():
-                print_warning("MPC configuration checking stopped during sleep.")
-                return
-            time.sleep(0.1)
+                        service.remove_pending_request(future)
+                        future.cancel()
+            except Exception as exc:
+                print_warning(f"MPC configuration capture failed: {exc}")
+            # Interruptible delay keeps shutdown responsive while allowing late startup.
+            mpc_config_stop_event.wait(1.0)
+    finally:
+        executor.remove_node(node)
+        executor.shutdown()
+        node.destroy_node()
 
 # ------------------------------------------------------------------
 # Setup signal handlers
@@ -304,8 +263,44 @@ def setup_signal_handlers():
 # ------------------------------------------------------------------
 # Main entry point of the script.
 # ------------------------------------------------------------------
+_session_status = None
+_assume_yes = False
+
+
+def session_status(state):
+    """Optional supervisor notification; regular interactive logging is unchanged."""
+    if _session_status:
+        path = Path(_session_status)
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(yaml.safe_dump({'state': state}))
+        temporary.replace(path)
+
+
+def prompt(text, default=''):
+    if _assume_yes:
+        print(text + default)
+        return default
+    return input(text)
+
+
+def wait_for_stop(batch):
+    """Batch waits for a signal, independent of stdin; interactive mode accepts stop."""
+    print('Batch recording: Ctrl-C stops and saves.' if batch else "Type 'stop' to finish recording.")
+    while True:
+        try:
+            if batch:
+                time.sleep(.2)
+            elif input('>> ').strip().lower() == 'stop':
+                return
+            else:
+                print("Invalid command. Please type 'stop'.")
+        except (EOFError, KeyboardInterrupt):
+            return
+
+
 def main(args=None):
     global run_folder, client, bag_process, logging_started, mpc_config, mpc_config_received
+    global mpc_info_service
     
     # Setup signal handlers for graceful termination
     setup_signal_handlers()
@@ -333,6 +328,10 @@ def main(args=None):
              "or a comma-separated list of topics (default: 'all')",
     )
     parser.add_argument(
+        "--mpc_info_service", default=DEFAULT_INFO_SERVICE,
+        help="GetRefTrajInfo service for the controller (supports renamed/namespaced nodes)",
+    )
+    parser.add_argument(
         "--no_rosbag",
         action="store_true",
         help="Disable ROS bag recording",
@@ -344,7 +343,20 @@ def main(args=None):
         choices=["mcap", "sqlite3"],
         help="Format for ROS bag recording (default: mcap)",
     )
+    parser.add_argument('--sim-config', help='Resolved manager configuration captured by drive-run')
+    parser.add_argument('--run-folder', help='Explicit recording directory supplied by drive-run')
+    parser.add_argument('--managed-run', action='store_true', help='Preserve session/ diagnostics when recording is discarded; requires --run-folder')
+    parser.add_argument('--status-file', help='Optional recording-state notification file')
+    parser.add_argument('--require-reference', action='store_true', help='Do not announce recording ready without a verified controller reference')
+    parser.add_argument('--yes', action='store_true', help='Batch logging: confirm/save automatically; SIGINT stops cleanly')
     parsed_args, unknown = parser.parse_known_args(args)
+    global _session_status, _assume_yes
+    _session_status, _assume_yes = parsed_args.status_file, parsed_args.yes
+    global _managed_run
+    _managed_run = parsed_args.managed_run
+    if _managed_run and (not parsed_args.run_folder or not (Path(parsed_args.run_folder) / "session").is_dir()):
+        raise ValueError('--managed-run requires --run-folder with session/ diagnostics')
+    mpc_info_service = parsed_args.mpc_info_service
 
     data_root = os.path.expanduser("~/beamng_log_data")
 
@@ -352,9 +364,18 @@ def main(args=None):
     client = LoggerClient()
     globals()['client'] = client
 
-    scenario_infos = send_request("get_sim_config", node_ros=client) or {}
+    if parsed_args.sim_config:
+        scenario_infos = yaml.safe_load(Path(parsed_args.sim_config).read_text())
+        if not isinstance(scenario_infos, dict):
+            raise ValueError('Simulator snapshot must be a mapping')
+        scenario_infos['vehicles_part'] = {
+            name: str(cfg.get('model_args',{}).get('model',''))+'_'+Path(cfg.get('model_args',{}).get('part_config','unknown')).stem
+            for name,cfg in scenario_infos.get('vehicles',{}).items()}
+    else:
+        scenario_infos = send_request("get_sim_config", node_ros=client) or {}
     vehicle_slug = vehicle_slug_from_config(scenario_infos)
-    run_folder = get_next_run_folder(data_root, vehicle=vehicle_slug)
+    run_folder = parsed_args.run_folder or get_next_run_folder(data_root, vehicle=vehicle_slug)
+    os.makedirs(run_folder, exist_ok=True)
     globals()['run_folder'] = run_folder
     file_path = os.path.join(run_folder, "data")
 
@@ -364,10 +385,10 @@ def main(args=None):
     print("\nLogger will use the following file for logging data:")
     print(f"  vehicle: {vehicle_slug}")
     print(f"  {file_path}")
-    confirm = input("Proceed? (y/n): ").strip().lower()
+    confirm = prompt("Proceed? (y/n): ", "y").strip().lower()
     if confirm != "y":
-        if os.path.exists(run_folder):
-            shutil.rmtree(run_folder)
+        session_status("declined")
+        globals()["run_folder"] = None
         sys.exit("Aborted by user.\n")
 
     print_info("Starting logger service...")
@@ -391,7 +412,6 @@ def main(args=None):
     mpc_config_stop_event = threading.Event()
     mpc_config_thread = threading.Thread(target=check_mpc_config, daemon=True)
     mpc_config_thread.start()
-    time.sleep(1)  # Give the thread a moment to start
     print_info("Started MPC configuration checking thread.")
     
     # Start ROS bag recording if enabled
@@ -438,21 +458,23 @@ def main(args=None):
         # Pause briefly to ensure the process starts
         time.sleep(2)
 
-    # Wait for the user to enter "stop" to end logging.
-    print("\nType 'stop' and press Enter when you wish to terminate logging.")
-    while True:
-        try:
-            cmd = input(">> ").strip().lower()
-            if cmd == "stop":
-                break
-            else:
-                print("Invalid command. Please type 'stop' to end logging.")
-        except EOFError:
-            print("\nInput stream closed. Stopping logging.")
-            break  # Treat EOF as a stop command
-        except KeyboardInterrupt:
-            print("\nInterrupted. Stopping logging.")
-            break  # Treat interruption as a stop command
+    if bag_process is not None and bag_process.poll() is not None:
+        raise RuntimeError('ROS recorder exited before session readiness')
+    if parsed_args.require_reference:
+        deadline = time.monotonic() + 60.0
+        while not mpc_config_received:
+            if time.monotonic() > deadline:
+                raise RuntimeError('Controller reference snapshot was not captured')
+            time.sleep(.1)
+        if mpc_config.get('reference_snapshot_error') or mpc_config.get('tracking_snapshot_error'):
+            raise RuntimeError('Recording setup is incomplete: '+str(mpc_config))
+    session_status('recording')
+    def stop_recording(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGINT, stop_recording)
+    signal.signal(signal.SIGTERM, stop_recording)
+
+    wait_for_stop(parsed_args.yes)
 
     # Stop ROS bag recording if it was started
     if bag_process:
@@ -471,8 +493,8 @@ def main(args=None):
 
     # Ask the user for metadata details.
     print("\nEnter metadata information for this run:")
-    map_name = input("Map Name: ").strip()
-    additional_info = input("Additional Info: ").strip()
+    map_name = prompt("Map Name: ").strip()
+    additional_info = prompt("Additional Info: ").strip()
 
     # Stop the MPC config thread if it's still running
     if mpc_config_thread and mpc_config_thread.is_alive():
@@ -513,12 +535,14 @@ def main(args=None):
     print_success(f"Consolidated data saved to {data_pkl}")
 
     # Prompt the user if they want to keep the log folder.
-    keep = input("Do you want to keep the run folder? (y/n): ").strip().lower()
+    keep = prompt("Do you want to keep the run folder? (y/n): ", "y").strip().lower()
     if keep == "n":
-        shutil.rmtree(run_folder)
-        print(f"Run folder {run_folder} has been deleted.")
+        discard_run_folder(run_folder, preserve_session=_managed_run)
+        print(f"Recording discarded; diagnostics retained in {run_folder}/session" if _managed_run else f"Run folder {run_folder} has been deleted.")
     else:
         print(f"Run folder {run_folder} retained.")
+
+    session_status("saved" if keep != "n" else "discarded")
 
     # Cleanup is handled by atexit handler, but we need to reset the globals
     # to prevent the atexit handler from asking about keeping data

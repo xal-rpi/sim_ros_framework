@@ -1,0 +1,28 @@
+{
+  "vehicle": "utv_wild_x3_easylift_twin",
+  "precision": "float32",
+  "abi_version": 4,
+  "environment_abi_version": 1,
+  "source_sha256": {
+    "vehicle_runtime/benchmark.c": "75bcbd5a6f8af50b6f8fc17adeb0db6daa2046fb0de8ae0851f86453a963abb8",
+    "vehicle_runtime/check_filter_runtime.c": "205b173411f965ccc1f329b9076d17cc1e23dd83b8d903b948d2616da6238c4c",
+    "vehicle_runtime/projection.c": "6daa65cc0bb9e6e82f8b43b347f9159f77ceac4e082053077b03fac6b0e58b46",
+    "vehicle_runtime/projection.h": "148ba4b7246164cdb1fa5dc49104a14e67cd0df31a825e60669ed749cac6e948",
+    "vehicle_runtime/roll_extension.c": "87a4c079a298f6d74c8856720048709784874c397704424900dd8b0748273386",
+    "vehicle_runtime/roll_extension.h": "3ce51bc88655f39d5c52b27baa7d0b5ca3ab19351bbd12ba6c68f8b71098eecf",
+    "vehicle_runtime/roll_filter.c": "752fd78daca44cb45995c011b787e51f74161ecf3801bc681acf6aa1c8545120",
+    "vehicle_runtime/roll_filter.h": "c11211cb85e92c68a9da59bf1c47e3c177d5a067cf6f1cb3281b1fbb8f2f841c",
+    "vehicle_runtime/roll_model.c": "49c68202c7ea8b84f4e7099e30681a8f5e2b8dde302fac3d0cd8bc53169c0f09",
+    "vehicle_runtime/vehicle_environment.c": "39202ff42b30be6ea23574151951eb81b3482bfe1111081ac80c5b2e13028c6e",
+    "vehicle_runtime/vehicle_environment.h": "1aec74f2da6159080e8c51accb7811f75853bc647160c6583c83fa8c1e76ec9b",
+    "vehicle_runtime/vehicle_runtime.c": "44a20f7836e8085a262dcc9cc0cc28240ab29f15e9f460f987a77385dc962d7d",
+    "vehicle_runtime/vehicle_runtime.h": "7d86b213af1deb4f8c1b96b81a47b013a566b61a452310a94c52ba79c02962b5",
+    "vehicle_runtime/vehicle_surface.c": "2c9f79d43963f8fc1ead794ea664c7ffbdc8db61ccb3305307b07ca301337a02",
+    "vehicles/utv_wild_x3_easylift_twin/generated/geometry_generated.c": "14a987c240b87872f7511c9df30900ba21821e39860437047c2ea8538687dcd8",
+    "vehicles/utv_wild_x3_easylift_twin/generated/geometry_generated.h": "5b00cd32693747b9af0fa5975ba25627ab8630217d45e3ffca4f3dd8cce50c6b",
+    "vehicles/utv_wild_x3_easylift_twin/generated/barrier_generated.c": "cabb8646eeccb952a8e5212b5b259001014f6278d4407c4a0a54c9736c70003c",
+    "vehicles/utv_wild_x3_easylift_twin/generated/barrier_generated.h": "ff464f14010079a4557357abd1d6fca09878750506ef7a7518fa8325afea538f",
+    "vehicles/utv_wild_x3_easylift_twin/generated/vehicle_export_config.h": "4a919bd580c7f8e05b981c2513fc11bc1087fea132757b5ad0f9df86046d44c1",
+    "vehicles/utv_wild_x3_easylift_twin/roll_filter_ffi.h": "b0f462b8c0afb7f327424edd39fcaf963c1bfd41f6c63fe49517dbb4e9a7188e"
+  }
+}

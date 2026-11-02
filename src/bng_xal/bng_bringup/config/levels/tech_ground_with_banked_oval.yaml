@@ -1,0 +1,18 @@
+# Oval_15.json, distinct from the older banked donut preset tech_ground_with_oval.
+# Preserve source geometry; reuse existing runs through the level override.
+level: tech_ground
+scenario_name: xlab_tech_ground_with_banked_oval
+
+environment:
+  trackbuilder_tracks:
+    - /trackEditor/xlab_environments/banked_oval_b15.json
+
+spawns:
+  # Saved (7.5,7.5,5), XY scale 4, initial tangent +X. Five metres into
+  # the first straight; provisional vehicle-reference clearance of 0.5 m.
+  on_track:
+    pos: [35, 30, 5.5]
+    yaw_angle: 0
+    cling: false
+
+extra_objects: {}

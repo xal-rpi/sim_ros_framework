@@ -10,10 +10,10 @@ compose:
   level: tech_ground
   vehicles:
     - id: EGO
-      vehicle: utv_wild
+      vehicle: covet_turbo_rally
       spawn: origin
     - id: AGENT2
-      vehicle: etk800_track
+      vehicle: covet_turbo_rally
       spawn: origin
       pos_offset: [6.0, 0.0, 0.0]
       yaw: -90

@@ -5,10 +5,10 @@ from __future__ import annotations
 from bng_controller.vehicle_config import LaunchIoParams, resolve_vehicle_io
 
 
-def test_resolve_vehicle_io_from_gridworld() -> None:
+def test_resolve_vehicle_io_from_single_vehicle() -> None:
     resolution = resolve_vehicle_io(
         "EGO",
-        "gridworld.yaml",
+        "single_vehicle.yaml",
         source="config",
         launch=LaunchIoParams(
             beamng_host="127.0.0.1",
@@ -26,7 +26,7 @@ def test_resolve_vehicle_io_from_gridworld() -> None:
 def test_resolve_vehicle_io_with_preset() -> None:
     resolution = resolve_vehicle_io(
         "EGO",
-        "gridworld.yaml",
+        "single_vehicle.yaml",
         source="config",
         launch_overrides={"preset": "derby_grid_lane.yaml"},
     )

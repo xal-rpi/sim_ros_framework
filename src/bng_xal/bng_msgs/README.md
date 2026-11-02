@@ -1,48 +1,29 @@
 # bng_msgs
 
-ROS 2 message and service definitions for the xlab BeamNG interface.
+BeamNG bridge sensors, scalar commands and simulator/logger services.
+Shared controller localization, MPC horizons and reference setup live in
+[`xal_drive_msgs`](../../../../xal_drive_msgs/README.md), for both BeamNG and PX4.
 
-## Quick reference
+| Interface | Purpose |
+|---|---|
+| `BasicStateMsg` | Basic pose/direction/velocity sensor |
+| `BngVehicleStateMsg` | Control-state UDP observation: pose, velocities and actuation |
+| `BngImuMsg`, `BngGpsMsg` | IMU and GPS streams |
+| `GtStateMsg` | Full ground-truth observation |
+| `BngControlCmd` | Scalar LLC command through the ROS bridge |
+| `ExecuteRequest` | Simulator/vehicle API requests |
+| `StartLogger`, `StopLogger` | Recording lifecycle |
 
-**Commands:** `BngControlCmd` on `/<vehicle>/control/cmd`  
-**State:** `BngVehicleStateMsg` on `/<vehicle>/sensors/control_state/control_state`  
-**Services:** `ExecuteRequest`, `StartLogger`, `StopLogger`
-
-Full field tables and control semantics: **[MESSAGES.md](MESSAGES.md)** ← start here for control integration.
-
-## Build
-
-Must be built before `bng_simulator` / `bng_controller`:
+[Field notes](MESSAGES.md) explain clocks and command validity bits.
+Build before the simulator/controller packages:
 
 ```bash
-colcon build --packages-select bng_msgs
+cd ~/ros2_ws
+colcon build --packages-select bng_msgs bng_simulator bng_controller bng_bringup
 source install/setup.bash
 ```
 
-After editing `.msg` files, rebuild `bng_msgs` and any dependent package.
-
-## Messages (golden path)
-
-| Message | Source | Purpose |
-|---------|--------|---------|
-| `BngControlCmd` | Your controller → dispatcher | Scalar LLC commands |
-| `BngVehicleStateMsg` | `control_state` UDP stream | Pose, velocities, actuation, torque est. |
-| `BngImuMsg` | `imu` UDP stream | Roof IMU |
-| `BngGpsMsg` | `gps` (if enabled) | Position |
-| `GtStateMsg` | GE poll path (legacy) | Full gtState via ros_poll |
-
-## Services
-
-| Service | Provider | Purpose |
-|---------|----------|---------|
-| `ExecuteRequest` | `sim_manager_node` | Teleport, config query, xlab API |
-| `StartLogger` / `StopLogger` | `sim_manager_node` | Disk logging |
-
-## Dependencies
-
-- `std_msgs`, `geometry_msgs`, `rosidl_default_generators`
-
-## See also
-
-- [bng_controller README](../bng_controller/README.md) — how commands are forwarded
-- [Root README](../../../README.md) — setup and architecture
+Removed tracking/HLC definitions have no compatibility aliases. After an interface
+removal, clean this package's generated build/install outputs before rebuilding so
+obsolete types are not left discoverable. Dependencies: `std_msgs`, `geometry_msgs`
+and the standard ROS interface generators/runtime.

@@ -9,7 +9,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "config",
-                default_value="gridworld.yaml",
+                default_value="single_vehicle.yaml",
                 description="Run config filename — all scenario detail in YAML (config/runs/)",
             ),
             DeclareLaunchArgument(

@@ -39,6 +39,8 @@ class GtStateWrapper(CommBase):
         wheel_angvel_tau_s: Optional[float] = None,
         debug_raw: Optional[bool] = None,
         torque_map: Optional[dict] = None,
+        contact: Optional[dict] = None,
+        surface: Optional[dict] = None,
         **_ignored,
     ):
         super().__init__(beamng, vehicle)
@@ -58,6 +60,8 @@ class GtStateWrapper(CommBase):
             wheel_angvel_tau_s,
             debug_raw,
             torque_map,
+            contact,
+            surface,
         )
         self.sensorId = self._get_gt_state_id()
 
@@ -85,6 +89,8 @@ class GtStateWrapper(CommBase):
         wheel_angvel_tau_s: Optional[float] = None,
         debug_raw: Optional[bool] = None,
         torque_map: Optional[dict] = None,
+        contact: Optional[dict] = None,
+        surface: Optional[dict] = None,
     ) -> None:
         data: StrDict = dict()
         data["name"] = name
@@ -105,6 +111,10 @@ class GtStateWrapper(CommBase):
             data["debug_raw"] = debug_raw
         if torque_map is not None:
             data["torque_map"] = torque_map
+        if contact is not None:
+            data["contact"] = contact
+        if surface is not None:
+            data["surface"] = surface
         args = {
             "type": "OpenGtState",
             "ack": "OpenedGtState",
