@@ -29,6 +29,14 @@ def test_compose_single_vehicle_defaults(tmp_path) -> None:
     assert ego["spawn"]["pos"] == [0, 0, 0]
     assert ego["spawn"]["xlab_yaw_deg"] == 0
     assert ego["io"]["port_index"] == 0
+    calibration = ego["controllers"]["LowLevelController"]["calibration"]
+    assert calibration["trajectory_preview"] == {
+        "time_s": {"steering": 0.05, "torque": 0.05, "wheel_speed": 0.05},
+    }
+    assert calibration["brake_coordination"] == {
+        "overlap_torque_nm": 2.8, "speed_disable_m_s": 1.0,
+        "speed_enable_m_s": 1.2, "pedal_deadband": 0.01,
+    }
     setup = cfg["beamng"]["setup_funcs"]
     assert "beamng.settings.set_nondeterministic" not in setup
     assert setup["beamng.settings.set_deterministic"] == {"speed_factor": -1}
@@ -234,6 +242,12 @@ def test_compose_new_vehicle_torque_maps(vehicle):
     )
     assert controller["drivetrain"]["mode"] == 2
     assert controller["drivetrain"]["startGear"] is None
+    calibration = controller["calibration"]
+    assert calibration["gains"]["kp"] == 100.0
+    assert calibration["gains"]["ki"] == 12.951175253199954
+    assert calibration["autonomous_rate_limits"] == {
+        "steering_rate_max": 0.9, "torque_rate_max": 5000.0,
+    }
 
 
 @pytest.mark.parametrize(
@@ -342,8 +356,9 @@ def test_easylift_uses_measured_steering_and_shadow_filter():
     assert llc["roll_filter"]["mode"] == "shadow"
     assert llc["environment"]["vehicle_export"] == "utv_wild_x3_easylift_twin"
     autonomous = llc["calibration"]["autonomous_rate_limits"]
-    assert autonomous["steering_rate_max"] > 0
-    assert autonomous["torque_rate_max"] > 0
+    assert autonomous == {"steering_rate_max": 0.9, "torque_rate_max": 5000.0}
+    assert llc["calibration"]["gains"]["kp"] == 100.0
+    assert llc["calibration"]["gains"]["ki"] == 12.951175253199954
     baseline = dict(llc["roll_filter"])
     baseline.pop("mode")
     for mode in ("active", "shadow"):

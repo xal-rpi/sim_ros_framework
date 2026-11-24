@@ -105,7 +105,7 @@ controllers:
       # Interpolate from projected path phase; time_s uses packet simulator clock.
       # Unspecified channels have zero preview. Values must be >= 0.
       trajectory_preview:
-        time_s: {steering: 0.1, torque: 0.1, wheel_speed: 0.1}
+        time_s: {steering: 0.05, torque: 0.05, wheel_speed: 0.05}
       # Or distance along predicted 3D CoG polyline, not reference-chart s:
       # trajectory_preview:
       #   distance_m: {steering: 0.5, torque: 0.5, wheel_speed: 0.5}
@@ -114,10 +114,21 @@ controllers:
       control_mode: full
       # [s] no command → LLC releases to manual control
       command_timeout: 4.0
+      # Shared autonomous command slew, applied after wheel-speed PI.
+      autonomous_rate_limits:
+        steering_rate_max: 0.9     # road-wheel command rate [rad/s]
+        torque_rate_max: 5000.0    # physical torque command rate [Nm/s]
+      # Autonomous service brake only; processed manual brake is preserved.
+      # Match the optimizer's brake-drive overlap upper bound when configured.
+      brake_coordination:
+        overlap_torque_nm: 2.8
+        speed_disable_m_s: 1.0     # suppress autonomous brake at/below this speed
+        speed_enable_m_s: 1.2      # re-enable above this speed (hysteresis)
+        pedal_deadband: 0.01       # zero tiny brake requests for arcade shifting
       gains:
         # Rear wheel-speed PI (needs torque_map for actuation).
         pi_enable: 1.0             # 0 = feedforward / throttle_override only
-        kp: 4027.676261566621
+        kp: 100.0
         ki: 12.951175253199954
         i_min: -100.0              # anti-windup on integral state [N·m·s]
         i_max: 100.0

@@ -2,7 +2,7 @@
   "vehicle": "utv_wild_x3_easylift_twin",
   "precision": "float32",
   "abi_version": 4,
-  "environment_abi_version": 1,
+  "environment_abi_version": 2,
   "source_sha256": {
     "vehicle_runtime/benchmark.c": "75bcbd5a6f8af50b6f8fc17adeb0db6daa2046fb0de8ae0851f86453a963abb8",
     "vehicle_runtime/check_filter_runtime.c": "205b173411f965ccc1f329b9076d17cc1e23dd83b8d903b948d2616da6238c4c",
@@ -13,8 +13,8 @@
     "vehicle_runtime/roll_filter.c": "752fd78daca44cb45995c011b787e51f74161ecf3801bc681acf6aa1c8545120",
     "vehicle_runtime/roll_filter.h": "c11211cb85e92c68a9da59bf1c47e3c177d5a067cf6f1cb3281b1fbb8f2f841c",
     "vehicle_runtime/roll_model.c": "49c68202c7ea8b84f4e7099e30681a8f5e2b8dde302fac3d0cd8bc53169c0f09",
-    "vehicle_runtime/vehicle_environment.c": "39202ff42b30be6ea23574151951eb81b3482bfe1111081ac80c5b2e13028c6e",
-    "vehicle_runtime/vehicle_environment.h": "1aec74f2da6159080e8c51accb7811f75853bc647160c6583c83fa8c1e76ec9b",
+    "vehicle_runtime/vehicle_environment.c": "4d937c5eb7374b6580a24fe585a99f8218eea3a6c548aaf5e1704f68aaf52468",
+    "vehicle_runtime/vehicle_environment.h": "dc2818817f569141ae1e4762a2110365cbb5e0fb5ecd76e8a3bc55c2d7c20adf",
     "vehicle_runtime/vehicle_runtime.c": "44a20f7836e8085a262dcc9cc0cc28240ab29f15e9f460f987a77385dc962d7d",
     "vehicle_runtime/vehicle_runtime.h": "7d86b213af1deb4f8c1b96b81a47b013a566b61a452310a94c52ba79c02962b5",
     "vehicle_runtime/vehicle_surface.c": "2c9f79d43963f8fc1ead794ea664c7ffbdc8db61ccb3305307b07ca301337a02",
@@ -23,6 +23,6 @@
     "vehicles/utv_wild_x3_easylift_twin/generated/barrier_generated.c": "cabb8646eeccb952a8e5212b5b259001014f6278d4407c4a0a54c9736c70003c",
     "vehicles/utv_wild_x3_easylift_twin/generated/barrier_generated.h": "ff464f14010079a4557357abd1d6fca09878750506ef7a7518fa8325afea538f",
     "vehicles/utv_wild_x3_easylift_twin/generated/vehicle_export_config.h": "4a919bd580c7f8e05b981c2513fc11bc1087fea132757b5ad0f9df86046d44c1",
-    "vehicles/utv_wild_x3_easylift_twin/roll_filter_ffi.h": "b0f462b8c0afb7f327424edd39fcaf963c1bfd41f6c63fe49517dbb4e9a7188e"
+    "vehicles/utv_wild_x3_easylift_twin/roll_filter_ffi.h": "5e27086f2f25befa2c075bdea40e28d02e2a45fbeadddb6244b59129844e6fa4"
   }
 }

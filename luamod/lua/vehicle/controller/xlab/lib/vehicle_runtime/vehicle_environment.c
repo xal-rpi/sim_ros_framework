@@ -9,7 +9,7 @@
 #define VE_ABS fabs
 #endif
 #define VE_PARAMETER_COUNT VEHICLE_MODEL_PARAMETER_COUNT
-#define VE_SNAPSHOT_SIZE (216u + 4u * VE_PARAMETER_COUNT)
+#define VE_SNAPSHOT_SIZE (220u + 4u * VE_PARAMETER_COUNT)
 
 static uint16_t u16(const unsigned char *p) {
     return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8));
@@ -41,7 +41,7 @@ static int same(const vehicle_real *a, const vehicle_real *b, int count) {
             return 0;
     return 1;
 }
-int ve_abi_version(void) { return 1; }
+int ve_abi_version(void) { return 2; }
 size_t ve_packet_size(void) { return VE_SNAPSHOT_SIZE; }
 size_t ve_context_size(void) { return sizeof(ve_context); }
 int ve_scalar_bytes(void) { return (int)sizeof(vehicle_real); }
@@ -54,7 +54,7 @@ void ve_reset(ve_context *c) {
 int ve_receive(ve_context *c, const ve_config *cfg, const unsigned char *p, size_t length) {
     if (!c || !config_valid(cfg) || !p || length != VE_SNAPSHOT_SIZE)
         return VE_BAD_PACKET;
-    if (!magic(p, 'X', 'L', 'E', '1') || u16(p + 4) != 1u || (u16(p + 6) & ~7u))
+    if (!magic(p, 'X', 'L', 'E', '1') || u16(p + 4) != 2u || (u16(p + 6) & ~7u))
         return VE_BAD_PACKET;
     if (u32(p + 8) != cfg->frame_id || u32(p + 12) != cfg->epoch_id ||
         u64(p + 16) != VEHICLE_PARAMETER_LAYOUT_ID)
@@ -73,7 +73,7 @@ int ve_receive(ve_context *c, const ve_config *cfg, const unsigned char *p, size
         (!(candidate.flags & 1u) && candidate.geometry_source_time_us) ||
         (!(candidate.flags & 2u) && candidate.parameter_source_time_us))
         return VE_BAD_PACKET;
-    for (unsigned int i = 0; i < 39u + VE_PARAMETER_COUNT; ++i) {
+    for (unsigned int i = 0; i < 40u + VE_PARAMETER_COUNT; ++i) {
         vehicle_real value = real32(p + 60u + 4u * i);
         if (!isfinite(value))
             return VE_BAD_PACKET;
@@ -83,9 +83,13 @@ int ve_receive(ve_context *c, const ve_config *cfg, const unsigned char *p, size
             candidate.surface.bounds[i - 27u] = value;
         else if (i < 39u)
             candidate.parameter_bounds_xyz[i - 33u] = value;
+        else if (i == 39u)
+            candidate.nominal_height_m = value;
         else
-            candidate.parameters[i - 39u] = value;
+            candidate.parameters[i - 40u] = value;
     }
+    if (candidate.nominal_height_m <= 0)
+        return VE_BAD_PACKET;
     for (int i = 0; i < 6; i += 2) {
         if (candidate.surface.bounds[i] >= candidate.surface.bounds[i + 1])
             return VE_BAD_PACKET;
@@ -109,13 +113,18 @@ int ve_receive(ve_context *c, const ve_config *cfg, const unsigned char *p, size
                        r[6] * (r[1] * r[5] - r[4] * r[2]);
     if (VE_ABS(det - 1) > (vehicle_real)1e-6)
         return VE_BAD_PACKET;
-    if (c->valid) {
+    /* Brain sample time orders producer lifetimes. Revision counters are local
+     * to a producer and may restart on a strictly newer sample. */
+    if (c->valid && candidate.state_time_us < c->state_time_us)
+        return VE_OLD_SNAPSHOT;
+    if (c->valid && candidate.state_time_us == c->state_time_us) {
         if (candidate.revision < c->revision ||
             candidate.geometry_revision < c->geometry_revision ||
             candidate.parameter_revision < c->parameter_revision ||
             candidate.state_time_us < c->state_time_us)
             return VE_OLD_SNAPSHOT;
-        int geometry_same = same(candidate.surface.patch, c->surface.patch, 27) &&
+        int geometry_same = candidate.nominal_height_m == c->nominal_height_m &&
+                            same(candidate.surface.patch, c->surface.patch, 27) &&
                             same(candidate.surface.bounds, c->surface.bounds, 6) &&
                             ((candidate.flags ^ c->flags) & 1u) == 0u &&
                             candidate.geometry_source_time_us == c->geometry_source_time_us;

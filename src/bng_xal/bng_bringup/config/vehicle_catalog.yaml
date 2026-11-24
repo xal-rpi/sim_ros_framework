@@ -85,11 +85,6 @@ catalog:
         drivetrain:
           mode: 0                 # realistic: retain explicit CVT gear selection
           startGear: 2            # Drive command index from the measured gearbox export
-        calibration:
-          # Autonomous post-PI slew, independent of roll-filter mode and tuning.
-          autonomous_rate_limits:
-            steering_rate_max: 0.9 # road-wheel command rate [rad/s]
-            torque_rate_max: 6000.0 # physical torque command rate [Nm/s]
         # Stock processed manual inputs pass through without extra ramps.
         # Raw and smoothed measured rates are shared by control/feedback consumers.
         measured_rates:

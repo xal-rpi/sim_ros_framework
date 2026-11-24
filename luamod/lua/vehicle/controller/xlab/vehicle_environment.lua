@@ -56,14 +56,14 @@ function M.init(_common, config)
     declarations = header
   end
   local native = ffi.load(config.library_path)
-  assert(native.ve_abi_version() == 1, 'Unsupported native environment ABI')
+  assert(native.ve_abi_version() == 2, 'Unsupported native environment ABI')
   assert(native.ve_scalar_bytes() == ffi.sizeof('vehicle_real'), 'Native precision mismatch')
   local count = tonumber(native.ve_parameter_count())
   local storage = ffi.new('ve_context[1]')
   assert(ffi.sizeof(storage[0].parameters) == ffi.sizeof('vehicle_real') * max(1, count),
     'Parameter storage differs from native export')
   assert(ffi.sizeof(storage[0]) == tonumber(native.ve_context_size()), 'Native context size mismatch')
-  assert(tonumber(native.ve_packet_size()) == 216 + 4 * count, 'Native packet size mismatch')
+  assert(tonumber(native.ve_packet_size()) == 220 + 4 * count, 'Native packet size mismatch')
 
   local cfg = ffi.new('ve_config[1]')
   cfg[0].frame_id, cfg[0].epoch_id = config.frame_id, config.epoch_id

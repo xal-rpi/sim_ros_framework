@@ -261,6 +261,7 @@ typedef struct {
     vehicle_surface surface;
     vehicle_real parameters[1];
     vehicle_real parameter_bounds_xyz[6];
+    vehicle_real nominal_height_m; /* Model support reference; not a live clearance observation. */
     uint64_t state_time_us;
     uint64_t geometry_source_time_us;
     uint64_t parameter_source_time_us;
@@ -275,7 +276,9 @@ typedef struct {
  * Reset once per configured frame/epoch. Receive validates bytes into temporary
  * storage, then replaces the complete context. Serialize calls in one consumer.
  * Bad/old packets leave the accepted context unchanged. Repeated identical
- * snapshots are accepted without changing source/assembly times. No
+ * snapshots are accepted without changing source/assembly times. Newer brain
+ * state time permits restarted revisions; equal-time snapshots retain revision
+ * ordering/consistency checks. Older state time never replaces context. No
  * receive-time timeout or delivery lease: caller supervises producer health
  * separately. Wire size and parameter layout are fixed by the selected vehicle
  * export.

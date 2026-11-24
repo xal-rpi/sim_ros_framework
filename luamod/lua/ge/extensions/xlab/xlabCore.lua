@@ -205,7 +205,7 @@ M.handleOpenController = function(request)
     local platform = windows and 'windows' or 'linux'
     local library = windows and 'roll_filter.dll' or 'libroll_filter.so'
     assert(manifest.target == platform and manifest.precision == 'float32'
-      and manifest.environment_abi_version == 1 and manifest.library == library,
+      and manifest.environment_abi_version == 2 and manifest.library == library,
       'Incompatible packaged vehicle export')
     env.vehicle_export = nil
     env.library_path = stageNativeLibrary(base, manifest)

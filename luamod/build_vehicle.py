@@ -42,7 +42,7 @@ def build(vehicle: str, target: str, output: Path) -> Path:
         record["precision"],
         record["abi_version"],
         record["environment_abi_version"],
-    ) != (vehicle, "float32", 4, 1):
+    ) != (vehicle, "float32", 4, 2):
         raise ValueError("Incompatible vehicle source export")
     for relative, expected in record["source_sha256"].items():
         path = (LIB / relative).resolve()

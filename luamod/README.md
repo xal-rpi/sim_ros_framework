@@ -146,6 +146,11 @@ Track assets use the separate [environment package](../environments/README.md).
 | Sensor broadcast | `sensor_send` UDP | Due state, IMU and GPS packs |
 | Logging | GE TCP poll | Complete GTState, including registered custom diagnostics |
 
+XLE1 v2 adds the export's nominal model height (220 + 4D bytes). The matching
+environment ABI is 2; rebuild/package the staged sources and recreate the vehicle
+with the updated Lua module and FFI. Patch projection and rollover math are unchanged.
+Old packets/libraries are rejected; no compatibility decoder is retained.
+
 GTState clocks are vehicle seconds carried as Lua doubles. Measured steering rate
 uses GT sample times; torque rate differentiates the map estimate, not measured
 wheel torque. Duplicate samples do not advance derivatives; gaps/regression invalidate
